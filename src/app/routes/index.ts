@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AdminRoutes } from '../modules/admin/admin.routes';
 import { authRoutes } from '../modules/auth/auth.routes';
 import { clientRoutes } from '../modules/client/client.routes';
+import { cleaningPlanRoutes } from '../modules/cleaning_plan/cleaning_plan.routes';
 import { fileUploadRoutes } from '../modules/file-upload/file-upload.routes';
 import { legalInfoRoutes } from '../modules/legal_info/legal_info.routes';
 import { locationRoutes } from '../modules/location/location.routes';
@@ -12,10 +13,15 @@ import { roomRoutes } from '../modules/room/room.routes';
 import { superAdminRoutes } from '../modules/superAdmin/superAdmin.routes';
 import { taskRoutes } from '../modules/task/task.routes';
 import { userRoutes } from '../modules/user/user.routes';
+import { workerRoutes } from '../modules/worker/worker.routes';
 
 const router = Router();
 
 const moduleRoutes = [
+    {
+        path: '/worker',
+        router: workerRoutes,
+    },
     {
         path: '/auth',
         router: authRoutes,
@@ -39,6 +45,10 @@ const moduleRoutes = [
     {
         path: '/task',
         router: taskRoutes,
+    },
+    {
+        path: '/cleaning-plan',
+        router: cleaningPlanRoutes,
     },
 
     {

@@ -21,9 +21,5 @@ router.patch(
     validateRequest(superAdminValidations.updateSuperAdminSchema),
     SuperAdminController.updateUserProfile
 );
-router.get(
-    '/get-earning',
-    auth(USER_ROLE.superAdmin),
-    SuperAdminController.getEarningsMatrix
-);
+
 export const superAdminRoutes = router;

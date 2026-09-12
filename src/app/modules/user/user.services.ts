@@ -17,12 +17,12 @@ import { Worker } from '../worker/worker.model';
 import { Manager } from '../manager/manager.model';
 import { upsertDevice } from '../device/device.service';
 import SuperAdmin from '../superAdmin/superAdmin.model';
-import { ENUM_TASK_STATUS } from '../task/task.enum';
 import { USER_ROLE } from './user.constant';
 import { UpdateUserProfileDTO } from './user.dto';
 import { TUserRole } from './user.interface';
 import { User } from './user.model';
 import { createToken } from './user.utils';
+import { updateUserProfileValidationSchema } from './user.validation';
 
 const generateVerifyCode = (): number => {
     return Math.floor(100000 + Math.random() * 900000);
@@ -328,6 +328,8 @@ const updateUserProfile = async (
         );
         return result;
     } else if (userData.role == USER_ROLE.worker) {
+        // Working days must use the dedicated availability endpoint.
+        payload = updateUserProfileValidationSchema.shape.body.strict().parse(payload);
         const user = await Worker.findById(userData.profileId);
         if (!user) {
             throw new AppError(httpStatus.NOT_FOUND, 'Profile not found');

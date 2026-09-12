@@ -19,7 +19,6 @@ export const registerUserValidationSchema = z.object({
     }),
 });
 
-import { ENUM_SERVICE_TYPE } from '../task/task.enum';
 
 export const updateUserProfileValidationSchema = z.object({
     body: z.object({
@@ -37,7 +36,6 @@ export const updateUserProfileValidationSchema = z.object({
 
         dateOfBirth: z.coerce.date().optional().nullable(),
 
-        serviceTypes: z.array(z.nativeEnum(ENUM_SERVICE_TYPE)).optional(),
     }),
 });
 //

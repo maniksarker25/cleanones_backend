@@ -4,7 +4,6 @@ import { uploadFile } from '../../helper/multer-s3-uploader';
 import auth from '../../middlewares/auth';
 import parseJsonBody from '../../middlewares/parseJsonBody';
 import validateRequest from '../../middlewares/validateRequest';
-import CustomerValidations from '../customer/customer.validation';
 import { USER_ROLE } from './user.constant';
 import userControllers from './user.controller';
 import userValidations from './user.validation';

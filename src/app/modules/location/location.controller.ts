@@ -66,6 +66,20 @@ const getClientLocations = catchAsync(async (req, res) => {
     });
 });
 
+// Client: get their own locations
+const getMyLocations = catchAsync(async (req, res) => {
+    const result = await locationServices.getMyLocationsFromDB(
+        req.user.profileId as string,
+        req.query
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'My locations retrieved successfully',
+        data: result,
+    });
+});
+
 const getSingleLocation = catchAsync(async (req, res) => {
     const result = await locationServices.getSingleLocationFromDB(
         req.params.id
@@ -85,6 +99,7 @@ const locationController = {
     getAllLocations,
     getClientLocations,
     getSingleLocation,
+    getMyLocations,
 };
 
 export default locationController;

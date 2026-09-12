@@ -29,11 +29,3 @@ declare namespace Express {
         };
     }
 }
-
-// src/types/express/index.d.ts
-
-declare namespace Express {
-    interface Request {
-        rawBody?: Buffer;
-    }
-}

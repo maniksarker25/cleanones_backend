@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { IPhotoRequirement } from '../additional_task/additional_task.interface';
 
 export type TTaskFrequency = 'daily' | 'weekly' | 'monthly';
 
@@ -20,6 +21,7 @@ export interface TTask {
     name: string;
     frequency_type: TTaskFrequency;
     is_photo_required: boolean;
+    photo_requirements?: IPhotoRequirement[];
     duration_minutes?: number;
     // 'weekly' tasks: which weekdays it's due on ('mon'..'sun')
     days_of_week?: string[];

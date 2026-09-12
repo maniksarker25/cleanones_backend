@@ -1,5 +1,5 @@
 {
-    "name": "first-project",
+    "name": "cleanones-backend",
     "version": "1.0.0",
     "description": "",
     "main": "index.js",
@@ -12,7 +12,10 @@
         "prettier": "prettier --ignore-path .gitignore --write \"./src**/*.+(js|ts|json)\"",
         "prettier:fix": "npx prettier --write src",
         "test": "echo \"Error: no test specified\" && exit 1",
-        "create-module": "ts-node src/app/create_module_tem.ts modules"
+        "create-module": "ts-node src/app/create_module_tem.ts modules",
+        "docs:dev": "ts-node src/docs-server.ts",
+        "docs:check": "node --test scripts/check-docs.cjs",
+        "docs:typecheck": "tsc --noEmit --esModuleInterop --skipLibCheck --strict --target es2016 --module commonjs src/docs-server.ts"
     },
     "keywords": [],
     "author": "",
@@ -47,6 +50,7 @@
         "smartsheet": "^4.2.0",
         "smile-identity-core": "^3.1.0",
         "socket.io": "^4.8.1",
+        "swagger-ui-express": "^5.0.1",
         "twilio": "^5.10.3",
         "validator": "^13.11.0",
         "winston": "^3.14.2",
@@ -54,6 +58,7 @@
         "zod": "^3.22.4"
     },
     "devDependencies": {
+        "@apidevtools/swagger-parser": "^13.0.0",
         "@types/axios": "^0.9.36",
         "@types/bcrypt": "^5.0.2",
         "@types/cookie-parser": "^1.4.6",
@@ -66,12 +71,14 @@
         "@types/nodemailer": "^6.4.14",
         "@types/paypal-rest-sdk": "^1.7.9",
         "@types/socket.io": "^3.0.1",
+        "@types/swagger-ui-express": "^4.1.8",
         "@types/validator": "^13.11.6",
         "@typescript-eslint/eslint-plugin": "^6.11.0",
         "@typescript-eslint/parser": "^6.11.0",
         "eslint": "^8.53.0",
         "eslint-config-prettier": "^9.0.0",
         "prettier": "^3.1.0",
+        "ts-node": "^10.9.2",
         "ts-node-dev": "^2.0.0",
         "typescript": "^5.2.2"
     }
