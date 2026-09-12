@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { AdminRoutes } from '../modules/admin/admin.routes';
+import { additionalTaskRoutes } from '../modules/additional_task/additional_task.routes';
 import { authRoutes } from '../modules/auth/auth.routes';
 import { clientRoutes } from '../modules/client/client.routes';
 import { cleaningPlanRoutes } from '../modules/cleaning_plan/cleaning_plan.routes';
@@ -49,6 +50,10 @@ const moduleRoutes = [
     {
         path: '/cleaning-plan',
         router: cleaningPlanRoutes,
+    },
+    {
+        path: '/additional-task',
+        router: additionalTaskRoutes,
     },
 
     {
