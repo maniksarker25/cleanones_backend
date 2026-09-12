@@ -6,14 +6,10 @@ const locationSchema = new Schema<TLocation>(
         client: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
         name: { type: String, required: true },
         address: { type: String, required: true },
-        city: { type: String },
-        postal_code: { type: String },
-        country: { type: String },
-        image_url: { type: String, default: null },
         is_active: { type: Boolean, default: true },
-        geo: {
+        location: {
             type: { type: String, enum: ['Point'], default: 'Point' },
-            coordinates: { type: [Number], default: undefined }, // [lng, lat]
+            coordinates: { type: [Number], default: undefined },
         },
     },
     {
@@ -23,6 +19,6 @@ const locationSchema = new Schema<TLocation>(
 );
 
 locationSchema.index({ client: 1, is_active: 1 });
-locationSchema.index({ geo: '2dsphere' }, { sparse: true });
+locationSchema.index({ location: '2dsphere' }, { sparse: true });
 
-export const Location = model<TLocation>('Location', locationSchema, 'locations');
+export const Location = model<TLocation>('Location',locationSchema);

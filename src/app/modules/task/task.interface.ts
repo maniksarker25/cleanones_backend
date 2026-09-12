@@ -3,6 +3,8 @@ import { Types } from 'mongoose';
 export type TTaskFrequency = 'daily' | 'weekly' | 'monthly';
 
 export interface TTask {
+    client: Types.ObjectId;
+    location: Types.ObjectId;
     room: Types.ObjectId;
     name: string;
     frequency_type: TTaskFrequency;
