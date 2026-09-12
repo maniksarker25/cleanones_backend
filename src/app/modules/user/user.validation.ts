@@ -1,0 +1,120 @@
+import { z } from 'zod';
+import { ENUM_USER_STATUS } from '../../utilities/enum';
+
+// Zod schema for user creation
+export const registerUserValidationSchema = z.object({
+    body: z.object({
+        userData: z.object({
+            firstName: z.string().min(1, 'Name is required').max(100),
+            lastName: z.string().min(1, 'Name is required').max(100),
+            email: z
+                .string({ invalid_type_error: 'Please add a valid email' })
+                .email('Invalid email format'),
+        }),
+        password: z.string().min(6, 'Password must be at least 6 characters'),
+        confirmPassword: z.string().min(6, 'Confirm password is required'),
+        role: z.enum(['worker', 'client', 'manager'], {
+            required_error: 'Role is required',
+        }),
+    }),
+});
+
+import { ENUM_SERVICE_TYPE } from '../task/task.enum';
+
+export const updateUserProfileValidationSchema = z.object({
+    body: z.object({
+        name: z.string().min(1, 'Name cannot be empty').optional(),
+
+        phone: z.string().min(6, 'Phone number is too short').optional(),
+
+        profile_image: z
+            .string()
+            .url('Invalid image URL')
+            .optional()
+            .or(z.literal('')),
+
+        address: z.string().optional(),
+
+        dateOfBirth: z.coerce.date().optional().nullable(),
+
+        serviceTypes: z.array(z.nativeEnum(ENUM_SERVICE_TYPE)).optional(),
+    }),
+});
+//
+const loginValidationSchema = z.object({
+    body: z.object({
+        email: z.string({ required_error: 'Email is required' }),
+        password: z.string({ required_error: 'Password is required' }),
+    }),
+});
+
+const changePasswordValidationSchema = z.object({
+    body: z.object({
+        oldPassword: z.string({ required_error: 'Old password is required' }),
+        newPassword: z.string({ required_error: 'Password is required' }),
+    }),
+});
+
+// refresh token validation schema -----------
+const refreshTokenValidationSchema = z.object({
+    cookies: z.object({
+        refreshToken: z.string({ required_error: 'Refresh token is required' }),
+    }),
+});
+
+// forget password validation schema
+const forgetPasswordValidationSchema = z.object({
+    body: z.object({
+        email: z.string({ required_error: 'User email is required' }),
+    }),
+});
+// reset password validation schema
+const resetPasswordValidationSchema = z.object({
+    body: z.object({
+        email: z.string({ required_error: 'User email is required' }),
+        newPassword: z.string({ required_error: 'New password is required' }),
+    }),
+});
+
+const verifyCodeValidationSchema = z.object({
+    body: z.object({
+        email: z.string({ required_error: 'Email is required' }),
+        verifyCode: z.number({ required_error: 'Verify code is required' }),
+    }),
+});
+
+const resendVerifyCodeSchema = z.object({
+    body: z.object({
+        email: z.string({ required_error: 'Email is required' }),
+    }),
+});
+
+const changeUserStatus = z.object({
+    body: z.object({
+        status: z.enum(
+            Object.values(ENUM_USER_STATUS) as [string, ...string[]]
+        ),
+    }),
+});
+
+const deleteUserAccountValidationSchema = z.object({
+    body: z.object({
+        password: z.string({ required_error: 'Password is required' }),
+    }),
+});
+
+const userValidations = {
+    registerUserValidationSchema,
+    loginValidationSchema,
+    changePasswordValidationSchema,
+    refreshTokenValidationSchema,
+    forgetPasswordValidationSchema,
+    resetPasswordValidationSchema,
+    verifyCodeValidationSchema,
+    resendVerifyCodeSchema,
+    changeUserStatus,
+    deleteUserAccountValidationSchema,
+    updateUserProfileValidationSchema,
+};
+
+export default userValidations;

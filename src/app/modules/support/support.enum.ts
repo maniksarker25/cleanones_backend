@@ -1,0 +1,4 @@
+export const ENUM_SUPPORT_STATUS = {
+  TODO: 'TODO',
+  RESOLVED: 'RESOLVED',
+};
