@@ -4,6 +4,7 @@ import { TLocation } from './location.interface';
 const locationSchema = new Schema<TLocation>(
     {
         client: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
+        last_updated_by: { type: Schema.Types.ObjectId, ref: 'Manager', default: null },
         name: { type: String, required: true },
         address: { type: String, required: true },
         is_active: { type: Boolean, default: true },

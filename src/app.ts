@@ -14,24 +14,11 @@ import notFound from './app/middlewares/notFound';
 import { rateLimiters } from './app/middlewares/rateLimiter.middleware';
 import PersonaController from './app/modules/persona/persona.controller';
 import router from './app/routes';
-import handleConnectedAccountWebhook from './app/stripeManager/connectedAccountWebhook';
-import handleWebhook from './app/stripeManager/webhook';
 
 import './app/events/listeners';
 const app: Application = express();
 // VERY IMPORTANT (for proxy / nginx)
 app.set('trust proxy', 1);
-// web hook
-app.post(
-    '/snow-webhook',
-    express.raw({ type: 'application/json' }),
-    handleWebhook
-);
-app.post(
-    '/snow-connected-account/webhook',
-    express.raw({ type: 'application/json' }),
-    handleConnectedAccountWebhook
-);
 
 // ✅ ADD THIS — before express.json()
 app.post(
@@ -68,9 +55,6 @@ app.use('/uploads', express.static('uploads'));
 // application routers ----------------
 
 app.use(rateLimiters.apiLimiter);
-app.get('/stripe-return', (req, res) => {
-    res.redirect('snowout-v2://stripe/return');
-});
 app.use('/api/v1', router);
 app.post('/contact-us', sendContactUsEmail);
 

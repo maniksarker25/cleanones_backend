@@ -3,8 +3,6 @@ import { TWorker } from './worker.interface';
 
 const workerSchema = new Schema<TWorker>(
     {
-        stripeAccountId: { type: String, default: null },
-        isStripeConnected: { type: Boolean, default: false },
         email: { type: String, default: null },
         user: {
             type: Schema.Types.ObjectId,
