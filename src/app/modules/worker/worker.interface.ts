@@ -1,26 +1,25 @@
 import { Types } from 'mongoose';
+import { WorkerType } from './worker.constant';
 
 export interface TWorker {
-    email?: string;
+    email: string;
+    phone?: string;
     user: Types.ObjectId;
-    employee_id?: string;
-    isagree_condition: boolean;
+    isagree_condition?: boolean;
     dob?: any;
     nationality?: string;
-    worker_type?: 'full_time' | 'part_time' | 'contractor' | 'freelancer' | 'employee' | null;
+    worker_type: WorkerType;
     position?: string;
-    location?: string;
+    address: string;
     base_location?: string;
     languages: string[];
     employee_contract_pdf?: string;
     working_days: string[];
     hourly_rate: number;
-    onboarding_draft?: any;
-    onboarding_complete1: boolean;
     is_profile_completed: boolean;
     id_card_front?: string;
     id_card_back?: string;
     certificates: string[];
-    contract_type?: string;
     national_id?: string;
+    isDeleted: boolean;
 }

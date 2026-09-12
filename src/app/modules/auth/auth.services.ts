@@ -8,8 +8,7 @@ import AppError from '../../error/appError';
 import { resetPasswordEmailBody } from '../../mailTemplate/resetPasswordEmailBody';
 import sendEmail from '../../utilities/sendEmail';
 import { upsertDevice } from '../device/device.service';
-import { Worker } from '../worker/worker.model';
-import { USER_ROLE } from '../user/user.constant';
+
 import { TUserRole } from '../user/user.interface';
 import { User } from '../user/user.model';
 import { createToken, verifyToken } from '../user/user.utils';
@@ -58,7 +57,7 @@ const loginUserIntoDB = async (payload: TLoginUser) => {
     const platform = payload?.platform ? payload?.platform : 'android';
 
     if (payload.playerId) {
-        upsertDevice(user.profileId, payload.playerId, platform);
+        upsertDevice(user.profileId as string, payload.playerId, platform);
     }
     const jwtPayload = {
         id: user?._id,

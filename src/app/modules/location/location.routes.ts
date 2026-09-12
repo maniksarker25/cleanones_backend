@@ -39,6 +39,13 @@ router.get(
     locationController.getClientLocations
 );
 
+// Client: get their own locations
+router.get(
+    '/my-locations',
+    auth(USER_ROLE.client),
+    locationController.getMyLocations
+);
+
 router.get(
     '/single-location/:id',
     auth(USER_ROLE.manager),

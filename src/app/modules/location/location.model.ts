@@ -14,7 +14,7 @@ const locationSchema = new Schema<TLocation>(
         },
     },
     {
-        timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+        timestamps: true,
         versionKey: false,
     }
 );

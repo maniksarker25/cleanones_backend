@@ -372,6 +372,109 @@ const getClientLocationsFromDB = async (
     };
 };
 
+const getMyLocationsFromDB = async (
+    clientId: string,
+    query: Record<string, unknown>
+) => {
+    await ensureClientExists(clientId);
+
+    const searchTerm = query.searchTerm as string | undefined;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const sort = query.sort as string | undefined;
+
+    const sortOrder = sort?.startsWith('-') ? -1 : 1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+
+    const pipeline: PipelineStage[] = [
+        {
+            $match: {
+                is_active: true,
+                client: new Types.ObjectId(clientId),
+            },
+        },
+    ];
+
+    if (searchTerm) {
+        pipeline.push({
+            $match: {
+                $or: ['name', 'address'].map((field) => ({
+                    [field]: { $regex: searchTerm, $options: 'i' },
+                })),
+            },
+        });
+    }
+
+    pipeline.push({
+        $facet: {
+            metadata: [{ $count: 'total' }],
+            data: [
+                { $sort: { [sortField]: sortOrder } },
+                { $skip: skip },
+                { $limit: limit },
+                {
+                    $lookup: {
+                        from: 'rooms',
+                        let: { locationId: '$_id' },
+                        pipeline: [
+                            {
+                                $match: {
+                                    $expr: {
+                                        $and: [
+                                            {
+                                                $eq: [
+                                                    '$location',
+                                                    '$$locationId',
+                                                ],
+                                            },
+                                            { $eq: ['$is_active', true] },
+                                        ],
+                                    },
+                                },
+                            },
+                            { $count: 'count' },
+                        ],
+                        as: 'roomCount',
+                    },
+                },
+                {
+                    $addFields: {
+                        total_room: {
+                            $ifNull: [
+                                { $arrayElemAt: ['$roomCount.count', 0] },
+                                0,
+                            ],
+                        },
+                    },
+                },
+                {
+                    $project: {
+                        roomCount: 0,
+                        client: 0,
+                        last_updated_by: 0,
+                    },
+                },
+            ],
+        },
+    });
+
+    const [aggResult] = await Location.aggregate(pipeline);
+
+    const total = aggResult?.metadata?.[0]?.total || 0;
+    const result = aggResult?.data || [];
+
+    return {
+        meta: {
+            page,
+            limit,
+            total,
+            totalPage: Math.ceil(total / limit),
+        },
+        result,
+    };
+};
+
 const getSingleLocationFromDB = async (id: string) => {
     const [location] = await Location.aggregate([
         { $match: { _id: new Types.ObjectId(id) } },
@@ -462,6 +565,7 @@ const locationServices = {
     deleteLocationFromDB,
     getAllLocationsFromDB,
     getClientLocationsFromDB,
+    getMyLocationsFromDB,
     getSingleLocationFromDB,
 };
 

@@ -1,0 +1,19 @@
+import { Types } from "mongoose";
+
+export interface IPhotoRequirement {
+    title: string;        // photo label defined by admin (e.g. "Before cleaning")
+    photo_url: string | null;  // uploaded by worker, null until uploaded
+    is_uploaded: boolean;
+}
+
+export interface IAdditionalTask {
+    cleaning_plan_id: Types.ObjectId;
+    name: string;
+    description?:string;
+    duration_minutes: number;
+    is_photo_required: boolean;
+    photo_requirements: IPhotoRequirement[]; // required photos with titles
+    is_completed: boolean;
+    date_time: Date;
+    is_approved: boolean;
+}

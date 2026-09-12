@@ -1,19 +1,18 @@
 import { Schema, model } from 'mongoose';
 import { TWorker } from './worker.interface';
+import { WorkerType } from './worker.constant';
 
 const workerSchema = new Schema<TWorker>(
     {
         email: { type: String, default: null },
+        isDeleted: { type: Boolean, default: false },
+        phone: { type: String, default: null },
         user: {
             type: Schema.Types.ObjectId,
             ref: 'User',
             required: true,
             unique: true,
             index: true,
-        },
-        employee_id: {
-            type: String,
-            default: null,
         },
         isagree_condition: {
             type: Boolean,
@@ -29,14 +28,14 @@ const workerSchema = new Schema<TWorker>(
         },
         worker_type: {
             type: String,
-            enum: ['full_time', 'part_time', 'contractor', 'freelancer', 'employee', null],
+            enum: [...Object.values(WorkerType), null],
             default: null,
         },
         position: {
             type: String,
             default: null,
         },
-        location: {
+        address: {
             type: String,
             default: null,
         },
@@ -60,14 +59,6 @@ const workerSchema = new Schema<TWorker>(
             type: Number,
             default: 25.0,
         },
-        onboarding_draft: {
-            type: Schema.Types.Mixed,
-            default: {},
-        },
-        onboarding_complete1: {
-            type: Boolean,
-            default: false,
-        },
         is_profile_completed: {
             type: Boolean,
             default: false,
@@ -83,10 +74,6 @@ const workerSchema = new Schema<TWorker>(
         certificates: {
             type: [String],
             default: [],
-        },
-        contract_type: {
-            type: String,
-            default: null,
         },
         national_id: {
             type: String,

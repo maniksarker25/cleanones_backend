@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 import config from '../config';
 import AppError from '../error/appError';
 import { Client } from '../modules/client/client.model';
+import { Manager } from '../modules/manager/manager.model';
 import { Worker } from '../modules/worker/worker.model';
 import SuperAdmin from '../modules/superAdmin/superAdmin.model';
 import { USER_ROLE } from '../modules/user/user.constant';
@@ -71,7 +72,14 @@ const auth = (...requiredRoles: TUserRole[]) => {
                         path: 'user',
                         select: '_id isDeleted isBlocked isVerified passwordChangedAt isActive',
                     });
-            } else if (USER_ROLE.superAdmin) {
+            } else if (role === USER_ROLE.manager) {
+                profileData = await Manager.findOne({ user: id })
+                    .select('_id user')
+                    .populate({
+                        path: 'user',
+                        select: '_id isDeleted isBlocked isVerified passwordChangedAt isActive',
+                    });
+            } else if (role === USER_ROLE.superAdmin) {
                 profileData = await SuperAdmin.findOne({ user: id })
                     .select('_id user')
                     .populate({

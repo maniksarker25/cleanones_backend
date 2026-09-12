@@ -32,6 +32,12 @@ const frequencyFieldsRefinement = (
     }
 };
 
+const photoRequirementSchema = z.object({
+    title: z.string().min(1, 'Photo title is required').trim(),
+    photo_url: z.string().nullable().optional(),
+    is_uploaded: z.boolean().optional(),
+});
+
 const createTaskValidationSchema = z.object({
     body: z
         .object({
@@ -41,6 +47,7 @@ const createTaskValidationSchema = z.object({
                 required_error: 'Frequency type is required',
             }),
             is_photo_required: z.boolean().optional(),
+            photo_requirements: z.array(photoRequirementSchema).optional(),
             duration_minutes: z.coerce.number().positive().optional(),
             days_of_week: z.array(z.enum(WEEKDAYS)).optional(),
             days_of_month: z.array(z.number().min(1).max(31)).optional(),
@@ -55,6 +62,7 @@ const updateTaskValidationSchema = z.object({
             name: z.string().min(1, 'Name cannot be empty').optional(),
             frequency_type: z.enum(['daily', 'weekly', 'monthly']).optional(),
             is_photo_required: z.boolean().optional(),
+            photo_requirements: z.array(photoRequirementSchema).optional(),
             duration_minutes: z.coerce.number().positive().optional(),
             days_of_week: z.array(z.enum(WEEKDAYS)).optional(),
             days_of_month: z.array(z.number().min(1).max(31)).optional(),

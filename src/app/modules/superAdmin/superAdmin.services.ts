@@ -2,8 +2,6 @@
 import httpStatus from 'http-status';
 import AppError from '../../error/appError';
 import { deleteFileFromS3 } from '../../helper/deleteFromS3';
-import { ENUM_TASK_STATUS } from '../task/task.enum';
-import TaskModel from '../task/task.model';
 import { ISuperAdmin } from './superAdmin.interface';
 import SuperAdmin from './superAdmin.model';
 
@@ -32,14 +30,6 @@ const updateSuperAdminProfile = async (
     return result;
 };
 
-/** Task statuses that count as earnings */
-const EARNING_STATUSES = [
-    ENUM_TASK_STATUS.ASSIGNED,
-    ENUM_TASK_STATUS.IN_PROGRESS,
-    ENUM_TASK_STATUS.COMPLETED,
-    ENUM_TASK_STATUS.ASSIGNED,
-    ENUM_TASK_STATUS.IN_PROGRESS,
-];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -154,183 +144,6 @@ interface GetEarningsMatrixParams {
     limit: number;
 }
 
-export const EarningsService = {
-    async getEarningsMatrix({ filter, page, limit }: GetEarningsMatrixParams) {
-        const validFilters: FilterType[] = [
-            'today',
-            'last_week',
-            'last_month',
-            'last_year',
-        ];
-        const safeFilter: FilterType = validFilters.includes(
-            filter as FilterType
-        )
-            ? (filter as FilterType)
-            : 'today';
-
-        const { start, end } = getDateRange(safeFilter);
-        const { start: prevStart, end: prevEnd } =
-            getPreviousDateRange(safeFilter);
-
-        // ── Base match shared by current & previous period queries ────────────
-        const baseMatch = {
-            status: { $in: EARNING_STATUSES },
-            isDeleted: false,
-            acceptedBidAmount: { $ne: null },
-        };
-
-        // ── 1. Current period: total earnings & paginated rows ────────────────
-        const skip = (page - 1) * limit;
-
-        const [currentPeriodData, previousPeriodData] = await Promise.all([
-            // Current period aggregation
-            TaskModel.aggregate([
-                {
-                    $match: {
-                        ...baseMatch,
-                        bidAcceptAt: { $gte: start, $lte: end },
-                    },
-                },
-                {
-                    $addFields: {
-                        // Admin earning = acceptedBidAmount × (platformFeePercentage / 100)
-                        adminEarning: {
-                            $multiply: [
-                                '$acceptedBidAmount',
-                                {
-                                    $divide: [
-                                        {
-                                            $ifNull: [
-                                                '$platformFeePercentage',
-                                                0,
-                                            ],
-                                        },
-                                        100,
-                                    ],
-                                },
-                            ],
-                        },
-                    },
-                },
-                {
-                    $facet: {
-                        summary: [
-                            {
-                                $group: {
-                                    _id: null,
-                                    totalEarnings: { $sum: '$adminEarning' },
-                                    totalTasks: { $sum: 1 },
-                                },
-                            },
-                        ],
-                        rows: [
-                            { $sort: { bidAcceptAt: -1 } },
-                            { $skip: skip },
-                            { $limit: limit },
-                            {
-                                $project: {
-                                    _id: 1,
-                                    payOn: '$bidAcceptAt',
-                                    txnId: '$transactionId',
-                                    status: 1,
-                                    acceptedBidAmount: 1,
-                                    platformFeePercentage: 1,
-                                    adminEarning: 1,
-                                },
-                            },
-                        ],
-                        // Total count for pagination
-                        totalCount: [{ $count: 'count' }],
-                    },
-                },
-            ]),
-
-            TaskModel.aggregate([
-                {
-                    $match: {
-                        ...baseMatch,
-                        bidAcceptAt: { $gte: prevStart, $lte: prevEnd },
-                    },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalEarnings: {
-                            $sum: {
-                                $multiply: [
-                                    '$acceptedBidAmount',
-                                    {
-                                        $divide: [
-                                            {
-                                                $ifNull: [
-                                                    '$platformFeePercentage',
-                                                    0,
-                                                ],
-                                            },
-                                            100,
-                                        ],
-                                    },
-                                ],
-                            },
-                        },
-                    },
-                },
-            ]),
-        ]);
-
-        // ── Shape the response ────────────────────────────────────────────────
-        const summary = currentPeriodData[0]?.summary?.[0] ?? {
-            totalEarnings: 0,
-            totalTasks: 0,
-        };
-        const rows = currentPeriodData[0]?.rows ?? [];
-        const totalCount = currentPeriodData[0]?.totalCount?.[0]?.count ?? 0;
-
-        const prevTotal = previousPeriodData?.[0]?.totalEarnings ?? 0;
-        const currentTotal: number = summary.totalEarnings ?? 0;
-
-        // Percentage change vs previous period (null when there's no previous data)
-        let percentageChange: number | null = null;
-        let changeDirection: 'higher' | 'lower' | 'same' | null = null;
-
-        if (prevTotal > 0) {
-            percentageChange = parseFloat(
-                (((currentTotal - prevTotal) / prevTotal) * 100).toFixed(2)
-            );
-            changeDirection =
-                percentageChange > 0
-                    ? 'higher'
-                    : percentageChange < 0
-                      ? 'lower'
-                      : 'same';
-        }
-
-        // Add a human-readable serial number to each row
-        const rowsWithSerial = rows.map((row: any, index: number) => ({
-            ...row,
-            sl: String(skip + index + 1).padStart(2, '0'),
-        }));
-
-        return {
-            filter: safeFilter,
-            filterLabel: getLabelForFilter(safeFilter),
-            summary: {
-                totalEarnings: parseFloat(currentTotal.toFixed(2)),
-                totalTasks: summary.totalTasks,
-                percentageChange,
-                changeDirection,
-                comparedTo: getComparedToLabel(safeFilter),
-            },
-            pagination: {
-                page,
-                limit,
-                total: totalCount,
-                totalPages: Math.ceil(totalCount / limit),
-            },
-            data: rowsWithSerial,
-        };
-    },
-};
 
 // ─── Label helpers ────────────────────────────────────────────────────────────
 
