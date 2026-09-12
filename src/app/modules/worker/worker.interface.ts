@@ -1,8 +1,6 @@
 import { Types } from 'mongoose';
 
 export interface TWorker {
-    stripeAccountId?: string;
-    isStripeConnected?: boolean;
     email?: string;
     user: Types.ObjectId;
     employee_id?: string;

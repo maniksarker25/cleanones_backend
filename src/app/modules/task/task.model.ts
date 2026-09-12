@@ -6,6 +6,7 @@ const taskSchema = new Schema<TTask>(
         client: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
         location: { type: Schema.Types.ObjectId, ref: 'Location', required: true, index: true },
         room: { type: Schema.Types.ObjectId, ref: 'Room', required: true, index: true },
+        last_updated_by: { type: Schema.Types.ObjectId, ref: 'Manager', default: null },
         name: { type: String, required: true },
         frequency_type: { type: String, enum: ['daily', 'weekly', 'monthly'], required: true },
         is_photo_required: { type: Boolean, default: false },

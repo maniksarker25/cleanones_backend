@@ -1,12 +1,16 @@
 import { Router } from 'express';
 import { AdminRoutes } from '../modules/admin/admin.routes';
 import { authRoutes } from '../modules/auth/auth.routes';
+import { clientRoutes } from '../modules/client/client.routes';
 import { fileUploadRoutes } from '../modules/file-upload/file-upload.routes';
 import { legalInfoRoutes } from '../modules/legal_info/legal_info.routes';
+import { locationRoutes } from '../modules/location/location.routes';
 import { ManageRoutes } from '../modules/manage-web/manage.routes';
 import { metaRoutes } from '../modules/meta/meta.routes';
 import { notificationRoutes } from '../modules/notification/notification.routes';
+import { roomRoutes } from '../modules/room/room.routes';
 import { superAdminRoutes } from '../modules/superAdmin/superAdmin.routes';
+import { taskRoutes } from '../modules/task/task.routes';
 import { userRoutes } from '../modules/user/user.routes';
 
 const router = Router();
@@ -19,6 +23,22 @@ const moduleRoutes = [
     {
         path: '/user',
         router: userRoutes,
+    },
+    {
+        path: '/client',
+        router: clientRoutes,
+    },
+    {
+        path: '/location',
+        router: locationRoutes,
+    },
+    {
+        path: '/room',
+        router: roomRoutes,
+    },
+    {
+        path: '/task',
+        router: taskRoutes,
     },
 
     {
