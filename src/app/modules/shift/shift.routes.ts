@@ -31,4 +31,11 @@ router.patch(
     shiftController.updateStatus
 );
 
+router.patch(
+    '/:planId/:date/tasks/:taskId/photo',
+    auth(USER_ROLE.worker),
+    validateRequest(shiftValidations.uploadTaskPhotoValidationSchema),
+    shiftController.uploadTaskPhoto
+);
+
 export const shiftRoutes = router;

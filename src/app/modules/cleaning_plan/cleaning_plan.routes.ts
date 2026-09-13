@@ -44,7 +44,7 @@ router.get(
 
 router.get(
     '/single-cleaning-plan/:id',
-    auth(USER_ROLE.manager),
+    auth(USER_ROLE.manager,USER_ROLE.client),
     cleaningPlanController.getSingleCleaningPlan
 );
 

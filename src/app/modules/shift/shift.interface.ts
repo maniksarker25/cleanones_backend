@@ -1,5 +1,4 @@
 import { Types } from 'mongoose';
-import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 
 export type ShiftStatus =
     | 'upcoming'
@@ -7,17 +6,65 @@ export type ShiftStatus =
     | 'completed'
     | 'cancelled';
 
+export type ShiftTaskStatus = 'UPCOMING' | 'IN_PROGRESS' | 'COMPLETED';
+
+export interface IShiftPhotoRequirement {
+    title: string;
+    photo_url: string | null;
+    is_uploaded: boolean;
+}
+
+// Everything below (rooms, tasks, assigned_workers) is a SNAPSHOT taken at
+// materialization time, not a live reference: a Shift is a self-contained
+// historical record of one specific day, and must stay accurate even if the
+// source Room/Task/Worker is later renamed, edited or deactivated. The
+// ObjectId refs are kept alongside purely for traceability (audit lookups
+// back to the source document) — nothing here should ever be re-derived by
+// populating them. See docs/SHIFT_MANAGEMENT_DESIGN.md.
+
+export interface IShiftRoom {
+    room: Types.ObjectId;
+    name: string;
+    room_type: string;
+}
+
+export interface IShiftTask {
+    task: Types.ObjectId;
+    room: Types.ObjectId;
+    name: string;
+    duration_minutes: number;
+    is_photo_required: boolean;
+    // Fresh every occurrence: titles are copied from the Task template, but
+    // photo_url/is_uploaded always start unset — a previous day's shift
+    // submitting a photo never affects this one.
+    photo_requirements: IShiftPhotoRequirement[];
+    // Auto-derived: true once every required photo_requirements entry is
+    // uploaded (or immediately if no photo is required). No manual
+    // complete/approve step — see docs/SHIFT_MANAGEMENT_DESIGN.md.
+    is_completed: boolean;
+    completed_at?: Date | null;
+    // Defaults to UPCOMING at materialization time. Transitions to
+    // IN_PROGRESS/COMPLETED are set manually (no automatic logic yet).
+    status: ShiftTaskStatus;
+}
+
+export interface IShiftAssignedWorker {
+    worker: Types.ObjectId;
+    name: string;
+    role: 'Team leader' | 'Co-leader' | 'Normal worker';
+    assigned_with_conflict: boolean;
+}
+
 export interface IShift {
     cleaning_plan: Types.ObjectId;
     // Calendar day only (normalized to UTC midnight) — identifies the occurrence.
     date: Date;
     // Actual start timestamp for this occurrence (date + plan's time-of-day).
     date_time: Date;
-    // Snapshot of the plan's rooms/duration at materialization time — a shift
-    // reflects the plan as it was when created, not whatever the plan becomes later.
-    rooms: Types.ObjectId[];
+    rooms: IShiftRoom[];
+    tasks: IShiftTask[];
     duration_minutes: number;
-    assigned_workers: IAssignedWorker[];
+    assigned_workers: IShiftAssignedWorker[];
     // true once a manager has edited this shift's workers directly, diverging
     // it from the plan's default assignment.
     is_worker_overridden: boolean;

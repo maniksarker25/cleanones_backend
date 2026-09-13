@@ -29,7 +29,7 @@ const workerBody = z
         email: z.string().trim().email().toLowerCase(),
         phone: z.string().trim().min(1),
         worker_type: z.nativeEnum(WorkerType),
-        address: z.string().trim().min(1),
+        address: z.string().optional(),
         isagree_condition: z.boolean().optional(),
         dob: z.coerce.date().optional(),
         nationality: z.string().optional(),

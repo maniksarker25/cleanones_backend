@@ -107,12 +107,31 @@ const updateStatus = catchAsync(async (req, res) => {
     });
 });
 
+const uploadTaskPhoto = catchAsync(async (req, res) => {
+    const date = parseDateParam(req.params.date);
+    const result = await shiftServices.uploadShiftTaskPhoto(
+        req.user.profileId as string,
+        req.params.planId,
+        date,
+        req.params.taskId,
+        req.body.title,
+        req.body.photo_url
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Photo uploaded successfully',
+        data: result,
+    });
+});
+
 const shiftController = {
     listMyShifts,
     listShifts,
     getShift,
     assignWorkers,
     updateStatus,
+    uploadTaskPhoto,
 };
 
 export default shiftController;

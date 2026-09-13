@@ -2512,8 +2512,64 @@ const schemas = {
             },
             rooms: {
                 type: 'array',
-                items: { $ref: '#/components/schemas/ObjectId' },
-                description: "Snapshot of the plan's rooms at materialization time.",
+                items: {
+                    type: 'object',
+                    properties: {
+                        room: { $ref: '#/components/schemas/ObjectId' },
+                        name: { type: 'string' },
+                        room_type: { type: 'string' },
+                    },
+                    description:
+                        'room is kept for traceability only — name/room_type are a frozen snapshot and never re-derived by populating it.',
+                },
+                description:
+                    "Snapshot of the plan's rooms at materialization time. Immutable — later edits to the source Room do not affect it.",
+            },
+            tasks: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        task: { $ref: '#/components/schemas/ObjectId' },
+                        room: { $ref: '#/components/schemas/ObjectId' },
+                        name: { type: 'string' },
+                        duration_minutes: { type: 'number' },
+                        is_photo_required: { type: 'boolean' },
+                        photo_requirements: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    title: { type: 'string' },
+                                    photo_url: { type: 'string', nullable: true },
+                                    is_uploaded: { type: 'boolean' },
+                                },
+                            },
+                            description:
+                                "Titles are a frozen snapshot of the source Task's template; photo_url/is_uploaded always start unset for this occurrence, independent of any other day's shift.",
+                        },
+                        is_completed: {
+                            type: 'boolean',
+                            description:
+                                'Auto-derived: true once every required photo_requirements entry is uploaded (or immediately if none are required). No manual complete/approve step.',
+                        },
+                        completed_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                        },
+                        status: {
+                            type: 'string',
+                            enum: ['UPCOMING', 'IN_PROGRESS', 'COMPLETED'],
+                            description:
+                                'Defaults to UPCOMING at materialization time. Transitions to IN_PROGRESS/COMPLETED are set manually (no automatic transition logic yet).',
+                        },
+                    },
+                    description:
+                        'task/room are kept for traceability only — the rest is a frozen snapshot for this specific occurrence.',
+                },
+                description:
+                    "One entry per active Task on the plan's rooms at materialization time — this is where actual photo submissions and completion state live, per occurrence. See docs/SHIFT_MANAGEMENT_DESIGN.md.",
             },
             duration_minutes: {
                 type: 'number',
@@ -2525,6 +2581,11 @@ const schemas = {
                     type: 'object',
                     properties: {
                         worker: { $ref: '#/components/schemas/ObjectId' },
+                        name: {
+                            type: 'string',
+                            description:
+                                "Frozen snapshot of the worker's name at assignment time — immune to later profile edits.",
+                        },
                         role: {
                             type: 'string',
                             enum: [
@@ -2541,7 +2602,7 @@ const schemas = {
                     },
                 },
                 description:
-                    'Defaults to a snapshot of the plan\'s assigned_workers at materialization time until overridden for this specific occurrence.',
+                    'Defaults to a snapshot of the plan\'s assigned_workers (with worker names resolved) at materialization time until overridden for this specific occurrence.',
             },
             is_worker_overridden: {
                 type: 'boolean',
