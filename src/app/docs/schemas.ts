@@ -1,5 +1,119 @@
 // Shared OpenAPI 3.0 schemas. Keep in sync with validation, models and services.
 const schemas = {
+    ClientContactCreate: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['client', 'name', 'role', 'phone', 'email'],
+        properties: {
+            client: {
+                $ref: '#/components/schemas/ObjectId',
+            },
+            name: {
+                type: 'string',
+                minLength: 1,
+                example: 'Alex Smith',
+                description: 'Trimmed; must not be blank.',
+            },
+            role: {
+                type: 'string',
+                minLength: 1,
+                example: 'Site supervisor',
+                description:
+                    'Free-text contact role; not an account authorization role.',
+            },
+            email: {
+                type: 'string',
+                format: 'email',
+                example: 'alex@example.com',
+                description: 'Trimmed valid email address.',
+            },
+            phone: {
+                type: 'string',
+                minLength: 1,
+                example: '+8801712345678',
+                description: 'Trimmed; must not be blank.',
+            },
+        },
+    },
+    ClientContactUpdate: {
+        type: 'object',
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+            client: {
+                $ref: '#/components/schemas/ObjectId',
+            },
+            name: {
+                type: 'string',
+                minLength: 1,
+                example: 'Alex Smith',
+                description: 'Trimmed; must not be blank.',
+            },
+            role: {
+                type: 'string',
+                minLength: 1,
+                example: 'Site supervisor',
+                description:
+                    'Free-text contact role; not an account authorization role.',
+            },
+            email: {
+                type: 'string',
+                format: 'email',
+                example: 'alex@example.com',
+                description: 'Trimmed valid email address.',
+            },
+            phone: {
+                type: 'string',
+                minLength: 1,
+                example: '+8801712345678',
+                description: 'Trimmed; must not be blank.',
+            },
+        },
+    },
+    ClientContact: {
+        type: 'object',
+        properties: {
+            client: {
+                $ref: '#/components/schemas/ObjectId',
+            },
+            _id: {
+                $ref: '#/components/schemas/ObjectId',
+            },
+            name: {
+                type: 'string',
+                minLength: 1,
+                example: 'Alex Smith',
+                description: 'Trimmed; must not be blank.',
+            },
+            role: {
+                type: 'string',
+                minLength: 1,
+                example: 'Site supervisor',
+                description:
+                    'Free-text contact role; not an account authorization role.',
+            },
+            email: {
+                type: 'string',
+                format: 'email',
+                example: 'alex@example.com',
+                description: 'Trimmed valid email address.',
+            },
+            phone: {
+                type: 'string',
+                minLength: 1,
+                example: '+8801712345678',
+                description: 'Trimmed; must not be blank.',
+            },
+            createdAt: {
+                type: 'string',
+                format: 'date-time',
+            },
+            updatedAt: {
+                type: 'string',
+                format: 'date-time',
+            },
+        },
+    },
     ObjectId: {
         type: 'string',
         pattern: '^[a-fA-F0-9]{24}$',

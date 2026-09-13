@@ -1,5 +1,6 @@
 // Reviewed HTTP contracts; keep aligned with routes, controllers and services.
 import userPaths from './user.paths';
+import clientContactPaths from './client_contact.paths';
 const errors = {
     '400': {
         description: 'Invalid ID, model validation, or business rule failure.',
@@ -64,6 +65,7 @@ const errors = {
     },
 };
 const paths = {
+    ...clientContactPaths,
     ...userPaths,
     '/client/create-client': {
         post: {
@@ -2090,6 +2092,86 @@ const paths = {
                                         message: { type: 'string' },
                                         data: {
                                             $ref: '#/components/schemas/CleaningPlan',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/cleaning-plan/get-my-cleaning-plans': {
+        get: {
+            ...{
+                tags: ['Cleaning plans'],
+                summary: 'Get my cleaning plans',
+                operationId: 'getMyCleaningPlans',
+                description:
+                    'Pagination is nested under data.meta; records are under data.result. Returns only active plans belonging to the authenticated client. rooms, assigned_workers and additional_tasks are omitted from list results, replaced by total_room, total_assigned_worker and total_additional_task counts. Supports page, limit, searchTerm, sort and an optional location ObjectId filter. Other query keys are ignored; client ownership and active status cannot be overridden.\n\nRequired role: client.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['client'],
+                parameters: [
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across title, description.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: 'createdAt' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/CleaningPlan',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
                                         },
                                     },
                                     required: ['success', 'message'],
