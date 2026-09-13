@@ -420,7 +420,28 @@ export const uploadShiftTaskPhoto = async (
         );
     }
 
+    await maybeAutoCompleteShift(shift._id);
+
     return Shift.findById(shift._id);
+};
+
+/**
+ * If every task on the shift is now is_completed, auto-advances the shift's
+ * own status to 'completed' — atomically, and only from
+ * 'upcoming'/'in_progress' (never re-triggers, and never revives a cancelled
+ * shift). A shift with no tasks at all never auto-completes this way, since
+ * there's nothing to judge completion by.
+ */
+const maybeAutoCompleteShift = async (shiftId: Types.ObjectId) => {
+    const shift = await Shift.findById(shiftId).select('tasks status').lean();
+    if (!shift || !shift.tasks.length) return;
+    const allTasksCompleted = shift.tasks.every((t) => t.is_completed);
+    if (!allTasksCompleted) return;
+
+    await Shift.updateOne(
+        { _id: shiftId, status: { $in: ['upcoming', 'in_progress'] } },
+        { $set: { status: 'completed' } }
+    );
 };
 
 const GEOFENCE_RADIUS_METERS = 50;
@@ -515,6 +536,20 @@ export const checkInToShift = async (
     );
     if (!result) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
+    }
+
+    // The first check-in on the shift moves it out of "upcoming". Gated on
+    // the shift's CURRENT status (not just "any check-in happened") so a
+    // later worker checking in doesn't reopen an already completed/cancelled
+    // shift, and gated atomically (status: 'upcoming' in the filter) so two
+    // workers' first check-ins racing each other can't double-transition it.
+    if (result.status === 'upcoming') {
+        const updated = await Shift.findOneAndUpdate(
+            { _id: shift._id, status: 'upcoming' },
+            { $set: { status: 'in_progress' } },
+            { new: true }
+        );
+        if (updated) return updated;
     }
     return result;
 };

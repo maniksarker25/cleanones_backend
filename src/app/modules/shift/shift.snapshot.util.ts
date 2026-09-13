@@ -92,7 +92,6 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
             photo_requirements: photoRequirements,
             is_completed: isTaskAutoCompleted(t.is_photo_required, photoRequirements),
             completed_at: null,
-            status: 'UPCOMING' as const,
         };
     });
 
