@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
+import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
 import { Worker } from '../worker/worker.model';
@@ -103,6 +104,7 @@ const createCleaningPlanIntoDB = async (
     });
 
     await materializeTodayShiftIfDue(result._id);
+    await chatServices.createChatGroupForPlan(result);
 
     return result;
 };
@@ -175,6 +177,13 @@ const updateCleaningPlanIntoDB = async (
         await materializeTodayShiftIfDue(result._id);
     }
 
+    if (result && assigned_workers?.length) {
+        await chatServices.syncChatGroupWorkers(
+            result._id,
+            result.assigned_workers.map((aw) => aw.worker)
+        );
+    }
+
     return result;
 };
 
@@ -190,6 +199,9 @@ const deleteCleaningPlanFromDB = async (managerId: string, id: string) => {
         { is_active: false, last_updated_by: managerId },
         { new: true }
     );
+
+    await chatServices.deactivateChatGroupForPlan(id);
+
     return result;
 };
 
@@ -600,6 +612,10 @@ const assignWorkersToPlan = async (
 
     if (result) {
         await materializeTodayShiftIfDue(result._id);
+        await chatServices.syncChatGroupWorkers(
+            result._id,
+            result.assigned_workers.map((aw) => aw.worker)
+        );
     }
 
     return result;

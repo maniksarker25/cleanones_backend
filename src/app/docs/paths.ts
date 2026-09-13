@@ -3424,9 +3424,9 @@ const paths = {
                 summary: 'Add about-us',
                 operationId: 'postManageAddAboutUs',
                 description:
-                    'Creates or updates the first document. On the update branch the current service returns undefined, so data is omitted.\n\nRequired role: superAdmin.',
+                    'Creates or updates the first document. On the update branch the current service returns undefined, so data is omitted.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [],
                 requestBody: {
                     required: true,
@@ -3474,9 +3474,9 @@ const paths = {
                 tags: ['Website content'],
                 summary: 'Edit about-us',
                 operationId: 'patchManageEditAboutUsId',
-                description: 'Required role: superAdmin.',
+                description: 'Required role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -3539,9 +3539,9 @@ const paths = {
                 summary: 'Delete about-us',
                 operationId: 'deleteManageDeleteAboutUsId',
                 description:
-                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin.',
+                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -3651,9 +3651,9 @@ const paths = {
                 summary: 'Add privacy-policy',
                 operationId: 'postManageAddPrivacyPolicy',
                 description:
-                    'Creates or updates the first document. On the update branch the current service returns undefined, so data is omitted.\n\nRequired role: superAdmin.',
+                    'Creates or updates the first document. On the update branch the current service returns undefined, so data is omitted.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [],
                 requestBody: {
                     required: true,
@@ -3701,9 +3701,9 @@ const paths = {
                 tags: ['Website content'],
                 summary: 'Edit privacy-policy',
                 operationId: 'patchManageEditPrivacyPolicyId',
-                description: 'Required role: superAdmin.',
+                description: 'Required role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -3766,9 +3766,9 @@ const paths = {
                 summary: 'Delete privacy-policy',
                 operationId: 'deleteManageDeletePrivacyPolicyId',
                 description:
-                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin.',
+                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -3878,9 +3878,9 @@ const paths = {
                 summary: 'Add terms-conditions',
                 operationId: 'postManageAddTermsConditions',
                 description:
-                    'Creates or updates the first document. On the update branch the current service returns undefined, so data is omitted.\n\nRequired role: superAdmin.',
+                    'Creates or updates the first document. On the update branch the current service returns undefined, so data is omitted.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [],
                 requestBody: {
                     required: true,
@@ -3928,9 +3928,9 @@ const paths = {
                 tags: ['Website content'],
                 summary: 'Edit terms-conditions',
                 operationId: 'patchManageEditTermsConditionsId',
-                description: 'Required role: superAdmin.',
+                description: 'Required role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -3993,9 +3993,9 @@ const paths = {
                 summary: 'Delete terms-conditions',
                 operationId: 'deleteManageDeleteTermsConditionsId',
                 description:
-                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin.',
+                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -4105,9 +4105,9 @@ const paths = {
                 summary: 'Add partner',
                 operationId: 'postManageAddPartner',
                 description:
-                    'Creates or updates the first document. On the update branch the current service returns undefined, so data is omitted.\n\nRequired role: superAdmin.',
+                    'Creates or updates the first document. On the update branch the current service returns undefined, so data is omitted.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [],
                 requestBody: {
                     required: true,
@@ -4155,9 +4155,9 @@ const paths = {
                 tags: ['Website content'],
                 summary: 'Edit partner',
                 operationId: 'patchManageEditPartnerId',
-                description: 'Required role: superAdmin.',
+                description: 'Required role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -4220,9 +4220,9 @@ const paths = {
                 summary: 'Delete partner',
                 operationId: 'deleteManageDeletePartnerId',
                 description:
-                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin.',
+                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -4335,9 +4335,9 @@ const paths = {
                 tags: ['Website content'],
                 summary: 'Add contact-us',
                 operationId: 'postManageAddContactUs',
-                description: 'Required role: superAdmin.',
+                description: 'Required role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [],
                 requestBody: {
                     required: true,
@@ -4385,9 +4385,9 @@ const paths = {
                 tags: ['Website content'],
                 summary: 'Edit contact-us',
                 operationId: 'patchManageEditContactUsId',
-                description: 'Required role: superAdmin.',
+                description: 'Required role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -4454,9 +4454,9 @@ const paths = {
                 summary: 'Delete contact-us',
                 operationId: 'deleteManageDeleteContactUsId',
                 description:
-                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin.',
+                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -4544,9 +4544,9 @@ const paths = {
                 tags: ['Website content'],
                 summary: 'Add faq',
                 operationId: 'postManageAddFaq',
-                description: 'Required role: superAdmin.',
+                description: 'Required role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [],
                 requestBody: {
                     required: true,
@@ -4592,9 +4592,9 @@ const paths = {
                 tags: ['Website content'],
                 summary: 'Edit faq',
                 operationId: 'patchManageEditFaqId',
-                description: 'Required role: superAdmin.',
+                description: 'Required role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -4661,9 +4661,9 @@ const paths = {
                 summary: 'Delete faq',
                 operationId: 'deleteManageDeleteFaqId',
                 description:
-                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin.',
+                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -4752,9 +4752,9 @@ const paths = {
                 summary: 'Add slider',
                 operationId: 'postManageAddSlider',
                 description:
-                    'Multipart title and image file; stored image paths are returned by the existing local uploader.\n\nRequired role: superAdmin.',
+                    'Multipart title and image file; stored image paths are returned by the existing local uploader.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [],
                 requestBody: {
                     required: true,
@@ -4811,9 +4811,9 @@ const paths = {
                 summary: 'Edit slider',
                 operationId: 'patchManageEditSliderId',
                 description:
-                    'Multipart title and image file; stored image paths are returned by the existing local uploader.\n\nRequired role: superAdmin.',
+                    'Multipart title and image file; stored image paths are returned by the existing local uploader.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -4877,9 +4877,9 @@ const paths = {
                 summary: 'Delete slider',
                 operationId: 'deleteManageDeleteSliderId',
                 description:
-                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin.',
+                    'Permanently deletes the document and returns it.\n\nRequired role: superAdmin, admin, manager.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin'],
+                'x-roles': ['admin', 'manager', 'superAdmin'],
                 parameters: [
                     {
                         name: 'id',
@@ -6180,7 +6180,7 @@ const paths = {
             summary: 'My next shift',
             operationId: 'getShiftMyNextShift',
             description:
-                "Worker-only. The next upcoming shift strictly after now (status: 'upcoming', earliest date_time). Only considers already-materialized Shift documents — a future occurrence that hasn't been materialized yet (no manager action taken, nightly cron hasn't run) won't appear here until it is. Returns {} (empty object) when there is none.\n\nRequired role: worker.",
+                "Worker-only. The next upcoming shift strictly after now, whichever is sooner of: the nearest already-materialized Shift assigned to this worker, or the nearest not-yet-materialized occurrence projected from the recurrence patterns of this worker's currently assigned plans (up to a 90-day horizon). is_virtual: true marks a projected occurrence that has no Shift document yet (no check-in/photo actions are possible on it until it materializes, which happens automatically once its own day arrives). Returns {} (empty object) when there is none within the horizon.\n\nRequired role: worker.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['worker'],
             parameters: [],
