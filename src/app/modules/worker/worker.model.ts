@@ -60,6 +60,21 @@ const workerSchema = new Schema<TWorker>(
             type: Number,
             default: 25.0,
         },
+        total_earning: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        total_paid: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        pending_amount: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
         is_profile_completed: {
             type: Boolean,
             default: false,

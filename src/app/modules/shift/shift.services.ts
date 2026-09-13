@@ -1,5 +1,5 @@
 import httpStatus from 'http-status';
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import AppError from '../../error/appError';
 import {
     anyPatternOccursOnDate,
@@ -554,6 +554,8 @@ export const checkInToShift = async (
     return result;
 };
 
+const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
+
 export const checkOutFromShift = async (
     workerId: string,
     planId: string,
@@ -563,36 +565,85 @@ export const checkOutFromShift = async (
     const { shift, workerIndex } = await findAssignedShiftOrThrow(workerId, planId, date);
     assertWithinGeofence(shift, coordinates);
 
-    if (!shift.assigned_workers[workerIndex].check_in_at) {
+    const checkInAt = shift.assigned_workers[workerIndex].check_in_at;
+    if (!checkInAt) {
         throw new AppError(httpStatus.BAD_REQUEST, 'You have not checked in for this shift yet');
     }
     if (shift.assigned_workers[workerIndex].check_out_at) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked out for this shift');
     }
+    // Check-out is gated on the whole shift being completed (every task's
+    // required photos uploaded — see maybeAutoCompleteShift) — workers stay
+    // checked in until the actual cleaning work is done, then everyone
+    // checks out once the shift as a whole is finished.
+    if (shift.status !== 'completed') {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'This shift is not completed yet — finish all tasks before checking out'
+        );
+    }
 
-    const result = await Shift.findOneAndUpdate(
-        {
-            _id: shift._id,
-            assigned_workers: {
-                $elemMatch: {
-                    worker: workerId,
-                    check_in_at: { $ne: null },
-                    check_out_at: null,
+    const checkOutAt = new Date();
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const result = await Shift.findOneAndUpdate(
+            {
+                _id: shift._id,
+                status: 'completed',
+                assigned_workers: {
+                    $elemMatch: {
+                        worker: workerId,
+                        check_in_at: { $ne: null },
+                        check_out_at: null,
+                    },
                 },
             },
-        },
-        {
-            $set: {
-                'assigned_workers.$.check_out_at': new Date(),
-                'assigned_workers.$.check_out_coordinates': coordinates,
+            {
+                $set: {
+                    'assigned_workers.$.check_out_at': checkOutAt,
+                    'assigned_workers.$.check_out_coordinates': coordinates,
+                },
             },
-        },
-        { new: true }
-    );
-    if (!result) {
-        throw new AppError(httpStatus.BAD_REQUEST, 'Already checked out for this shift');
+            { new: true, session }
+        );
+        if (!result) {
+            throw new AppError(
+                httpStatus.BAD_REQUEST,
+                'Already checked out for this shift, or the shift is not completed yet'
+            );
+        }
+
+        const worker = await Worker.findById(workerId).session(session);
+        if (!worker) {
+            throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
+        }
+
+        const durationHours = Math.max(
+            0,
+            (checkOutAt.getTime() - checkInAt.getTime()) / 3_600_000
+        );
+        const earnedAmount = roundToTwoDecimals(
+            durationHours * worker.hourly_rate
+        );
+
+        await Worker.findByIdAndUpdate(
+            workerId,
+            { $inc: { total_earning: earnedAmount, pending_amount: earnedAmount } },
+            { session }
+        );
+
+        await session.commitTransaction();
+        session.endSession();
+
+        return result;
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        throw error;
     }
-    return result;
 };
 
 const shiftServices = {
