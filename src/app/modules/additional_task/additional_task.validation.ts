@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-const queryBoolean = z.enum(['true', 'false']).transform((value) => value === 'true').optional();
+const queryBoolean = z
+    .enum(['true', 'false'], {
+        errorMap: () => ({ message: 'Must be the string "true" or "false"' }),
+    })
+    .transform((value) => value === 'true')
+    .optional();
 export const additionalTaskListQuerySchema = z.object({
     planId: z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid planId').optional(),
     page: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),

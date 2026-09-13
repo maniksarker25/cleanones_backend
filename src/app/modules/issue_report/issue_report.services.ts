@@ -24,7 +24,7 @@ const ensureLocationExists = async (id: string) => {
 const createIssueReportIntoDB = async (payload: unknown) => {
     const body = issueReportBody.parse(payload);
     await ensureLocationExists(body.location);
-    return IssueReport.create({ ...body, isResolved: false });
+    return IssueReport.create({ ...body, status: 'PENDING' });
 };
 
 const updateIssueReportIntoDB = async (id: string, payload: unknown) => {

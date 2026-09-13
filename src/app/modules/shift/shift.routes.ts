@@ -9,6 +9,30 @@ const router = Router();
 
 router.get('/my-shifts', auth(USER_ROLE.worker), shiftController.listMyShifts);
 
+router.get(
+    '/my-active-shift',
+    auth(USER_ROLE.worker),
+    shiftController.getMyActiveShift
+);
+
+router.get(
+    '/my-today-meta',
+    auth(USER_ROLE.worker),
+    shiftController.getMyTodayMeta
+);
+
+router.get(
+    '/my-next-shift',
+    auth(USER_ROLE.worker),
+    shiftController.getMyNextShift
+);
+
+router.get(
+    '/my-live-status',
+    auth(USER_ROLE.client),
+    shiftController.getMyLiveStatus
+);
+
 router.get('/:planId', auth(USER_ROLE.manager), shiftController.listShifts);
 
 router.get(

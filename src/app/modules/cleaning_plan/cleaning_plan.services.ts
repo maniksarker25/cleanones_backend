@@ -3,6 +3,8 @@ import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
+import { Worker } from '../worker/worker.model';
+import { getOrCreateShift } from '../shift/shift.services';
 import {
     assertWorkersAssignable,
     computeMaxEstimatedDuration,
@@ -10,6 +12,27 @@ import {
 } from './cleaning_plan.availability.services';
 import { IAssignedWorker, ICleaningPlan } from './cleaning_plan.interface';
 import { CleaningPlan } from './cleaning_plan.model';
+
+/**
+ * Best-effort same-day materialization: if the plan (with its current rooms/
+ * tasks/workers) actually occurs today, create today's Shift right away
+ * instead of waiting for the midnight cron — so a plan created/assigned
+ * today can be checked into today. getOrCreateShift is idempotent (unique
+ * cleaning_plan+date index), so this is always safe to call. Errors (no
+ * occurrence today, inactive plan, etc.) are expected in the common case and
+ * must never fail the caller's create/update/assign request — the nightly
+ * cron remains the fallback that eventually materializes it regardless.
+ */
+const materializeTodayShiftIfDue = async (planId: Types.ObjectId | string) => {
+    try {
+        await getOrCreateShift(planId, new Date());
+    } catch (error) {
+        console.error(
+            `Same-day shift materialization skipped for plan ${planId}:`,
+            error
+        );
+    }
+};
 
 const ensureClientExists = async (clientId: string) => {
     const client = await Client.findOne({ _id: clientId, isDeleted: false });
@@ -78,6 +101,9 @@ const createCleaningPlanIntoDB = async (
         manager: managerId,
         last_updated_by: managerId,
     });
+
+    await materializeTodayShiftIfDue(result._id);
+
     return result;
 };
 
@@ -139,6 +165,16 @@ const updateCleaningPlanIntoDB = async (
         new: true,
         runValidators: true,
     });
+
+    // Only worth re-checking today's occurrence when something that affects
+    // it actually changed (rooms/tasks, workers, or the schedule itself).
+    if (
+        result &&
+        (rooms !== undefined || assigned_workers?.length || date_time !== undefined)
+    ) {
+        await materializeTodayShiftIfDue(result._id);
+    }
+
     return result;
 };
 
@@ -421,7 +457,7 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
         },
         {
             $lookup: {
-                from: 'workers',
+                from: Worker.collection.name,
                 localField: 'assigned_workers.worker',
                 foreignField: '_id',
                 as: '_workerDocs',
@@ -488,23 +524,7 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
                 localField: 'manager',
                 foreignField: '_id',
                 as: 'manager',
-                pipeline: [
-                    {
-                        $lookup: {
-                            from: 'users',
-                            localField: 'user',
-                            foreignField: '_id',
-                            as: 'user',
-                            pipeline: [{ $project: { password: 0 } }],
-                        },
-                    },
-                    {
-                        $unwind: {
-                            path: '$user',
-                            preserveNullAndEmptyArrays: true,
-                        },
-                    },
-                ],
+                pipeline: [{ $project: { user: 0 } }],
             },
         },
         {
@@ -519,23 +539,7 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
                 localField: 'last_updated_by',
                 foreignField: '_id',
                 as: 'last_updated_by',
-                pipeline: [
-                    {
-                        $lookup: {
-                            from: 'users',
-                            localField: 'user',
-                            foreignField: '_id',
-                            as: 'user',
-                            pipeline: [{ $project: { password: 0 } }],
-                        },
-                    },
-                    {
-                        $unwind: {
-                            path: '$user',
-                            preserveNullAndEmptyArrays: true,
-                        },
-                    },
-                ],
+                pipeline: [{ $project: { user: 0 } }],
             },
         },
         {
@@ -593,6 +597,11 @@ const assignWorkersToPlan = async (
         },
         { new: true, runValidators: true }
     );
+
+    if (result) {
+        await materializeTodayShiftIfDue(result._id);
+    }
+
     return result;
 };
 
