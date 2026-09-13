@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { issueReportRoutes } from '../modules/issue_report/issue_report.routes';
 import { AdminRoutes } from '../modules/admin/admin.routes';
 import { additionalTaskRoutes } from '../modules/additional_task/additional_task.routes';
 import { authRoutes } from '../modules/auth/auth.routes';
@@ -21,6 +22,10 @@ import { workerRoutes } from '../modules/worker/worker.routes';
 const router = Router();
 
 const moduleRoutes = [
+    {
+        path: '/issue-report',
+        router: issueReportRoutes,
+    },
     {
         path: '/client-contact',
         router: clientContactRoutes,

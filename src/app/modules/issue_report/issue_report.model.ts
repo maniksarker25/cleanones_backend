@@ -23,6 +23,10 @@ const issueReportSchema = new Schema<IIssueReport>(
             required: true,
             trim: true,
         },
+        isResolved: {
+            type: Boolean,
+            default: false,
+        },
     },
     {
         timestamps: true,
