@@ -2481,9 +2481,9 @@ const paths = {
                 summary: 'Create additional task',
                 operationId: 'postAdditionalTaskCreateAdditionalTask',
                 description:
-                    'The referenced cleaning plan must exist and be active. The new task ID is pushed onto the plan\'s additional_tasks array. is_completed and is_approved are forced to false.\n\nRequired role: client.',
+                    'The referenced cleaning plan must exist and be active. The new task ID is pushed onto the plan\'s additional_tasks array. is_completed is forced to false.\n\nRequired role: client or manager. Manager-created tasks are automatically approved (is_approved: true); client-created tasks require approval (is_approved: false). Approval is determined by the authenticated role and cannot be overridden by the request body.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['client'],
+                'x-roles': ['client', 'manager'],
                 parameters: [],
                 requestBody: {
                     required: true,
@@ -2500,9 +2500,43 @@ const paths = {
                 ...errors,
                 ...{
                     '201': {
-                        description: 'Additional task created.',
+                        description: 'Additional task created. Manager: automatically approved. Client: awaiting approval.',
                         content: {
                             'application/json': {
+                                examples: {
+                                    managerCreated: {
+                                        summary: 'Manager creates an approved task',
+                                        value: {
+                                            success: true,
+                                            message: 'Additional task created successfully',
+                                            data: {
+                                                _id: '507f1f77bcf86cd799439012',
+                                                cleaning_plan_id: '507f1f77bcf86cd799439011',
+                                                name: 'Clean entrance windows',
+                                                duration_minutes: 20,
+                                                date_time: '2026-09-13T09:00:00.000Z',
+                                                is_completed: false,
+                                                is_approved: true,
+                                            },
+                                        },
+                                    },
+                                    clientCreated: {
+                                        summary: 'Client creates a task awaiting approval',
+                                        value: {
+                                            success: true,
+                                            message: 'Additional task created successfully',
+                                            data: {
+                                                _id: '507f1f77bcf86cd799439012',
+                                                cleaning_plan_id: '507f1f77bcf86cd799439011',
+                                                name: 'Clean entrance windows',
+                                                duration_minutes: 20,
+                                                date_time: '2026-09-13T09:00:00.000Z',
+                                                is_completed: false,
+                                                is_approved: false,
+                                            },
+                                        },
+                                    },
+                                },
                                 schema: {
                                     type: 'object',
                                     properties: {
@@ -6125,9 +6159,9 @@ const paths = {
                 summary: 'Get one shift occurrence',
                 operationId: 'getShiftPlanIdDate',
                 description:
-                    'date is an ISO date (YYYY-MM-DD). Returns the materialized Shift if one exists, otherwise a virtual preview (is_virtual: true) computed from the plan\'s current state. 404 if the plan has no occurrence on that date.\n\nRequired role: manager.',
+                    'date is an ISO date (YYYY-MM-DD). Returns the materialized Shift if one exists, otherwise a virtual preview (is_virtual: true) computed from the plan\'s current state. 404 if the plan has no occurrence on that date. A worker caller is only allowed to view a shift they are actually in assigned_workers for — 403 otherwise; a manager may view any shift.\n\nRequired role: manager or worker.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['manager'],
+                'x-roles': ['manager', 'worker'],
                 parameters: [
                     {
                         name: 'planId',

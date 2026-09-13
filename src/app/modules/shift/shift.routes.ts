@@ -13,7 +13,7 @@ router.get('/:planId', auth(USER_ROLE.manager), shiftController.listShifts);
 
 router.get(
     '/:planId/:date',
-    auth(USER_ROLE.manager),
+    auth(USER_ROLE.manager, USER_ROLE.worker),
     shiftController.getShift
 );
 

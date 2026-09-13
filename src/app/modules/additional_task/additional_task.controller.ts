@@ -7,7 +7,7 @@ import additionalTaskServices from './additional_task.services';
 
 const createAdditionalTask = catchAsync(async (req, res) => {
     const result =
-        await additionalTaskServices.createAdditionalTaskIntoDB(req.body);
+        await additionalTaskServices.createAdditionalTaskIntoDB(req.body, req.user.role as string);
     sendResponse(res, {
         statusCode: httpStatus.CREATED,
         success: true,

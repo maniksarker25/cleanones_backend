@@ -125,14 +125,38 @@ export const getOrCreateShift = async (
  * Read-only preview for a single date: returns the materialized Shift if one
  * exists, otherwise builds an equivalent, unsaved shape from the plan's
  * current live state (`is_virtual: true`) — no DB write happens here.
+ *
+ * `requestingWorkerId` is an ownership gate: when provided (the caller is a
+ * worker, not a manager), the shift/preview is only returned if that worker
+ * is actually in `assigned_workers` — otherwise 403, regardless of whether
+ * the shift is real or virtual. Omitted entirely for manager calls, which
+ * can view any shift.
  */
-export const getShiftForDate = async (planId: string, date: Date) => {
+export const getShiftForDate = async (
+    planId: string,
+    date: Date,
+    requestingWorkerId?: string
+) => {
     const day = normalizeToUTCDateOnly(date);
     const existing = await Shift.findOne({ cleaning_plan: planId, date: day }).lean();
-    if (existing) return { ...existing, is_virtual: false };
+    const result = existing
+        ? { ...existing, is_virtual: false }
+        : await buildVirtualShift(await ensureActivePlan(planId), day);
 
-    const plan = await ensureActivePlan(planId);
-    return buildVirtualShift(plan, day);
+    if (
+        result &&
+        requestingWorkerId &&
+        !result.assigned_workers.some(
+            (aw) => aw.worker.toString() === requestingWorkerId
+        )
+    ) {
+        throw new AppError(
+            httpStatus.FORBIDDEN,
+            'You are not assigned to this shift'
+        );
+    }
+
+    return result;
 };
 
 /**
@@ -471,8 +495,16 @@ export const checkInToShift = async (
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
     }
 
-    return Shift.findOneAndUpdate(
-        { _id: shift._id, 'assigned_workers.worker': workerId },
+    // $elemMatch ties both conditions to the SAME array entry (a plain
+    // dot-path pair on an array can match across different elements) and
+    // makes the "not already checked in" check part of the atomic write
+    // itself — not just the read above — so two concurrent check-ins from
+    // the same worker can never both succeed.
+    const result = await Shift.findOneAndUpdate(
+        {
+            _id: shift._id,
+            assigned_workers: { $elemMatch: { worker: workerId, check_in_at: null } },
+        },
         {
             $set: {
                 'assigned_workers.$.check_in_at': new Date(),
@@ -481,6 +513,10 @@ export const checkInToShift = async (
         },
         { new: true }
     );
+    if (!result) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
+    }
+    return result;
 };
 
 export const checkOutFromShift = async (
@@ -499,8 +535,17 @@ export const checkOutFromShift = async (
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked out for this shift');
     }
 
-    return Shift.findOneAndUpdate(
-        { _id: shift._id, 'assigned_workers.worker': workerId },
+    const result = await Shift.findOneAndUpdate(
+        {
+            _id: shift._id,
+            assigned_workers: {
+                $elemMatch: {
+                    worker: workerId,
+                    check_in_at: { $ne: null },
+                    check_out_at: null,
+                },
+            },
+        },
         {
             $set: {
                 'assigned_workers.$.check_out_at': new Date(),
@@ -509,6 +554,10 @@ export const checkOutFromShift = async (
         },
         { new: true }
     );
+    if (!result) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Already checked out for this shift');
+    }
+    return result;
 };
 
 const shiftServices = {

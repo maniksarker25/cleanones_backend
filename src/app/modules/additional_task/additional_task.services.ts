@@ -17,7 +17,8 @@ const ensureCleaningPlanExists = async (planId: string) => {
 // ─── Create (Client) ──────────────────────────────────────────────────────────
 
 const createAdditionalTaskIntoDB = async (
-    payload: Omit<IAdditionalTask, 'is_completed' | 'is_approved'>
+    payload: Omit<IAdditionalTask, 'is_completed' | 'is_approved'>,
+    requesterRole: string
 ) => {
     const plan = await ensureCleaningPlanExists(
         payload.cleaning_plan_id.toString()
@@ -26,7 +27,7 @@ const createAdditionalTaskIntoDB = async (
     const task = await AdditionalTask.create({
         ...payload,
         is_completed: false,
-        is_approved: false,
+        is_approved: requesterRole === USER_ROLE.manager,
     });
 
     // push the new task id into the cleaning plan's additional_tasks array

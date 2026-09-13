@@ -1026,7 +1026,7 @@ const schemas = {
             'date_time',
         ],
         description:
-            'Client-created; the cleaning plan must exist and be active. is_completed and is_approved default to false and cannot be set on create.',
+            'Clients and managers can create tasks; the cleaning plan must exist and be active. is_completed is false. is_approved is true for managers and false for clients, determined by the authenticated role rather than the request body.',
     },
     AdditionalTaskUpdate: {
         type: 'object',
