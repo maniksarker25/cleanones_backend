@@ -1,11 +1,10 @@
 import { Schema, model } from 'mongoose';
 import { TTask } from './task.interface';
 
+// Template only — no photo_url/is_uploaded here, see task.interface.ts.
 const photoRequirementSchema = new Schema(
     {
         title: { type: String, required: true, trim: true },
-        photo_url: { type: String, default: null },
-        is_uploaded: { type: Boolean, default: false },
     },
     { _id: false }
 );

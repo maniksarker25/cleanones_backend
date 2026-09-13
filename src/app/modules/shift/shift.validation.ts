@@ -24,6 +24,16 @@ const updateStatusValidationSchema = z.object({
     }),
 });
 
+const uploadTaskPhotoValidationSchema = z.object({
+    body: z.object({
+        title: z.string({ required_error: 'title is required' }).min(1).trim(),
+        photo_url: z
+            .string({ required_error: 'photo_url is required' })
+            .min(1)
+            .trim(),
+    }),
+});
+
 const shiftValidations = {
     workerShiftsQuery: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use YYYY-MM-DD').refine(
@@ -36,6 +46,7 @@ const shiftValidations = {
     }).strict(),
     assignWorkersValidationSchema,
     updateStatusValidationSchema,
+    uploadTaskPhotoValidationSchema,
 };
 
 export default shiftValidations;

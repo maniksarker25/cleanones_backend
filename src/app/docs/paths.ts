@@ -6350,5 +6350,92 @@ const paths = {
             },
         },
     },
+    '/shift/{planId}/{date}/tasks/{taskId}/photo': {
+        patch: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Upload a required photo for one shift task',
+                operationId: 'patchShiftPlanIdDateTasksTaskIdPhoto',
+                description:
+                    'Materializes the shift for this date first if it does not exist yet. title must match one of that task instance\'s photo_requirements titles (frozen at materialization time) or this returns 400. Only a worker assigned to this shift may upload. is_completed on the task entry is recomputed automatically once every required photo is uploaded — there is no manual complete/approve step. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['worker'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'date',
+                        in: 'path',
+                        required: true,
+                        description: 'ISO date (YYYY-MM-DD).',
+                        schema: { type: 'string', format: 'date' },
+                    },
+                    {
+                        name: 'taskId',
+                        in: 'path',
+                        required: true,
+                        description:
+                            "The source Task's identifier (matches tasks[].task on the shift).",
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    title: {
+                                        type: 'string',
+                                        description:
+                                            'Must match one of this task instance\'s photo_requirements titles.',
+                                    },
+                                    photo_url: {
+                                        type: 'string',
+                                        description:
+                                            'URL of the already-uploaded file (upload the file via the file module first, then submit its URL here).',
+                                    },
+                                },
+                                required: ['title', 'photo_url'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Shift',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
 };
 export default paths;

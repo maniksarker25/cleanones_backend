@@ -32,10 +32,11 @@ const frequencyFieldsRefinement = (
     }
 };
 
+// Template only — a Task just declares which photos are required (title).
+// Upload state (photo_url/is_uploaded) is per-occurrence and lives on the
+// Shift's own task-instance snapshot instead.
 const photoRequirementSchema = z.object({
     title: z.string().min(1, 'Photo title is required').trim(),
-    photo_url: z.string().nullable().optional(),
-    is_uploaded: z.boolean().optional(),
 });
 
 const createTaskValidationSchema = z.object({

@@ -8,7 +8,7 @@ A `CleaningPlan` is a *definition*: "these rooms, these default workers, recurri
 
 Two needs drove this:
 - **Per-day worker swaps.** A manager needs to replace one worker for a single day (someone's sick) without touching the recurring plan or affecting any other occurrence.
-- **Per-occurrence state.** Eventually: check-in, completion, photos, status — all naturally per-day, not per-plan.
+- **Per-occurrence state.** Photo submissions, task completion, and status — all naturally per-day, not per-plan (see §9–10).
 
 ## 2. Materialize lazily, not exhaustively
 
@@ -37,7 +37,11 @@ The `{cleaning_plan: 1, date: 1}` **unique index** is what makes this safe under
 
 ## 4. Snapshotting, not live-referencing
 
-When a Shift materializes, it copies `rooms`, `duration_minutes`, and `assigned_workers` from the plan **at that instant** rather than storing a reference back to the plan and reading those fields live forever. This means a plan edit made *after* a shift already exists doesn't retroactively change that shift — which matters most once a shift has started or completed (you don't want a plan-level edit next month silently rewriting what actually happened on a past occurrence). Only occurrences that haven't materialized yet pick up plan changes automatically, because they're still virtual and computed fresh at read time.
+When a Shift materializes, it copies `rooms`, `tasks`, `duration_minutes`, and `assigned_workers` from the plan **at that instant** rather than storing a reference back to the plan/room/task/worker documents and reading those fields live forever. This means an edit made *after* a shift already exists — renaming a room, changing a task's required photos, correcting a worker's name — doesn't retroactively change that shift. This matters most once a shift has started or completed: you don't want a plan-level edit next month silently rewriting what a worker was actually asked to do, or who actually did it, on a past occurrence. Only occurrences that haven't materialized yet pick up plan/room/task/worker changes automatically, because they're still virtual and computed fresh at read time.
+
+`room`/`task`/`worker` ObjectId fields are still kept inside each snapshot entry, but purely for **traceability** (so an audit can trace a shift's task instance back to the Task it came from) — nothing in the system ever re-derives a shift's displayed content by populating them. The frozen `name`/`room_type`/`photo_requirements` fields are always authoritative for what that shift actually shows.
+
+This same reasoning extends to `assigned_workers`: each entry snapshots the worker's `name` at assignment time (not just their `worker` ObjectId), so a later profile edit or deactivation can't retroactively change who a historical shift says worked that day.
 
 ## 5. Per-shift worker reassignment and conflict checking
 
@@ -58,10 +62,38 @@ Every shift starts with `assigned_workers` equal to the plan's default (auto-inh
 
 ## 7. Status
 
-`status` (`upcoming` / `in_progress` / `completed` / `cancelled`) exists on the Shift now as a foundation for the operational side (worker check-in, completion tracking) that naturally belongs per-occurrence rather than per-plan. There's currently no enforced transition workflow — any status can be set at any time — that's an intentional simplification left open for whenever check-in/completion flows are actually built on top of this.
+`status` (`upcoming` / `in_progress` / `completed` / `cancelled`) exists on the Shift as a foundation for the operational side that naturally belongs per-occurrence rather than per-plan. There's currently no enforced transition workflow — any status can be set at any time — that's an intentional simplification left open for whenever a stricter check-in workflow is needed.
 
-## 8. Worker daily schedule
+## 8. Tasks: from recurring template to per-occurrence instance
+
+A `Task` (attached to a Room) declares *what* recurs and *what photos are required*, but it's a single shared document across every occurrence it produces — every Monday's cleaning of that room is the same `Task` row. It therefore cannot hold per-day state like "was the before-photo uploaded this Monday." So `Task.photo_requirements` is deliberately a **template only** — just `{ title }`, nothing about upload state.
+
+When a Shift materializes, each active Task on its rooms becomes its own entry in `Shift.tasks[]` — a fresh, independent instance for that specific day: the task's `name`/`duration_minutes`/`is_photo_required` are snapshotted, and `photo_requirements` is rebuilt from the Task's title list with `photo_url: null, is_uploaded: false` for every title, regardless of what any other day's shift for the same Task looked like. Each `IShiftTask` also snapshots its `room` directly (not just `task`), so a shift's tasks can be grouped/filtered by room without a join back through the Task collection.
+
+## 9. Photo submission and automatic completion
+
+A worker uploads a photo via `PATCH /shift/:planId/:date/tasks/:taskId/photo` with `{ title, photo_url }` (the file itself is uploaded separately through the generic file-upload module first; this endpoint just records the resulting URL). The call:
+
+1. Materializes the shift if it's still virtual (via `getOrCreateShift` — the same single write path as every other shift mutation).
+2. Verifies the calling worker is actually in that shift's `assigned_workers` — a worker can only submit photos for a shift they're assigned to.
+3. Finds the matching `photo_requirements` entry by exact `title` match within that task instance; an unrecognized title is a `400`, not silently ignored.
+4. Writes `photo_url`/`is_uploaded` atomically via a MongoDB array-filter update (`tasks.$[t].photo_requirements.$[p]`) — targeted at the exact nested entry, so concurrent uploads to *different* photo slots on the same shift never clobber each other.
+5. Re-reads the task instance and recomputes `is_completed`: `true` once every `photo_requirements` entry has `is_uploaded: true` (or immediately, if `is_photo_required` is `false` — nothing is gating it). `completed_at` is set the moment it flips to `true`.
+
+Separately, each task instance also carries its own `status` (`UPCOMING` / `IN_PROGRESS` / `COMPLETED`), always starting at `UPCOMING` when materialized — independent of `is_completed`. There is no endpoint or automatic logic transitioning it yet; it's a placeholder field for a workflow to be defined later.
+
+**There is no manual "mark complete" action and no manager approval step.** This was a deliberate simplification: the team works together on a shift without needing per-person task accounting (see §10), and requiring a manager to individually approve every task on every shift would add review overhead without a corresponding business need right now. If review/approval is needed later, it can be layered on top of this `tasks[]` structure (e.g. an `is_approved` flag) without changing how photos are recorded.
+
+## 10. No per-task worker assignment
+
+`IShiftTask` intentionally has no `assigned_to` field. The whole team listed in a shift's `assigned_workers` works the shift together — any of them can upload a photo for any task on any room in that shift. This was a deliberate simplification over per-task/per-room worker assignment (e.g. "worker X only handles Room A"): the latter would need its own conflict/validation rules and isn't needed unless a team actually splits up by room, which isn't the current operating model. If that need arises, an optional `assigned_to: ObjectId` could be added to `IShiftTask` without disturbing anything else here.
+
+## 11. Worker daily schedule
 
 `GET /api/v1/shift/my-shifts?date=YYYY-MM-DD` lists the authenticated worker's assignments across plans for one UTC calendar date. It merges saved shifts with virtual occurrences from active, non-completed plans, preserving the read-only behavior above. Saved shifts remain visible when assigned to the worker even if the parent plan is now inactive or completed; cancelled shifts are included with their status.
 
 Before generating virtual entries, the service checks for saved occurrences of every candidate plan, including shifts where the worker is no longer assigned. Any saved occurrence suppresses the plan's virtual fallback, so a manager's per-day worker removal cannot be undone by the default plan assignment. Results are sorted by start time, with plan ID breaking ties. Existing worker/date and plan/date indexes support the lookup; no model changes are required.
+
+## 12. One snapshot builder, reused everywhere
+
+A shift's content (`rooms`, `tasks`, `assigned_workers`, `duration_minutes`, and the recurrence patterns used to decide whether a plan occurs on a given date) is built in exactly one place — `buildShiftSnapshot(plan)` — from a single batched fetch (Rooms, active Tasks, Workers, each queried once in parallel rather than the patterns and duration being computed via separate redundant queries as in an earlier version of this design). Every call site that needs to know "what would this plan's occurrence look like" — `getOrCreateShift`, the single-date and range preview reads, and the worker's `my-shifts` virtual fallback — calls this same function. This is what guarantees a virtual preview and the shift that eventually materializes from it are always built identically; there's no second implementation that could quietly drift out of sync.

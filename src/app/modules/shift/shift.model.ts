@@ -1,9 +1,47 @@
 import { Schema, model } from 'mongoose';
 import { IShift } from './shift.interface';
 
-const assignedWorkerSchema = new Schema(
+const photoRequirementSchema = new Schema(
+    {
+        title: { type: String, required: true, trim: true },
+        photo_url: { type: String, default: null },
+        is_uploaded: { type: Boolean, default: false },
+    },
+    { _id: false }
+);
+
+const shiftRoomSchema = new Schema(
+    {
+        room: { type: Schema.Types.ObjectId, ref: 'Room', required: true },
+        name: { type: String, required: true },
+        room_type: { type: String, required: true },
+    },
+    { _id: false }
+);
+
+const shiftTaskSchema = new Schema(
+    {
+        task: { type: Schema.Types.ObjectId, ref: 'Task', required: true },
+        room: { type: Schema.Types.ObjectId, ref: 'Room', required: true },
+        name: { type: String, required: true },
+        duration_minutes: { type: Number, default: 0, min: 0 },
+        is_photo_required: { type: Boolean, default: false },
+        photo_requirements: { type: [photoRequirementSchema], default: [] },
+        is_completed: { type: Boolean, default: false },
+        completed_at: { type: Date, default: null },
+        status: {
+            type: String,
+            enum: ['UPCOMING', 'IN_PROGRESS', 'COMPLETED'],
+            default: 'UPCOMING',
+        },
+    },
+    { _id: false }
+);
+
+const shiftAssignedWorkerSchema = new Schema(
     {
         worker: { type: Schema.Types.ObjectId, ref: 'Worker', required: true },
+        name: { type: String, required: true },
         role: {
             type: String,
             enum: ['Team leader', 'Co-leader', 'Normal worker'],
@@ -31,8 +69,11 @@ const shiftSchema = new Schema<IShift>(
             required: true,
         },
         rooms: {
-            type: [Schema.Types.ObjectId],
-            ref: 'Room',
+            type: [shiftRoomSchema],
+            default: [],
+        },
+        tasks: {
+            type: [shiftTaskSchema],
             default: [],
         },
         duration_minutes: {
@@ -41,7 +82,7 @@ const shiftSchema = new Schema<IShift>(
             min: 0,
         },
         assigned_workers: {
-            type: [assignedWorkerSchema],
+            type: [shiftAssignedWorkerSchema],
             default: [],
         },
         is_worker_overridden: {
