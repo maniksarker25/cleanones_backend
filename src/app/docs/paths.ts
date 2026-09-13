@@ -2743,6 +2743,17 @@ const paths = {
                 'x-roles': ['manager', 'client'],
                 parameters: [
                     {
+                        name: 'is_approved',
+                        in: 'query',
+                        required: false,
+                        description: 'Send true for approved tasks or false for tasks not approved. Omit to include both. Strings are converted to booleans; invalid values return 400.',
+                        schema: { type: 'string', enum: ['true', 'false'] },
+                        examples: {
+                            approved: { value: 'true' },
+                            notApproved: { value: 'false' },
+                        },
+                    },
+                    {
                         name: 'planId',
                         in: 'query',
                         required: false,
@@ -6079,6 +6090,151 @@ const paths = {
                                     success: { type: 'boolean', enum: [true] },
                                     message: { type: 'string', example: 'Shifts retrieved successfully' },
                                     data: { type: 'array', items: { $ref: '#/components/schemas/Shift' } },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/my-active-shift': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'My active shift',
+            operationId: 'getShiftMyActiveShift',
+            description:
+                "Worker-only. The worker's current shift: status in_progress AND this worker is personally still checked in (their own check_in_at set, check_out_at null) — not just assigned to some in-progress shift, since other workers on it may still be working after this one left. Returns {} (empty object) when there isn't one.\n\nRequired role: worker.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['worker'],
+            parameters: [],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'The active shift, or {} when none.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Active shift retrieved successfully' },
+                                    data: {
+                                        oneOf: [
+                                            { $ref: '#/components/schemas/ShiftWithProgress' },
+                                            { type: 'object', properties: {}, additionalProperties: false, description: 'Empty object when no active shift.' },
+                                        ],
+                                    },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/my-today-meta': {
+        get: {
+            tags: ['Shifts'],
+            summary: "My today's shift counts",
+            operationId: 'getShiftMyTodayMeta',
+            description:
+                "Worker-only. Counters for today's shifts (saved + virtual occurrences, same universe as /shift/my-shifts): total_shift, completed, and pending (total_shift - completed; covers upcoming/in_progress/cancelled alike).\n\nRequired role: worker.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['worker'],
+            parameters: [],
+            responses: {
+                ...errors,
+                '200': {
+                    description: "Today's shift counters.",
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: "Today's shift metadata retrieved successfully" },
+                                    data: {
+                                        type: 'object',
+                                        properties: {
+                                            total_shift: { type: 'integer' },
+                                            completed: { type: 'integer' },
+                                            pending: { type: 'integer' },
+                                        },
+                                        required: ['total_shift', 'completed', 'pending'],
+                                    },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/my-next-shift': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'My next shift',
+            operationId: 'getShiftMyNextShift',
+            description:
+                "Worker-only. The next upcoming shift strictly after now (status: 'upcoming', earliest date_time). Only considers already-materialized Shift documents — a future occurrence that hasn't been materialized yet (no manager action taken, nightly cron hasn't run) won't appear here until it is. Returns {} (empty object) when there is none.\n\nRequired role: worker.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['worker'],
+            parameters: [],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'The next shift, or {} when none.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Next shift retrieved successfully' },
+                                    data: {
+                                        oneOf: [
+                                            { $ref: '#/components/schemas/ShiftSummary' },
+                                            { type: 'object', properties: {}, additionalProperties: false, description: 'Empty object when no next shift.' },
+                                        ],
+                                    },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/my-live-status': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'My live shift status',
+            operationId: 'getShiftMyLiveStatus',
+            description:
+                "Client-only. Every in_progress shift across all of this client's active cleaning plans, each with room-level and overall completion progress computed live (never cached/stored). Overall progress is the average of each room's progress, not a raw task count across the whole shift. tasks[] is intentionally omitted from the response — use the manager/worker shift-detail endpoints for full per-task detail.\n\nRequired role: client.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['client'],
+            parameters: [],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'In-progress shifts, or an empty array when none are active right now.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Live shift status retrieved successfully' },
+                                    data: {
+                                        type: 'array',
+                                        items: { $ref: '#/components/schemas/ShiftLiveStatus' },
+                                    },
                                 },
                                 required: ['success', 'message', 'data'],
                             },

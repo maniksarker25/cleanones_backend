@@ -100,7 +100,8 @@ const getAllAdditionalTasksByPlanFromDB = async (
 ) => {
     const parsed = additionalTaskListQuerySchema.safeParse(query);
     if (!parsed.success) {
-        throw new AppError(httpStatus.BAD_REQUEST, parsed.error.issues[0].message);
+        const issue = parsed.error.issues[0];
+        throw new AppError(httpStatus.BAD_REQUEST, `${issue.path.join('.')}: ${issue.message}`);
     }
     const { planId, searchTerm, sort } = parsed.data;
     const filters: Record<string, unknown> = {};

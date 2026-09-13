@@ -232,7 +232,58 @@ Returns only locations belonging to the logged-in client.
 
 ---
 
-## 6. Additional task requests — "ask for extra work"
+## 6. Live shift status — "what's happening right now"
+
+### `GET /shift/my-live-status`
+
+Returns every currently `in_progress` shift across all of the client's active cleaning plans, with progress computed live on every request (not cached). No query params.
+
+**Response `data[]` item**
+```json
+{
+  "_id": "6aa6933cfd0491c628aeec00",
+  "cleaning_plan": "6aa6933cfd0491c628aeebf6",
+  "date": "2026-09-13T00:00:00.000Z",
+  "date_time": "2026-09-13T12:32:43.000Z",
+  "status": "in_progress",
+  "location": {
+    "location": "5eed20260913000300000005",
+    "name": "Demo Cedar Offices — Annex Building",
+    "coordinates": { "type": "Point", "coordinates": [90.401, 23.802] }
+  },
+  "duration_minutes": 90,
+  "assigned_workers": [
+    {
+      "worker": "6aa6913e7e11d72ff0d891da",
+      "name": "Top Manager Test Worker",
+      "role": "Normal worker",
+      "check_in_at": "2026-09-13T12:35:00.000Z",
+      "check_out_at": null
+    }
+  ],
+  "total_room": 1,
+  "total_task": 3,
+  "overall_progress_percent": 33,
+  "rooms": [
+    {
+      "room": "5eed20260913000400000010",
+      "name": "Meeting Room",
+      "room_type": "meeting",
+      "total_task": 3,
+      "completed_task": 1,
+      "progress_percent": 33
+    }
+  ]
+}
+```
+
+`overall_progress_percent` is the **average of each room's `progress_percent`**, not a raw completed/total task count across the whole shift — a shift with one 10-task room and one 1-task room weighs both rooms equally. Each room's `progress_percent` is `completed_task / total_task` for that room, rounded to the nearest integer (`0` if the room has no tasks). The full per-task detail (photo upload status, etc.) is **not** included here — this endpoint is a summary view only.
+
+An empty array means the client has no shift currently in progress (nothing checked in and not yet completed).
+
+---
+
+## 7. Additional task requests — "ask for extra work"
 
 This is how a client requests one-off work beyond the standard recurring tasks above, tied to a **cleaning plan** (a manager-scheduled cleaning run at one of the client's locations).
 
@@ -271,7 +322,7 @@ Returns one additional task document (same shape as the create response).
 
 ---
 
-## 7. Notifications
+## 8. Notifications
 
 ### `GET /notification/get-notifications`
 
@@ -300,6 +351,7 @@ Deletes one notification belonging to the client.
 | GET | `/location/my-locations` | My locations |
 | GET | `/room/my-rooms/{locationId}` | Rooms at one of my locations |
 | GET | `/task/my-tasks/{roomId}` | Recurring tasks in one of my rooms |
+| GET | `/shift/my-live-status` | Live progress of in-progress shifts |
 | POST | `/additional-task/create-additional-task` | Request extra work |
 | PATCH | `/additional-task/update-additional-task/{id}` | Edit my request |
 | DELETE | `/additional-task/delete-additional-task/{id}` | Cancel my request |

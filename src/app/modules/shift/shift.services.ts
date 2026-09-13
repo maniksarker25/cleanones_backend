@@ -251,6 +251,130 @@ export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
 };
 
 /**
+ * Per-room progress = completed tasks in that room / total tasks in that
+ * room. Overall shift progress = average of the rooms' progress (not a raw
+ * task count across the whole shift), so one large room doesn't drown out a
+ * small one. completed_room counts rooms at 100% — useful for an "X/Y rooms"
+ * style summary. Keeps `tasks` in the result; callers that don't want the
+ * full per-task detail (e.g. the client live-status list) strip it themselves.
+ */
+const attachProgress = (shift: IShift & { _id: Types.ObjectId }) => {
+    const rooms = shift.rooms.map((room) => {
+        const roomTasks = shift.tasks.filter(
+            (t) => t.room.toString() === room.room.toString()
+        );
+        const completedTask = roomTasks.filter((t) => t.is_completed).length;
+        const totalTask = roomTasks.length;
+        return {
+            ...room,
+            total_task: totalTask,
+            completed_task: completedTask,
+            progress_percent: totalTask
+                ? Math.round((completedTask / totalTask) * 100)
+                : 0,
+        };
+    });
+
+    const overallProgressPercent = rooms.length
+        ? Math.round(
+              rooms.reduce((sum, r) => sum + r.progress_percent, 0) / rooms.length
+          )
+        : 0;
+
+    return {
+        ...shift,
+        rooms,
+        total_room: shift.rooms.length,
+        completed_room: rooms.filter((r) => r.progress_percent === 100).length,
+        total_task: shift.tasks.length,
+        overall_progress_percent: overallProgressPercent,
+    };
+};
+
+/**
+ * Client-facing "what's happening right now": every in_progress shift across
+ * all of this client's active cleaning plans, each with room-level and
+ * overall completion progress computed live (never cached/stored). Full
+ * per-task detail is intentionally omitted — this is a summary view.
+ */
+export const getClientLiveShiftsFromDB = async (clientId: string) => {
+    const planIds = await CleaningPlan.find({
+        client: clientId,
+        is_active: true,
+    }).distinct('_id');
+
+    const shifts = await Shift.find({
+        cleaning_plan: { $in: planIds },
+        status: 'in_progress',
+    }).lean();
+
+    return shifts.map((shift) => {
+        const { tasks, ...withoutTasks } = attachProgress(shift);
+        return withoutTasks;
+    });
+};
+
+/**
+ * Worker's own current shift: status in_progress AND this specific worker is
+ * still personally checked in (their own check_in_at set, check_out_at
+ * null) — not just "assigned to some in-progress shift", since other
+ * workers on the same shift may still be working after this one left.
+ * Returns {} when there isn't one, per the dashboard's "no active shift" state.
+ */
+export const getActiveShiftForWorker = async (workerId: string) => {
+    const shift = await Shift.findOne({
+        status: 'in_progress',
+        assigned_workers: {
+            $elemMatch: {
+                worker: workerId,
+                check_in_at: { $ne: null },
+                check_out_at: null,
+            },
+        },
+    }).lean();
+
+    if (!shift) return {};
+    const { tasks, rooms, assigned_workers, ...rest } = attachProgress(shift);
+    return rest;
+};
+
+/**
+ * Today's shift counters for the worker's dashboard: total (saved + virtual
+ * occurrences, same as /shift/my-shifts), completed, and pending (today's
+ * total minus completed — includes upcoming/in_progress/cancelled alike).
+ */
+export const getWorkerTodayMetaFromDB = async (workerId: string) => {
+    const shifts = await listWorkerShiftsForDate(workerId, new Date());
+    const total = shifts.length;
+    const completed = shifts.filter((s) => s.status === 'completed').length;
+    return {
+        total_shift: total,
+        completed,
+        pending: total - completed,
+    };
+};
+
+/**
+ * The worker's next upcoming shift, strictly after now. Only considers
+ * already-materialized Shift documents (status: 'upcoming') — a future
+ * occurrence that hasn't been materialized yet (no manager action, cron
+ * hasn't run) won't show up here until it is. Returns {} when there is none.
+ */
+export const getNextShiftForWorker = async (workerId: string) => {
+    const shift = await Shift.findOne({
+        'assigned_workers.worker': workerId,
+        status: 'upcoming',
+        date_time: { $gt: new Date() },
+    })
+        .sort({ date_time: 1 })
+        .lean();
+
+    if (!shift) return {};
+    const { tasks, rooms, assigned_workers, ...rest } = shift;
+    return rest;
+};
+
+/**
  * Reassigns workers for one specific occurrence only, materializing the
  * shift first if it doesn't exist yet. Mirrors the plan-level assignment
  * rules: ineligible workers are always rejected; scheduling conflicts are
@@ -651,6 +775,10 @@ const shiftServices = {
     getOrCreateShift,
     getShiftForDate,
     listShiftsInRange,
+    getClientLiveShiftsFromDB,
+    getActiveShiftForWorker,
+    getWorkerTodayMetaFromDB,
+    getNextShiftForWorker,
     assignWorkersToShift,
     updateShiftStatus,
     uploadShiftTaskPhoto,

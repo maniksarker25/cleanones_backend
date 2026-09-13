@@ -59,8 +59,13 @@ const schemas = {
                 "minLength": 1,
                 "example": "The floor scrubber is leaking."
             },
-            "isResolved": {
-                "type": "boolean"
+            "status": {
+                "type": "string",
+                "enum": [
+                    "PENDING",
+                    "IN_PROGRESS",
+                    "RESOLVED"
+                ]
             }
         }
     },
@@ -91,9 +96,14 @@ const schemas = {
                 "minLength": 1,
                 "example": "The floor scrubber is leaking."
             },
-            "isResolved": {
-                "type": "boolean",
-                "default": false
+            "status": {
+                "type": "string",
+                "enum": [
+                    "PENDING",
+                    "IN_PROGRESS",
+                    "RESOLVED"
+                ],
+                "default": "PENDING"
             },
             "createdAt": {
                 "type": "string",
@@ -2691,6 +2701,208 @@ const schemas = {
         },
         description:
             'A single-day occurrence of a CleaningPlan, derived from the recurrence of the active Tasks on its rooms. See docs/SHIFT_MANAGEMENT_DESIGN.md.',
+    },
+    ShiftLiveStatus: {
+        type: 'object',
+        properties: {
+            _id: {
+                type: 'string',
+                pattern: '^[a-fA-F0-9]{24}$',
+                example: '507f1f77bcf86cd799439011',
+            },
+            cleaning_plan: {
+                $ref: '#/components/schemas/ObjectId',
+            },
+            date: {
+                type: 'string',
+                format: 'date-time',
+            },
+            date_time: {
+                type: 'string',
+                format: 'date-time',
+            },
+            location: {
+                type: 'object',
+                properties: {
+                    location: { $ref: '#/components/schemas/ObjectId' },
+                    name: { type: 'string' },
+                    coordinates: {
+                        type: 'object',
+                        nullable: true,
+                        properties: {
+                            type: { type: 'string', enum: ['Point'] },
+                            coordinates: {
+                                type: 'array',
+                                items: { type: 'number' },
+                                minItems: 2,
+                                maxItems: 2,
+                                description: '[longitude, latitude]',
+                            },
+                        },
+                    },
+                },
+            },
+            duration_minutes: {
+                type: 'number',
+            },
+            assigned_workers: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        worker: { $ref: '#/components/schemas/ObjectId' },
+                        name: { type: 'string' },
+                        role: {
+                            type: 'string',
+                            enum: ['Team leader', 'Co-leader', 'Normal worker'],
+                        },
+                        check_in_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                        },
+                        check_out_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                        },
+                    },
+                },
+            },
+            status: {
+                type: 'string',
+                enum: ['in_progress'],
+                description: 'Always in_progress — this endpoint only returns currently active shifts.',
+            },
+            total_room: {
+                type: 'integer',
+            },
+            completed_room: {
+                type: 'integer',
+                description: 'Count of rooms at progress_percent 100.',
+            },
+            total_task: {
+                type: 'integer',
+            },
+            overall_progress_percent: {
+                type: 'integer',
+                minimum: 0,
+                maximum: 100,
+                description:
+                    "Average of each room's progress_percent. 0 when the shift has no rooms.",
+            },
+            rooms: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        room: { $ref: '#/components/schemas/ObjectId' },
+                        name: { type: 'string' },
+                        room_type: { type: 'string' },
+                        total_task: { type: 'integer' },
+                        completed_task: { type: 'integer' },
+                        progress_percent: {
+                            type: 'integer',
+                            minimum: 0,
+                            maximum: 100,
+                            description:
+                                'completed_task / total_task for this room, rounded. 0 when the room has no tasks.',
+                        },
+                    },
+                },
+            },
+        },
+        description:
+            'A live, computed-on-read progress view of one in_progress Shift. tasks[] is intentionally omitted — see the Shift schema for the full per-task detail (photo_requirements, is_completed, etc.).',
+    },
+    ShiftSummary: {
+        type: 'object',
+        properties: {
+            _id: {
+                type: 'string',
+                pattern: '^[a-fA-F0-9]{24}$',
+                example: '507f1f77bcf86cd799439011',
+            },
+            cleaning_plan: {
+                $ref: '#/components/schemas/ObjectId',
+            },
+            date: {
+                type: 'string',
+                format: 'date-time',
+            },
+            date_time: {
+                type: 'string',
+                format: 'date-time',
+            },
+            location: {
+                type: 'object',
+                properties: {
+                    location: { $ref: '#/components/schemas/ObjectId' },
+                    name: { type: 'string' },
+                    coordinates: {
+                        type: 'object',
+                        nullable: true,
+                        properties: {
+                            type: { type: 'string', enum: ['Point'] },
+                            coordinates: {
+                                type: 'array',
+                                items: { type: 'number' },
+                                minItems: 2,
+                                maxItems: 2,
+                                description: '[longitude, latitude]',
+                            },
+                        },
+                    },
+                },
+            },
+            duration_minutes: {
+                type: 'number',
+            },
+            status: {
+                type: 'string',
+                enum: ['upcoming', 'in_progress', 'completed', 'cancelled'],
+            },
+            is_worker_overridden: {
+                type: 'boolean',
+            },
+            last_updated_by: {
+                $ref: '#/components/schemas/ObjectId',
+                nullable: true,
+            },
+            createdAt: {
+                type: 'string',
+                format: 'date-time',
+            },
+            updatedAt: {
+                type: 'string',
+                format: 'date-time',
+            },
+        },
+        description:
+            'A Shift without its tasks[]/rooms[]/assigned_workers[] arrays — used where a dashboard only needs the schedule/location/status, not the full detail.',
+    },
+    ShiftWithProgress: {
+        allOf: [
+            { $ref: '#/components/schemas/ShiftSummary' },
+            {
+                type: 'object',
+                properties: {
+                    total_room: { type: 'integer' },
+                    completed_room: {
+                        type: 'integer',
+                        description: 'Count of rooms at progress_percent 100.',
+                    },
+                    total_task: { type: 'integer' },
+                    overall_progress_percent: {
+                        type: 'integer',
+                        minimum: 0,
+                        maximum: 100,
+                    },
+                },
+            },
+        ],
+        description:
+            "ShiftSummary plus computed overall progress totals — no rooms[]/tasks[]/assigned_workers[] detail. Used by the worker-facing active-shift endpoint, which is a dashboard summary card, not a task-execution view.",
     },
     InvoiceCreate: {
         type: 'object',

@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { IIssueReport, ISSUE_SEVERITY } from './issue_report.interface';
+import { IIssueReport, ISSUE_SEVERITY, ISSUE_STATUS } from './issue_report.interface';
 
 const issueReportSchema = new Schema<IIssueReport>(
     {
@@ -23,9 +23,10 @@ const issueReportSchema = new Schema<IIssueReport>(
             required: true,
             trim: true,
         },
-        isResolved: {
-            type: Boolean,
-            default: false,
+        status: {
+            type: String,
+            enum: ISSUE_STATUS,
+            default: 'PENDING',
         },
     },
     {

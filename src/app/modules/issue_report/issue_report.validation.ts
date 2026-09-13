@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ISSUE_SEVERITY } from './issue_report.interface';
+import { ISSUE_SEVERITY, ISSUE_STATUS } from './issue_report.interface';
 
 export const issueReportBody = z
     .object({
@@ -12,7 +12,7 @@ export const issueReportBody = z
 
 export const issueReportUpdateBody = issueReportBody
     .extend({
-        isResolved: z.boolean(),
+        status: z.enum(ISSUE_STATUS),
     })
     .partial()
     .refine((body) => Object.keys(body).length > 0, {

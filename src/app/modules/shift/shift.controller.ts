@@ -20,6 +20,54 @@ const listMyShifts = catchAsync(async (req, res) => {
     });
 });
 
+const getMyActiveShift = catchAsync(async (req, res) => {
+    const result = await shiftServices.getActiveShiftForWorker(
+        req.user.profileId as string
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Active shift retrieved successfully',
+        data: result,
+    });
+});
+
+const getMyTodayMeta = catchAsync(async (req, res) => {
+    const result = await shiftServices.getWorkerTodayMetaFromDB(
+        req.user.profileId as string
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: "Today's shift metadata retrieved successfully",
+        data: result,
+    });
+});
+
+const getMyNextShift = catchAsync(async (req, res) => {
+    const result = await shiftServices.getNextShiftForWorker(
+        req.user.profileId as string
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Next shift retrieved successfully',
+        data: result,
+    });
+});
+
+const getMyLiveStatus = catchAsync(async (req, res) => {
+    const result = await shiftServices.getClientLiveShiftsFromDB(
+        req.user.profileId as string
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Live shift status retrieved successfully',
+        data: result,
+    });
+});
+
 const parseDateParam = (value: string, label = 'date'): Date => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
@@ -165,6 +213,10 @@ const checkOut = catchAsync(async (req, res) => {
 
 const shiftController = {
     listMyShifts,
+    getMyActiveShift,
+    getMyTodayMeta,
+    getMyNextShift,
+    getMyLiveStatus,
     listShifts,
     getShift,
     assignWorkers,

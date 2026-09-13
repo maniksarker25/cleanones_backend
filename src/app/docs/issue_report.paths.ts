@@ -5,7 +5,7 @@ const issueReportPaths = {
             summary: 'Create issue report',
             operationId: 'postcreateissuereport',
             description:
-                'Required role: worker. Location must exist and be active. isResolved defaults to false and cannot be supplied on creation.',
+                'Required role: worker. Location must exist and be active. status defaults to PENDING and cannot be supplied on creation.',
             security: [
                 {
                     bearerAuth: [],
@@ -118,7 +118,7 @@ const issueReportPaths = {
             summary: 'Update issue report',
             operationId: 'patchupdateissuereportid',
             description:
-                'Required role: manager. Supply at least one field. Managers may set isResolved. A supplied location must exist and be active.',
+                'Required role: manager. Supply at least one field. Managers may set status (PENDING | IN_PROGRESS | RESOLVED). A supplied location must exist and be active.',
             security: [
                 {
                     bearerAuth: [],
