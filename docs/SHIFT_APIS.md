@@ -1,6 +1,6 @@
 # Shift Management APIs
 
-Base path: `/api/v1/shift`. All endpoints require `Authorization: Bearer <manager-access-token>`.
+Base path: `/api/v1/shift`. Manager endpoints require `Authorization: Bearer <manager-access-token>`. The `/my-shifts` endpoint requires a worker access token.
 
 A **Shift** is a single-day occurrence of a `CleaningPlan`, derived from the recurrence (`frequency_type`/`days_of_week`/`days_of_month`) of the active `Task` documents on that plan's rooms. See `docs/SHIFT_MANAGEMENT_DESIGN.md` for how occurrences, materialization, and conflict-checking work.
 
@@ -8,6 +8,7 @@ A **Shift** is a single-day occurrence of a `CleaningPlan`, derived from the rec
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| GET | `/my-shifts?date=YYYY-MM-DD` | List the authenticated worker's shifts for one date |
 | GET | `/:planId` | List a plan's occurrences in a date range |
 | GET | `/:planId/:date` | Get one occurrence |
 | PATCH | `/:planId/:date/assign-workers` | Replace workers for one specific occurrence |
@@ -22,6 +23,18 @@ Every response includes `is_virtual`:
 - `is_virtual: false` — a real `Shift` document exists (created either by a prior manager edit or by the daily materialization job).
 
 Any **write** endpoint (`assign-workers`, `status`) materializes the shift first if it's still virtual, then applies the change to the now-real document.
+
+## `GET /api/v1/shift/my-shifts?date=2026-09-13`
+
+Requires a worker access token. `date` is required and must be a valid UTC calendar date in `YYYY-MM-DD` format. Worker identity comes from authentication; no worker ID is accepted.
+
+Returns `200` with `{ "success": true, "message": "Shifts retrieved successfully", "data": [...] }`. Each item uses the shift shape shown below, sorted by `date_time` ascending. No assignments returns `data: []`.
+
+- Includes saved shifts assigned to this worker, including completed and cancelled shifts, regardless of the parent plan's current activity or assignment.
+- Includes virtual occurrences from active (`is_active: true`), non-completed plans assigned to this worker when task recurrence matches the requested date.
+- A saved shift always overrides plan defaults. If a manager removed this worker from that occurrence, it will not reappear as a virtual shift.
+- This read does not save shifts. Past virtual occurrences reflect current plan settings, not historical snapshots.
+- Missing, malformed, or impossible dates return `400`. Authentication and account checks use the existing worker middleware.
 
 ---
 

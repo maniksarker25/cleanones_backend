@@ -59,3 +59,9 @@ Every shift starts with `assigned_workers` equal to the plan's default (auto-inh
 ## 7. Status
 
 `status` (`upcoming` / `in_progress` / `completed` / `cancelled`) exists on the Shift now as a foundation for the operational side (worker check-in, completion tracking) that naturally belongs per-occurrence rather than per-plan. There's currently no enforced transition workflow — any status can be set at any time — that's an intentional simplification left open for whenever check-in/completion flows are actually built on top of this.
+
+## 8. Worker daily schedule
+
+`GET /api/v1/shift/my-shifts?date=YYYY-MM-DD` lists the authenticated worker's assignments across plans for one UTC calendar date. It merges saved shifts with virtual occurrences from active, non-completed plans, preserving the read-only behavior above. Saved shifts remain visible when assigned to the worker even if the parent plan is now inactive or completed; cancelled shifts are included with their status.
+
+Before generating virtual entries, the service checks for saved occurrences of every candidate plan, including shifts where the worker is no longer assigned. Any saved occurrence suppresses the plan's virtual fallback, so a manager's per-day worker removal cannot be undone by the default plan assignment. Results are sorted by start time, with plan ID breaking ties. Existing worker/date and plan/date indexes support the lookup; no model changes are required.

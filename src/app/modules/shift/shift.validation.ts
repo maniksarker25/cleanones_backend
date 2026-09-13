@@ -25,6 +25,15 @@ const updateStatusValidationSchema = z.object({
 });
 
 const shiftValidations = {
+    workerShiftsQuery: z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use YYYY-MM-DD').refine(
+            (value) => {
+                const date = new Date(value);
+                return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+            },
+            'Date must be a valid calendar date'
+        ),
+    }).strict(),
     assignWorkersValidationSchema,
     updateStatusValidationSchema,
 };

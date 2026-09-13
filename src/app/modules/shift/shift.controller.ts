@@ -3,6 +3,21 @@ import AppError from '../../error/appError';
 import catchAsync from '../../utilities/catchasync';
 import sendResponse from '../../utilities/sendResponse';
 import shiftServices from './shift.services';
+import shiftValidations from './shift.validation';
+
+const listMyShifts = catchAsync(async (req, res) => {
+    const { date } = shiftValidations.workerShiftsQuery.parse(req.query);
+    const result = await shiftServices.listWorkerShiftsForDate(
+        req.user.profileId as string,
+        new Date(date)
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Shifts retrieved successfully',
+        data: result,
+    });
+});
 
 const parseDateParam = (value: string, label = 'date'): Date => {
     const date = new Date(value);
@@ -93,6 +108,7 @@ const updateStatus = catchAsync(async (req, res) => {
 });
 
 const shiftController = {
+    listMyShifts,
     listShifts,
     getShift,
     assignWorkers,

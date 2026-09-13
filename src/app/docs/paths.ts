@@ -1170,6 +1170,18 @@ const paths = {
                                 frequency_type: 'weekly',
                                 days_of_week: ['mon', 'fri'],
                                 is_photo_required: true,
+                                photo_requirements: [
+                                    {
+                                        title: 'Before cleaning',
+                                        photo_url: null,
+                                        is_uploaded: false,
+                                    },
+                                    {
+                                        title: 'After cleaning',
+                                        photo_url: null,
+                                        is_uploaded: false,
+                                    },
+                                ],
                                 duration_minutes: 15,
                             },
                         },
@@ -1229,6 +1241,21 @@ const paths = {
                     content: {
                         'application/json': {
                             schema: { $ref: '#/components/schemas/TaskUpdate' },
+                            example: {
+                                is_photo_required: true,
+                                photo_requirements: [
+                                    {
+                                        title: 'Before cleaning',
+                                        photo_url: null,
+                                        is_uploaded: false,
+                                    },
+                                    {
+                                        title: 'After cleaning',
+                                        photo_url: null,
+                                        is_uploaded: false,
+                                    },
+                                ],
+                            },
                         },
                     },
                 },
@@ -5898,6 +5925,42 @@ const paths = {
                                     },
                                     required: ['success', 'message'],
                                 },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/my-shifts': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'List my shifts for a specific date',
+            operationId: 'getShiftMyShifts',
+            description: 'Returns the authenticated worker\'s saved and virtual shifts across cleaning plans, ordered by start time. Saved assignments override plan defaults, including worker removals. Includes completed and cancelled saved shifts. Virtual occurrences use active, non-completed plans and current task recurrence; past virtual entries are not historical snapshots. This read never creates shifts. Required role: worker.',
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['worker'],
+            parameters: [{
+                name: 'date',
+                in: 'query',
+                required: true,
+                description: 'Valid UTC calendar date in YYYY-MM-DD format.',
+                schema: { type: 'string', format: 'date', example: '2026-09-13' },
+            }],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Worker shifts, or an empty array when none are assigned.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Shifts retrieved successfully' },
+                                    data: { type: 'array', items: { $ref: '#/components/schemas/Shift' } },
+                                },
+                                required: ['success', 'message', 'data'],
                             },
                         },
                     },
