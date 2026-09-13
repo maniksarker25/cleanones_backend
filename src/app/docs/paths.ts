@@ -1,4 +1,5 @@
 // Reviewed HTTP contracts; keep aligned with routes, controllers and services.
+import userPaths from './user.paths';
 const errors = {
     '400': {
         description: 'Invalid ID, model validation, or business rule failure.',
@@ -63,6 +64,7 @@ const errors = {
     },
 };
 const paths = {
+    ...userPaths,
     '/client/create-client': {
         post: {
             ...{
@@ -1823,7 +1825,7 @@ const paths = {
                         in: 'query',
                         schema: { type: 'string' },
                         description:
-                            'Case-insensitive regex search across email, phone, position, nationality.',
+                            'Case-insensitive regex search across name, email, phone, position, nationality.',
                     },
                     {
                         name: 'worker_type',

@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { WorkerType } from './worker.constant';
 
 export interface TWorker {
+    name:string;
     email: string;
     phone?: string;
     user: Types.ObjectId;

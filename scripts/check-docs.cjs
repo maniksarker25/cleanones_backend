@@ -55,7 +55,6 @@ test('Every mounted module route is documented or explicitly unfinished', () => 
     }
     visit(ast);
     const exclusions = {
-        '/user': 'Missing task.enum and customer validation dependencies.',
         '/super-admin': 'Missing task.enum and stale default Task import.',
         'get /meta/earning-chart-data':
             'Service returns only placeholder values.',

@@ -9,9 +9,24 @@ const services = require('../src/app/modules/worker/worker.services').default;
 const validation = require('../src/app/modules/worker/worker.validation').default;
 const { workerRoutes } = require('../src/app/modules/worker/worker.routes');
 
+test('worker names are required on creation and cannot be cleared on updates', () => {
+    const input = { email: 'worker@example.com', phone: '123456789', worker_type: 'Employee', address: 'Dhaka', password: 'secret123', confirmPassword: 'secret123' };
+    for (const name of [undefined, null, '', '   ']) {
+        assert.equal(validation.createWorkerBody.safeParse({ ...input, name }).success, false);
+        assert(new Worker({ name }).validateSync().errors.name);
+        if (name !== undefined) assert.equal(validation.updateWorkerBody.safeParse({ name }).success, false);
+    }
+    assert.equal(validation.createWorkerBody.parse({ ...input, name: '  Alex Morgan  ' }).name, 'Alex Morgan');
+    assert.equal(validation.updateWorkerBody.parse({ name: '  Alex  ' }).name, 'Alex');
+    assert.equal(new Worker({ name: '  Alex  ' }).name, 'Alex');
+    assert.equal(validation.updateWorkerBody.safeParse({ position: 'Cleaner' }).success, true);
+    const profile = require('../src/app/modules/user/user.validation').default.updateUserProfileValidationSchema;
+    assert.equal(profile.safeParse({ body: { name: '   ' } }).success, false);
+});
+
 test('worker validation rejects protected fields and unsafe list filters', () => {
     const input = {
-        email: 'WORKER@example.com', phone: '123456789',
+        name: 'Alex Morgan', email: 'WORKER@example.com', phone: '123456789',
         worker_type: 'Employee', address: 'Dhaka',
         password: 'secret123', confirmPassword: 'secret123',
     };
@@ -54,7 +69,7 @@ test('managers may set employee days but not freelancer days or bypass with a ty
     try {
         const id = '507f1f77bcf86cd799439011';
         await assert.rejects(services.createWorkerIntoDB({
-            email: 'freelancer@example.com', phone: '123', address: 'Dhaka',
+            name: 'Alex Morgan', email: 'freelancer@example.com', phone: '123', address: 'Dhaka',
             password: 'secret123', confirmPassword: 'secret123',
             worker_type: 'Freelancer', working_days: ['Monday'],
         }), { statusCode: 403 });
@@ -134,7 +149,7 @@ test('all five worker routes allow managers and reject other roles or missing to
     await new Promise((resolve) => server.once('listening', resolve));
     const base = 'http://127.0.0.1:' + server.address().port + '/worker';
     const endpoints = [
-        ['POST', '/create-worker', { email: 'worker@example.com', phone: '123', worker_type: 'Employee', address: 'Dhaka', password: 'secret123', confirmPassword: 'secret123' }],
+        ['POST', '/create-worker', { name: 'Alex Morgan', email: 'worker@example.com', phone: '123', worker_type: 'Employee', address: 'Dhaka', password: 'secret123', confirmPassword: 'secret123' }],
         ['PATCH', '/update-worker/507f1f77bcf86cd799439011', { position: 'Cleaner' }],
         ['DELETE', '/delete-worker/507f1f77bcf86cd799439011'],
         ['GET', '/all-workers'],

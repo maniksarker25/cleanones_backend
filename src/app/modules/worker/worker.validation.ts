@@ -25,6 +25,7 @@ const daySchema = z
 
 const workerBody = z
     .object({
+        name: z.string({ required_error: 'Name is required' }).trim().min(1, 'Name cannot be empty'),
         email: z.string().trim().email().toLowerCase(),
         phone: z.string().trim().min(1),
         worker_type: z.nativeEnum(WorkerType),

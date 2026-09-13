@@ -22,7 +22,7 @@ export const registerUserValidationSchema = z.object({
 
 export const updateUserProfileValidationSchema = z.object({
     body: z.object({
-        name: z.string().min(1, 'Name cannot be empty').optional(),
+        name: z.string().trim().min(1, 'Name cannot be empty').optional(),
 
         phone: z.string().min(6, 'Phone number is too short').optional(),
 

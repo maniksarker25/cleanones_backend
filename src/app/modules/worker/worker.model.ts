@@ -4,6 +4,7 @@ import { WorkerType } from './worker.constant';
 
 const workerSchema = new Schema<TWorker>(
     {
+        name: { type: String, required: true, trim: true },
         email: { type: String, default: null },
         isDeleted: { type: Boolean, default: false },
         phone: { type: String, default: null },
