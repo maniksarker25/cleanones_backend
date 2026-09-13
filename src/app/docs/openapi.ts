@@ -33,6 +33,15 @@ export function createOpenApiDocument(serverUrl = '/api/v1') {
             ['Locations', 'Client sites and room counts.'],
             ['Rooms', 'Rooms within a location and task counts.'],
             ['Tasks', 'Daily, weekly and monthly task definitions.'],
+            ['Workers', 'Manager-managed worker profiles and availability.'],
+            [
+                'Cleaning plans',
+                'Manager-scheduled cleaning plans with assigned workers.',
+            ],
+            [
+                'Additional tasks',
+                'Client-requested extra tasks on a cleaning plan, subject to manager approval.',
+            ],
             ['Administration', 'Administrator account management.'],
             [
                 'Website content',

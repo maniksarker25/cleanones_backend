@@ -3,7 +3,12 @@ import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
-import { ICleaningPlan } from './cleaning_plan.interface';
+import {
+    assertWorkersAssignable,
+    computeMaxEstimatedDuration,
+    listEligibleWorkersForPlan,
+} from './cleaning_plan.availability.services';
+import { IAssignedWorker, ICleaningPlan } from './cleaning_plan.interface';
 import { CleaningPlan } from './cleaning_plan.model';
 
 const ensureClientExists = async (clientId: string) => {
@@ -24,15 +29,52 @@ const ensureLocationExists = async (locationId: string) => {
 
 // ─── Create ────────────────────────────────────────────────────────────────────
 
+type CreateCleaningPlanPayload = Omit<
+    ICleaningPlan,
+    'createdAt' | 'updatedAt' | 'max_estimated_duration'
+> & { force?: boolean };
+
 const createCleaningPlanIntoDB = async (
     managerId: string,
-    payload: Omit<ICleaningPlan, 'createdAt' | 'updatedAt'>
+    payload: CreateCleaningPlanPayload
 ) => {
     await ensureClientExists(payload.client.toString());
     await ensureLocationExists(payload.location.toString());
 
+    const { force, assigned_workers, ...rest } = payload;
+    const rooms = rest.rooms ?? [];
+    const max_estimated_duration = await computeMaxEstimatedDuration(rooms);
+    // validateRequest doesn't apply Zod's coerced output back onto req.body,
+    // so date_time/end_date can still be raw strings here — normalize explicitly
+    // before any Date arithmetic in the availability engine.
+    const dateTime = new Date(rest.date_time);
+    const endDate = rest.end_date ? new Date(rest.end_date) : null;
+
+    let finalAssignedWorkers: IAssignedWorker[] = [];
+    if (assigned_workers?.length) {
+        const tempPlanId = new Types.ObjectId();
+        const conflicts = await assertWorkersAssignable(
+            {
+                _id: tempPlanId,
+                date_time: dateTime,
+                end_date: endDate,
+                rooms,
+            },
+            assigned_workers.map((aw) => aw.worker),
+            !!force
+        );
+        finalAssignedWorkers = assigned_workers.map((aw) => ({
+            ...aw,
+            assigned_with_conflict: conflicts.has(aw.worker.toString()),
+        }));
+    }
+
     const result = await CleaningPlan.create({
-        ...payload,
+        ...rest,
+        date_time: dateTime,
+        end_date: endDate,
+        assigned_workers: finalAssignedWorkers,
+        max_estimated_duration,
         manager: managerId,
         last_updated_by: managerId,
     });
@@ -41,23 +83,62 @@ const createCleaningPlanIntoDB = async (
 
 // ─── Update ────────────────────────────────────────────────────────────────────
 
+type UpdateCleaningPlanPayload = Partial<ICleaningPlan> & { force?: boolean };
+
 const updateCleaningPlanIntoDB = async (
     managerId: string,
     id: string,
-    payload: Partial<ICleaningPlan>
+    payload: UpdateCleaningPlanPayload
 ) => {
     const plan = await CleaningPlan.findById(id);
     if (!plan)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
 
-    const result = await CleaningPlan.findByIdAndUpdate(
-        id,
-        { ...payload, last_updated_by: managerId },
-        {
-            new: true,
-            runValidators: true,
-        }
-    );
+    const { force, assigned_workers, rooms, date_time, end_date, ...rest } =
+        payload;
+    const effectiveRooms = rooms ?? plan.rooms;
+    // Normalize possible raw strings (validateRequest doesn't apply Zod's
+    // coerced output back onto req.body) before any Date arithmetic.
+    const effectiveDateTime = date_time ? new Date(date_time) : plan.date_time;
+    const effectiveEndDate =
+        end_date !== undefined
+            ? end_date
+                ? new Date(end_date)
+                : null
+            : plan.end_date ?? null;
+
+    const update: Record<string, unknown> = { ...rest, last_updated_by: managerId };
+    if (date_time !== undefined) update.date_time = effectiveDateTime;
+    if (end_date !== undefined) update.end_date = effectiveEndDate;
+
+    if (rooms !== undefined) {
+        update.rooms = rooms;
+        update.max_estimated_duration = await computeMaxEstimatedDuration(
+            effectiveRooms
+        );
+    }
+
+    if (assigned_workers?.length) {
+        const conflicts = await assertWorkersAssignable(
+            {
+                _id: plan._id,
+                date_time: effectiveDateTime,
+                end_date: effectiveEndDate,
+                rooms: effectiveRooms,
+            },
+            assigned_workers.map((aw) => aw.worker),
+            !!force
+        );
+        update.assigned_workers = assigned_workers.map((aw) => ({
+            ...aw,
+            assigned_with_conflict: conflicts.has(aw.worker.toString()),
+        }));
+    }
+
+    const result = await CleaningPlan.findByIdAndUpdate(id, update, {
+        new: true,
+        runValidators: true,
+    });
     return result;
 };
 
@@ -441,6 +522,49 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
     return plan;
 };
 
+// ─── Eligible workers (preview) ─────────────────────────────────────────────────
+
+const getEligibleWorkersForPlan = async (id: string) => {
+    return listEligibleWorkersForPlan(id);
+};
+
+// ─── Assign workers (enforce) ───────────────────────────────────────────────────
+
+const assignWorkersToPlan = async (
+    managerId: string,
+    id: string,
+    assigned_workers: IAssignedWorker[],
+    force: boolean
+) => {
+    const plan = await CleaningPlan.findById(id);
+    if (!plan)
+        throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
+
+    const conflicts = await assertWorkersAssignable(
+        {
+            _id: plan._id,
+            date_time: plan.date_time,
+            end_date: plan.end_date ?? null,
+            rooms: plan.rooms,
+        },
+        assigned_workers.map((aw) => aw.worker),
+        force
+    );
+
+    const result = await CleaningPlan.findByIdAndUpdate(
+        id,
+        {
+            assigned_workers: assigned_workers.map((aw) => ({
+                ...aw,
+                assigned_with_conflict: conflicts.has(aw.worker.toString()),
+            })),
+            last_updated_by: managerId,
+        },
+        { new: true, runValidators: true }
+    );
+    return result;
+};
+
 // ───────────────────────────────────────────────────────────────────────────────
 
 const cleaningPlanServices = {
@@ -449,6 +573,8 @@ const cleaningPlanServices = {
     deleteCleaningPlanFromDB,
     getAllCleaningPlansFromDB,
     getSingleCleaningPlanFromDB,
+    getEligibleWorkersForPlan,
+    assignWorkersToPlan,
 };
 
 export default cleaningPlanServices;

@@ -10,6 +10,26 @@ const managerSchema = new Schema<TManager>(
             unique: true,
             index: true,
         },
+        name: {
+            type: String,
+            required: true,
+        },
+        email: {
+            type: String,
+            required: true,
+        },
+        phone: {
+            type: String,
+            required: true,
+        },
+        address: {
+            type: String,
+            default: null,
+        },
+        profile_photo: {
+            type: String,
+            default: null,
+        },
     },
     {
         timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

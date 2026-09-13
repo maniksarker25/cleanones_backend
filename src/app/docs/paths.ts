@@ -597,6 +597,86 @@ const paths = {
             },
         },
     },
+    '/location/my-locations': {
+        get: {
+            ...{
+                tags: ['Locations'],
+                summary: 'My locations',
+                operationId: 'getLocationMyLocations',
+                description:
+                    "Client-only. Returns locations belonging to the authenticated client. Pagination is nested under data.meta; records are under data.result.\n\nRequired role: client.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['client'],
+                parameters: [
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across name, address.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: 'created_at' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/Location',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/room/create-room': {
         post: {
             ...{
@@ -752,6 +832,99 @@ const paths = {
             },
         },
     },
+    '/room/all-rooms': {
+        get: {
+            ...{
+                tags: ['Rooms'],
+                summary: 'List all rooms',
+                operationId: 'getRoomAllRooms',
+                description:
+                    "Manager-only. Unscoped room listing across all locations, filterable by location and client. Pagination is nested under data.meta; records are under data.result. Defaults to active records.\n\nRequired role: manager.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'location',
+                        in: 'query',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                        description: 'Filter rooms belonging to this location.',
+                    },
+                    {
+                        name: 'client',
+                        in: 'query',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                        description:
+                            "Filter rooms whose location belongs to this client.",
+                    },
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across name, room_type, cleaning_type.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: 'created_at' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/Room',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/room/all-rooms/{locationId}': {
         get: {
             ...{
@@ -877,6 +1050,93 @@ const paths = {
                                         message: { type: 'string' },
                                         data: {
                                             $ref: '#/components/schemas/Room',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/room/my-rooms/{locationId}': {
+        get: {
+            ...{
+                tags: ['Rooms'],
+                summary: 'My rooms',
+                operationId: 'getRoomMyRoomsLocationId',
+                description:
+                    "Client-only. locationId must be one of the client's own locations, otherwise 404 Location not found. Pagination is nested under data.meta; records are under data.result.\n\nRequired role: client.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['client'],
+                parameters: [
+                    {
+                        name: 'locationId',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across name, room_type, cleaning_type.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: 'created_at' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/Room',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
                                         },
                                     },
                                     required: ['success', 'message'],
@@ -1183,6 +1443,1271 @@ const paths = {
                                         message: { type: 'string' },
                                         data: {
                                             $ref: '#/components/schemas/Task',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/task/my-tasks/{roomId}': {
+        get: {
+            ...{
+                tags: ['Tasks'],
+                summary: 'My tasks',
+                operationId: 'getTaskMyTasksRoomId',
+                description:
+                    "Client-only. roomId must be inside one of the client's own locations, otherwise 404 Room not found. Pagination is nested under data.meta; records are under data.result.\n\nRequired role: client.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['client'],
+                parameters: [
+                    {
+                        name: 'roomId',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description: 'Case-insensitive regex search across name.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: '-createdAt' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/Task',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/worker/my-availability': {
+        patch: {
+            ...{
+                tags: ['Workers'],
+                summary: "Update the caller's availability",
+                operationId: 'patchWorkerMyAvailability',
+                description:
+                    'Only active Freelancer-type workers can update their own availability; other workers receive 403.\n\nRequired role: worker.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['worker'],
+                parameters: [],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    working_days: {
+                                        type: 'array',
+                                        items: {
+                                            type: 'string',
+                                            enum: [
+                                                'monday',
+                                                'tuesday',
+                                                'wednesday',
+                                                'thursday',
+                                                'friday',
+                                                'saturday',
+                                                'sunday',
+                                            ],
+                                        },
+                                    },
+                                },
+                                required: ['working_days'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Worker',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/worker/create-worker': {
+        post: {
+            ...{
+                tags: ['Workers'],
+                summary: 'Create worker',
+                operationId: 'postWorkerCreateWorker',
+                description:
+                    'Creates a user and worker profile in a MongoDB transaction. Rejects duplicate email or phone. working_days may only be supplied for Employee-type workers.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/WorkerCreate',
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Worker',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/worker/update-worker/{id}': {
+        patch: {
+            ...{
+                tags: ['Workers'],
+                summary: 'Update worker',
+                operationId: 'patchWorkerUpdateWorkerId',
+                description:
+                    'Partial update. Rejects duplicate email or phone. working_days may only be set when the target worker is Employee-type.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/WorkerUpdate',
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Worker',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/worker/delete-worker/{id}': {
+        delete: {
+            ...{
+                tags: ['Workers'],
+                summary: 'Soft-delete worker',
+                operationId: 'deleteWorkerDeleteWorkerId',
+                description:
+                    'Soft-deletes the worker profile and marks its linked user deleted and blocked. Returns null.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Null',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/worker/all-workers': {
+        get: {
+            ...{
+                tags: ['Workers'],
+                summary: 'List workers',
+                operationId: 'getWorkerAllWorkers',
+                description:
+                    'Pagination is nested under data.meta; records are under data.result. Excludes soft-deleted workers (including legacy records missing isDeleted).\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across email, phone, position, nationality.',
+                    },
+                    {
+                        name: 'worker_type',
+                        in: 'query',
+                        schema: {
+                            type: 'string',
+                            enum: ['Employee', 'Freelancer'],
+                        },
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: {
+                            type: 'string',
+                            enum: [
+                                'created_at',
+                                '-created_at',
+                                'email',
+                                '-email',
+                                'hourly_rate',
+                                '-hourly_rate',
+                            ],
+                            default: '-created_at',
+                        },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/Worker',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/worker/single-worker/{id}': {
+        get: {
+            ...{
+                tags: ['Workers'],
+                summary: 'Get worker',
+                operationId: 'getWorkerSingleWorkerId',
+                description:
+                    'Excludes soft-deleted workers.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Worker',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/cleaning-plan/create-cleaning-plan': {
+        post: {
+            ...{
+                tags: ['Cleaning plans'],
+                summary: 'Create cleaning plan',
+                operationId: 'postCleaningPlanCreateCleaningPlan',
+                description:
+                    'manager and last_updated_by are set from the authenticated manager profile. Client must exist and not be deleted; location must be active.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/CleaningPlanCreate',
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '201': {
+                        description: 'Cleaning plan created.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/CleaningPlan',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/cleaning-plan/update-cleaning-plan/{id}': {
+        patch: {
+            ...{
+                tags: ['Cleaning plans'],
+                summary: 'Update cleaning plan',
+                operationId: 'patchCleaningPlanUpdateCleaningPlanId',
+                description:
+                    'Partial update. last_updated_by is set from the authenticated manager profile. Parent client/location cannot be changed through the documented update contract.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/CleaningPlanUpdate',
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/CleaningPlan',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/cleaning-plan/delete-cleaning-plan/{id}': {
+        delete: {
+            ...{
+                tags: ['Cleaning plans'],
+                summary: 'Deactivate cleaning plan',
+                operationId: 'deleteCleaningPlanDeleteCleaningPlanId',
+                description:
+                    'Sets is_active=false and last_updated_by, and returns the updated document. Does not cascade to child additional tasks.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/CleaningPlan',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/cleaning-plan/all-cleaning-plans': {
+        get: {
+            ...{
+                tags: ['Cleaning plans'],
+                summary: 'List cleaning plans',
+                operationId: 'getCleaningPlanAllCleaningPlans',
+                description:
+                    'Pagination is nested under data.meta; records are under data.result. Defaults to active plans. rooms, assigned_workers and additional_tasks are omitted from list results, replaced by total_room, total_assigned_worker and total_additional_task counts. Any unrecognized query key is applied as an equality filter on the underlying collection, so pass query parameters carefully.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across title, description.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: 'createdAt' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/CleaningPlan',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/cleaning-plan/single-cleaning-plan/{id}': {
+        get: {
+            ...{
+                tags: ['Cleaning plans'],
+                summary: 'Get cleaning plan',
+                operationId: 'getCleaningPlanSingleCleaningPlanId',
+                description:
+                    'Includes populated references, full rooms/assigned_workers/additional_tasks documents, and single-plan aggregation totals. The service does not exclude inactive records.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/CleaningPlan',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/cleaning-plan/{id}/eligible-workers': {
+        get: {
+            ...{
+                tags: ['Cleaning plans'],
+                summary: 'List eligible workers with conflict flags',
+                operationId: 'getCleaningPlanIdEligibleWorkers',
+                description:
+                    'Returns active, non-blocked workers for this plan, each with is_conflict/conflict_reason/conflicting_plan_id computed against the plan\'s date_time, end_date and the recurrence (frequency_type/days_of_week/days_of_month) of the active tasks on the plan\'s rooms. Excludes this plan itself from the conflict search. Ineligible workers (deleted/blocked/inactive) are omitted entirely rather than flagged.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    worker: {
+                                                        type: 'object',
+                                                    },
+                                                    is_conflict: {
+                                                        type: 'boolean',
+                                                    },
+                                                    conflict_reason: {
+                                                        type: 'string',
+                                                        enum: ['double_booked'],
+                                                        nullable: true,
+                                                    },
+                                                    conflicting_plan_id: {
+                                                        $ref: '#/components/schemas/ObjectId',
+                                                        nullable: true,
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/cleaning-plan/{id}/assign-workers': {
+        patch: {
+            ...{
+                tags: ['Cleaning plans'],
+                summary: 'Assign workers to a cleaning plan',
+                operationId: 'patchCleaningPlanIdAssignWorkers',
+                description:
+                    'Replaces assigned_workers. Ineligible workers (deleted/blocked/inactive) are always rejected with 400. When one or more submitted workers has a scheduling conflict, the request is rejected with 409 (body.errorDetails.conflicts lists the offending workers) unless force=true, in which case those entries are saved with assigned_with_conflict=true for audit purposes.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'force',
+                        in: 'query',
+                        schema: { type: 'boolean' },
+                        description:
+                            'Alternative to force in the body; assign despite scheduling conflicts.',
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    assigned_workers: {
+                                        type: 'array',
+                                        minItems: 1,
+                                        items: {
+                                            type: 'object',
+                                            properties: {
+                                                worker: {
+                                                    $ref: '#/components/schemas/ObjectId',
+                                                },
+                                                role: {
+                                                    type: 'string',
+                                                    enum: [
+                                                        'Team leader',
+                                                        'Co-leader',
+                                                        'Normal worker',
+                                                    ],
+                                                },
+                                            },
+                                            required: ['worker', 'role'],
+                                        },
+                                    },
+                                    force: { type: 'boolean' },
+                                },
+                                required: ['assigned_workers'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/CleaningPlan',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/additional-task/create-additional-task': {
+        post: {
+            ...{
+                tags: ['Additional tasks'],
+                summary: 'Create additional task',
+                operationId: 'postAdditionalTaskCreateAdditionalTask',
+                description:
+                    'The referenced cleaning plan must exist and be active. The new task ID is pushed onto the plan\'s additional_tasks array. is_completed and is_approved are forced to false.\n\nRequired role: client.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['client'],
+                parameters: [],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/AdditionalTaskCreate',
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '201': {
+                        description: 'Additional task created.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/AdditionalTask',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/additional-task/update-additional-task/{id}': {
+        patch: {
+            ...{
+                tags: ['Additional tasks'],
+                summary: 'Update additional task',
+                operationId: 'patchAdditionalTaskUpdateAdditionalTaskId',
+                description:
+                    'Partial update. is_approved is stripped from the payload even if supplied; use the approve endpoint instead.\n\nRequired role: client.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['client'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/AdditionalTaskUpdate',
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/AdditionalTask',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/additional-task/delete-additional-task/{id}': {
+        delete: {
+            ...{
+                tags: ['Additional tasks'],
+                summary: 'Delete additional task',
+                operationId: 'deleteAdditionalTaskDeleteAdditionalTaskId',
+                description:
+                    "Permanently deletes the task and pulls its ID from the parent cleaning plan's additional_tasks array. Unlike most delete endpoints in this API, the response data is a status message object, not the deleted document or null.\n\nRequired role: client.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['client'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                message: { type: 'string' },
+                                            },
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/additional-task/approve-additional-task/{id}': {
+        patch: {
+            ...{
+                tags: ['Additional tasks'],
+                summary: 'Approve or reject additional task',
+                operationId: 'patchAdditionalTaskApproveAdditionalTaskId',
+                description: 'Required role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    is_approved: { type: 'boolean' },
+                                },
+                                required: ['is_approved'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/AdditionalTask',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/additional-task/all-additional-tasks/{planId}': {
+        get: {
+            ...{
+                tags: ['Additional tasks'],
+                summary: 'List additional tasks for a cleaning plan',
+                operationId: 'getAdditionalTaskAllAdditionalTasksPlanId',
+                description:
+                    'The referenced cleaning plan must exist and be active. Pagination is nested under data.meta; records are under data.result. Any unrecognized query key is applied as an equality filter on the underlying collection, so pass query parameters carefully.\n\nRequired role: manager, client.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager', 'client'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across name, description.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: 'created_at' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/AdditionalTask',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/additional-task/single-additional-task/{id}': {
+        get: {
+            ...{
+                tags: ['Additional tasks'],
+                summary: 'Get additional task',
+                operationId: 'getAdditionalTaskSingleAdditionalTaskId',
+                description: 'Required role: manager, client.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager', 'client'],
+                parameters: [
+                    {
+                        name: 'id',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/AdditionalTask',
                                         },
                                     },
                                     required: ['success', 'message'],
@@ -4369,6 +5894,302 @@ const paths = {
                                                     },
                                                 },
                                             },
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/{planId}': {
+        get: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'List a cleaning plan\'s shift occurrences in a date range',
+                operationId: 'getShiftPlanId',
+                description:
+                    'Returns one entry per date the plan actually occurs on within [from, to] (dates it does not occur on are omitted, not returned empty). Each entry is either an already-materialized Shift or a virtual, unsaved preview (is_virtual: true) computed live from the plan\'s current rooms/tasks/assigned_workers. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'from',
+                        in: 'query',
+                        schema: { type: 'string', format: 'date' },
+                        description: 'Defaults to today.',
+                    },
+                    {
+                        name: 'to',
+                        in: 'query',
+                        schema: { type: 'string', format: 'date' },
+                        description: 'Defaults to from + 30 days.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'array',
+                                            items: {
+                                                $ref: '#/components/schemas/Shift',
+                                            },
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/{planId}/{date}': {
+        get: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Get one shift occurrence',
+                operationId: 'getShiftPlanIdDate',
+                description:
+                    'date is an ISO date (YYYY-MM-DD). Returns the materialized Shift if one exists, otherwise a virtual preview (is_virtual: true) computed from the plan\'s current state. 404 if the plan has no occurrence on that date.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'date',
+                        in: 'path',
+                        required: true,
+                        description: 'ISO date (YYYY-MM-DD).',
+                        schema: { type: 'string', format: 'date' },
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Shift',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/{planId}/{date}/assign-workers': {
+        patch: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Assign workers to one specific shift occurrence',
+                operationId: 'patchShiftPlanIdDateAssignWorkers',
+                description:
+                    'Materializes the shift for this date first if it does not exist yet, then replaces its assigned_workers, diverging it from the plan\'s default assignment (is_worker_overridden becomes true). Ineligible workers (deleted/blocked/inactive) are always rejected with 400. A scheduling conflict — against either another materialized shift or another plan\'s not-yet-materialized occurrence — is rejected with 409 unless force=true, in which case the conflicted entries are saved with assigned_with_conflict=true for audit purposes. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'date',
+                        in: 'path',
+                        required: true,
+                        description: 'ISO date (YYYY-MM-DD).',
+                        schema: { type: 'string', format: 'date' },
+                    },
+                    {
+                        name: 'force',
+                        in: 'query',
+                        schema: { type: 'boolean' },
+                        description:
+                            'Alternative to force in the body; assign despite scheduling conflicts.',
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    assigned_workers: {
+                                        type: 'array',
+                                        minItems: 1,
+                                        items: {
+                                            type: 'object',
+                                            properties: {
+                                                worker: {
+                                                    $ref: '#/components/schemas/ObjectId',
+                                                },
+                                                role: {
+                                                    type: 'string',
+                                                    enum: [
+                                                        'Team leader',
+                                                        'Co-leader',
+                                                        'Normal worker',
+                                                    ],
+                                                },
+                                            },
+                                            required: ['worker', 'role'],
+                                        },
+                                    },
+                                    force: { type: 'boolean' },
+                                },
+                                required: ['assigned_workers'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Shift',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/{planId}/{date}/status': {
+        patch: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Update one shift occurrence\'s status',
+                operationId: 'patchShiftPlanIdDateStatus',
+                description:
+                    'Materializes the shift for this date first if it does not exist yet, then updates its status.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'date',
+                        in: 'path',
+                        required: true,
+                        description: 'ISO date (YYYY-MM-DD).',
+                        schema: { type: 'string', format: 'date' },
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    status: {
+                                        type: 'string',
+                                        enum: [
+                                            'upcoming',
+                                            'in_progress',
+                                            'completed',
+                                            'cancelled',
+                                        ],
+                                    },
+                                },
+                                required: ['status'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Shift',
                                         },
                                     },
                                     required: ['success', 'message'],

@@ -189,6 +189,9 @@ const globalErrorHandler: ErrorRequestHandler = (
   } else if (err instanceof AppError) {
     statusCode = err.statusCode;
     errorMessage = err.message;
+    if (err.details !== undefined) {
+      errorDetails = err.details as Record<string, unknown>;
+    }
   } else if (err?.name === 'CastError') {
     statusCode = 400;
     // message = 'Invalid ID';

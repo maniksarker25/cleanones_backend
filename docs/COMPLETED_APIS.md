@@ -1,6 +1,6 @@
 # cleanones-backend API reference
 
-72 documented operations from the implemented, mounted API handlers. This snapshot describes the current unfinished backend; documented contracts are not a claim that every endpoint works end to end.
+76 documented operations from the implemented, mounted API handlers. This snapshot describes the current unfinished backend; documented contracts are not a claim that every endpoint works end to end.
 
 ## Connection and authentication
 
@@ -59,16 +59,20 @@ Create a client, then its location, then a room, then tasks. Weekly tasks need a
 | DELETE | `/location/delete-location/{id}`         | manager                           | [Deactivate location](#deletelocationdeletelocationid)              |
 | GET    | `/location/all-locations`                | manager                           | [List locations](#getlocationalllocations)                          |
 | GET    | `/location/single-location/{id}`         | manager                           | [Get location](#getlocationsinglelocationid)                        |
+| GET    | `/location/my-locations`                 | client                            | [My locations](#getlocationmylocations)                             |
 | POST   | `/room/create-room`                      | manager                           | [Create room](#postroomcreateroom)                                  |
 | PATCH  | `/room/update-room/{id}`                 | manager                           | [Update room](#patchroomupdateroomid)                               |
 | DELETE | `/room/delete-room/{id}`                 | manager                           | [Deactivate room](#deleteroomdeleteroomid)                          |
+| GET    | `/room/all-rooms`                        | manager                           | [List all rooms](#getroomallrooms)                                  |
 | GET    | `/room/all-rooms/{locationId}`           | manager                           | [List rooms](#getroomallroomslocationid)                            |
 | GET    | `/room/single-room/{id}`                 | manager                           | [Get room](#getroomsingleroomid)                                    |
+| GET    | `/room/my-rooms/{locationId}`            | client                            | [My rooms](#getroommyroomslocationid)                                |
 | POST   | `/task/create-task`                      | manager                           | [Create task](#posttaskcreatetask)                                  |
 | PATCH  | `/task/update-task/{id}`                 | manager                           | [Update task](#patchtaskupdatetaskid)                               |
 | DELETE | `/task/delete-task/{id}`                 | manager                           | [Deactivate task](#deletetaskdeletetaskid)                          |
 | GET    | `/task/all-tasks/{roomId}`               | manager                           | [List tasks](#gettaskalltasksroomid)                                |
 | GET    | `/task/single-task/{id}`                 | manager                           | [Get task](#gettasksingletaskid)                                    |
+| GET    | `/task/my-tasks/{roomId}`                | client                            | [My tasks](#gettaskmytasksroomid)                                    |
 | GET    | `/location/client-locations/{clientId}`  | manager                           | [List a client's locations](#getlocationclientlocationsclientid)    |
 | POST   | `/auth/login`                            | Public                            | [Log in](#postauthlogin)                                            |
 | POST   | `/auth/change-password`                  | client, worker, admin, superAdmin | [Change password](#postauthchangepassword)                          |
@@ -502,13 +506,15 @@ Required role: manager.
 
 **Request: application/json**
 
-| Field       | Type                         | Required | Details       |
-| ----------- | ---------------------------- | -------- | ------------- |
-| `client`    | [ObjectId](#schema-objectid) | Yes      |               |
-| `name`      | string                       | Yes      | minLength: 1. |
-| `address`   | string                       | Yes      | minLength: 1. |
-| `is_active` | boolean                      | No       |               |
-| `location`  | [Point](#schema-point)       | No       |               |
+| Field         | Type                         | Required | Details                                    |
+| ------------- | ---------------------------- | -------- | ------------------------------------------- |
+| `client`      | [ObjectId](#schema-objectid) | Yes      |                                             |
+| `name`        | string                       | Yes      | minLength: 1.                               |
+| `address`     | string                       | Yes      | minLength: 1.                               |
+| `description` | string                       | No       |                                             |
+| `type`        | string                       | Yes      | Allowed: "Hotel", "School", "Hospital", "Other". |
+| `is_active`   | boolean                      | No       |                                             |
+| `location`    | [Point](#schema-point)       | No       |                                             |
 
 Example request:
 
@@ -516,7 +522,8 @@ Example request:
 {
   "client": "507f1f77bcf86cd799439011",
   "name": "Head Office",
-  "address": "12 Example Road, Dhaka"
+  "address": "12 Example Road, Dhaka",
+  "type": "Hotel"
 }
 ```
 
@@ -543,12 +550,14 @@ Required role: manager.
 
 **Request: application/json**
 
-| Field       | Type                   | Required | Details       |
-| ----------- | ---------------------- | -------- | ------------- |
-| `name`      | string                 | No       | minLength: 1. |
-| `address`   | string                 | No       | minLength: 1. |
-| `is_active` | boolean                | No       |               |
-| `location`  | [Point](#schema-point) | No       |               |
+| Field         | Type                   | Required | Details                                    |
+| ------------- | ---------------------- | -------- | ------------------------------------------- |
+| `name`        | string                 | No       | minLength: 1.                               |
+| `address`     | string                 | No       | minLength: 1.                               |
+| `description` | string                 | No       |                                             |
+| `type`        | string                 | No       | Allowed: "Hotel", "School", "Hospital", "Other". |
+| `is_active`   | boolean                | No       |                                             |
+| `location`    | [Point](#schema-point) | No       |                                             |
 
 Example request:
 
@@ -556,6 +565,7 @@ Example request:
 {
   "name": "Head Office",
   "address": "12 Example Road, Dhaka",
+  "type": "Hotel",
   "is_active": true,
   "location": {
     "coordinates": [90.4125, 23.8103]
@@ -676,6 +686,37 @@ Envelope: `success`, `message`, and `data`. **data:** object.
 | `meta`   | [Pagination](#schema-pagination)      | Yes      |            |
 | `result` | array of [Location](#schema-location) | Yes      | Each item: |
 
+<a id="getlocationmylocations"></a>
+
+### GET /location/my-locations
+
+My locations
+Client-only. Returns locations belonging to the authenticated client. Pagination is nested under data.meta; records are under data.result.
+
+Required role: client.
+
+**Access:** client.
+
+**Parameters**
+
+| Name         | In    | Type    | Required | Details                                                                  |
+| ------------ | ----- | ------- | -------- | ------------------------------------------------------------------------ |
+| `page`       | query | integer | No       | Use a positive page number. Default: 1.                                  |
+| `limit`      | query | integer | No       | Use a positive page size. Default: 10.                                   |
+| `searchTerm` | query | string  | No       | Case-insensitive regex search across name, address.                      |
+| `sort`       | query | string  | No       | Single field; prefix with - for descending order. Default: "created_at". |
+
+**Request body:** none.
+
+**Response: HTTP 200**
+
+Envelope: `success`, `message`, and `data`. **data:** object.
+
+| Field    | Type                                   | Required | Details    |
+| -------- | --------------------------------------- | -------- | ---------- |
+| `meta`   | [Pagination](#schema-pagination)       | Yes      |            |
+| `result` | array of [Location](#schema-location)  | Yes      | Each item: |
+
 ## Rooms
 
 Rooms within a location and task counts.
@@ -693,13 +734,14 @@ Required role: manager.
 
 **Request: application/json**
 
-| Field       | Type                         | Required | Details       |
-| ----------- | ---------------------------- | -------- | ------------- |
-| `location`  | [ObjectId](#schema-objectid) | Yes      |               |
-| `name`      | string                       | Yes      | minLength: 1. |
-| `room_type` | string                       | Yes      | minLength: 1. |
-| `floor`     | number                       | No       |               |
-| `is_active` | boolean                      | No       |               |
+| Field           | Type                         | Required | Details       |
+| --------------- | ---------------------------- | -------- | ------------- |
+| `location`      | [ObjectId](#schema-objectid) | Yes      |               |
+| `name`          | string                       | Yes      | minLength: 1. |
+| `room_type`     | string                       | Yes      | minLength: 1. |
+| `cleaning_type` | string                       | Yes      | minLength: 1. |
+| `floor`         | number                       | No       |               |
+| `is_active`     | boolean                      | No       |               |
 
 Example request:
 
@@ -708,6 +750,7 @@ Example request:
   "location": "507f1f77bcf86cd799439011",
   "name": "Conference Room",
   "room_type": "meeting",
+  "cleaning_type": "Standard",
   "floor": 2
 }
 ```
@@ -735,12 +778,13 @@ Required role: manager.
 
 **Request: application/json**
 
-| Field       | Type    | Required | Details       |
-| ----------- | ------- | -------- | ------------- |
-| `name`      | string  | No       | minLength: 1. |
-| `room_type` | string  | No       | minLength: 1. |
-| `floor`     | number  | No       |               |
-| `is_active` | boolean | No       |               |
+| Field           | Type    | Required | Details       |
+| --------------- | ------- | -------- | ------------- |
+| `name`          | string  | No       | minLength: 1. |
+| `room_type`     | string  | No       | minLength: 1. |
+| `cleaning_type` | string  | No       | minLength: 1. |
+| `floor`         | number  | No       |               |
+| `is_active`     | boolean | No       |               |
 
 Example request:
 
@@ -748,6 +792,7 @@ Example request:
 {
   "name": "Conference Room",
   "room_type": "meeting",
+  "cleaning_type": "Standard",
   "floor": 2,
   "is_active": true
 }
@@ -780,6 +825,39 @@ Required role: manager.
 
 Envelope: `success`, `message`, and `data`. **data:** [Room](#schema-room).
 
+<a id="getroomallrooms"></a>
+
+### GET /room/all-rooms
+
+List all rooms
+Manager-only. Unscoped room listing across all locations, filterable by location and client. Pagination is nested under data.meta; records are under data.result. Defaults to active records.
+
+Required role: manager.
+
+**Access:** manager.
+
+**Parameters**
+
+| Name         | In    | Type                          | Required | Details                                                                  |
+| ------------ | ----- | ----------------------------- | -------- | ------------------------------------------------------------------------ |
+| `location`   | query | [ObjectId](#schema-objectid)  | No       | Filter rooms belonging to this location.                                 |
+| `client`     | query | [ObjectId](#schema-objectid)  | No       | Filter rooms whose location belongs to this client.                      |
+| `page`       | query | integer                       | No       | Use a positive page number. Default: 1.                                  |
+| `limit`      | query | integer                       | No       | Use a positive page size. Default: 10.                                   |
+| `searchTerm` | query | string                        | No       | Case-insensitive regex search across name, room_type, cleaning_type.     |
+| `sort`       | query | string                        | No       | Single field; prefix with - for descending order. Default: "created_at". |
+
+**Request body:** none.
+
+**Response: HTTP 200**
+
+Envelope: `success`, `message`, and `data`. **data:** object.
+
+| Field    | Type                             | Required | Details    |
+| -------- | --------------------------------- | -------- | ---------- |
+| `meta`   | [Pagination](#schema-pagination) | Yes      |            |
+| `result` | array of [Room](#schema-room)    | Yes      | Each item: |
+
 <a id="getroomallroomslocationid"></a>
 
 ### GET /room/all-rooms/{locationId}
@@ -798,7 +876,7 @@ Required role: manager.
 | `locationId` | path  | [ObjectId](#schema-objectid) | Yes      | MongoDB document identifier.                                             |
 | `page`       | query | integer                      | No       | Use a positive page number. Default: 1.                                  |
 | `limit`      | query | integer                      | No       | Use a positive page size. Default: 10.                                   |
-| `searchTerm` | query | string                       | No       | Case-insensitive regex search across name, room_type.                    |
+| `searchTerm` | query | string                       | No       | Case-insensitive regex search across name, room_type, cleaning_type.     |
 | `sort`       | query | string                       | No       | Single field; prefix with - for descending order. Default: "created_at". |
 
 **Request body:** none.
@@ -834,6 +912,38 @@ Required role: manager.
 **Response: HTTP 200**
 
 Envelope: `success`, `message`, and `data`. **data:** [Room](#schema-room).
+
+<a id="getroommyroomslocationid"></a>
+
+### GET /room/my-rooms/{locationId}
+
+My rooms
+Client-only. locationId must be one of the client's own locations, otherwise 404 Location not found. Pagination is nested under data.meta; records are under data.result.
+
+Required role: client.
+
+**Access:** client.
+
+**Parameters**
+
+| Name         | In    | Type                         | Required | Details                                                                  |
+| ------------ | ----- | ---------------------------- | -------- | ------------------------------------------------------------------------ |
+| `locationId` | path  | [ObjectId](#schema-objectid) | Yes      | MongoDB document identifier.                                             |
+| `page`       | query | integer                      | No       | Use a positive page number. Default: 1.                                  |
+| `limit`      | query | integer                      | No       | Use a positive page size. Default: 10.                                   |
+| `searchTerm` | query | string                       | No       | Case-insensitive regex search across name, room_type, cleaning_type.     |
+| `sort`       | query | string                       | No       | Single field; prefix with - for descending order. Default: "created_at". |
+
+**Request body:** none.
+
+**Response: HTTP 200**
+
+Envelope: `success`, `message`, and `data`. **data:** object.
+
+| Field    | Type                             | Required | Details    |
+| -------- | --------------------------------- | -------- | ---------- |
+| `meta`   | [Pagination](#schema-pagination) | Yes      |            |
+| `result` | array of [Room](#schema-room)    | Yes      | Each item: |
 
 ## Tasks
 
@@ -1007,6 +1117,38 @@ Required role: manager.
 **Response: HTTP 200**
 
 Envelope: `success`, `message`, and `data`. **data:** [Task](#schema-task).
+
+<a id="gettaskmytasksroomid"></a>
+
+### GET /task/my-tasks/{roomId}
+
+My tasks
+Client-only. roomId must be inside one of the client's own locations, otherwise 404 Room not found. Pagination is nested under data.meta; records are under data.result.
+
+Required role: client.
+
+**Access:** client.
+
+**Parameters**
+
+| Name         | In    | Type                         | Required | Details                                                                   |
+| ------------ | ----- | ---------------------------- | -------- | -------------------------------------------------------------------------- |
+| `roomId`     | path  | [ObjectId](#schema-objectid) | Yes      | MongoDB document identifier.                                              |
+| `page`       | query | integer                      | No       | Use a positive page number. Default: 1.                                   |
+| `limit`      | query | integer                      | No       | Use a positive page size. Default: 10.                                    |
+| `searchTerm` | query | string                       | No       | Case-insensitive regex search across name.                                |
+| `sort`       | query | string                       | No       | Single field; prefix with - for descending order. Default: "-createdAt". |
+
+**Request body:** none.
+
+**Response: HTTP 200**
+
+Envelope: `success`, `message`, and `data`. **data:** object.
+
+| Field    | Type                             | Required | Details    |
+| -------- | --------------------------------- | -------- | ---------- |
+| `meta`   | [Pagination](#schema-pagination) | Yes      |            |
+| `result` | array of [Task](#schema-task)    | Yes      | Each item: |
 
 ## Administration
 
@@ -2356,47 +2498,53 @@ Type: null.
 
 ### LocationCreate
 
-| Field       | Type                         | Required | Details       |
-| ----------- | ---------------------------- | -------- | ------------- |
-| `client`    | [ObjectId](#schema-objectid) | Yes      |               |
-| `name`      | string                       | Yes      | minLength: 1. |
-| `address`   | string                       | Yes      | minLength: 1. |
-| `is_active` | boolean                      | No       |               |
-| `location`  | [Point](#schema-point)       | No       |               |
+| Field         | Type                         | Required | Details                                    |
+| ------------- | ---------------------------- | -------- | ------------------------------------------- |
+| `client`      | [ObjectId](#schema-objectid) | Yes      |                                             |
+| `name`        | string                       | Yes      | minLength: 1.                               |
+| `address`     | string                       | Yes      | minLength: 1.                               |
+| `description` | string                       | No       |                                             |
+| `type`        | string                       | Yes      | Allowed: "Hotel", "School", "Hospital", "Other". |
+| `is_active`   | boolean                      | No       |                                             |
+| `location`    | [Point](#schema-point)       | No       |                                             |
 
 <a id="schema-locationupdate"></a>
 
 ### LocationUpdate
 
-| Field       | Type                   | Required | Details       |
-| ----------- | ---------------------- | -------- | ------------- |
-| `name`      | string                 | No       | minLength: 1. |
-| `address`   | string                 | No       | minLength: 1. |
-| `is_active` | boolean                | No       |               |
-| `location`  | [Point](#schema-point) | No       |               |
+| Field         | Type                   | Required | Details                                    |
+| ------------- | ---------------------- | -------- | ------------------------------------------- |
+| `name`        | string                 | No       | minLength: 1.                               |
+| `address`     | string                 | No       | minLength: 1.                               |
+| `description` | string                 | No       |                                             |
+| `type`        | string                 | No       | Allowed: "Hotel", "School", "Hospital", "Other". |
+| `is_active`   | boolean                | No       |                                             |
+| `location`    | [Point](#schema-point) | No       |                                             |
 
 <a id="schema-roomcreate"></a>
 
 ### RoomCreate
 
-| Field       | Type                         | Required | Details       |
-| ----------- | ---------------------------- | -------- | ------------- |
-| `location`  | [ObjectId](#schema-objectid) | Yes      |               |
-| `name`      | string                       | Yes      | minLength: 1. |
-| `room_type` | string                       | Yes      | minLength: 1. |
-| `floor`     | number                       | No       |               |
-| `is_active` | boolean                      | No       |               |
+| Field           | Type                         | Required | Details       |
+| --------------- | ---------------------------- | -------- | ------------- |
+| `location`      | [ObjectId](#schema-objectid) | Yes      |               |
+| `name`          | string                       | Yes      | minLength: 1. |
+| `room_type`     | string                       | Yes      | minLength: 1. |
+| `cleaning_type` | string                       | Yes      | minLength: 1. |
+| `floor`         | number                       | No       |               |
+| `is_active`     | boolean                      | No       |               |
 
 <a id="schema-roomupdate"></a>
 
 ### RoomUpdate
 
-| Field       | Type    | Required | Details       |
-| ----------- | ------- | -------- | ------------- |
-| `name`      | string  | No       | minLength: 1. |
-| `room_type` | string  | No       | minLength: 1. |
-| `floor`     | number  | No       |               |
-| `is_active` | boolean | No       |               |
+| Field           | Type    | Required | Details       |
+| --------------- | ------- | -------- | ------------- |
+| `name`          | string  | No       | minLength: 1. |
+| `room_type`     | string  | No       | minLength: 1. |
+| `cleaning_type` | string  | No       | minLength: 1. |
+| `floor`         | number  | No       |               |
+| `is_active`     | boolean | No       |               |
 
 <a id="schema-taskcreate"></a>
 
@@ -2460,6 +2608,8 @@ If frequency_type is supplied as weekly or monthly, include its nonempty schedul
 | `client`          | string or object or null | No       | ObjectId on writes; populated document on reads. May be null. |
 | `name`            | string                   | No       | minLength: 1.                                                 |
 | `address`         | string                   | No       | minLength: 1.                                                 |
+| `description`     | string                   | No       |                                                               |
+| `type`            | string                   | No       | Allowed: "Hotel", "School", "Hospital", "Other".              |
 | `is_active`       | boolean                  | No       |                                                               |
 | `location`        | [Point](#schema-point)   | No       |                                                               |
 | `_id`             | string                   | No       | pattern: ^[a-fA-F0-9]{24}$.                                   |
@@ -2477,6 +2627,7 @@ If frequency_type is supplied as weekly or monthly, include its nonempty schedul
 | `location`        | string or object or null | No       | ObjectId on writes; populated document on reads. May be null. |
 | `name`            | string                   | No       | minLength: 1.                                                 |
 | `room_type`       | string                   | No       | minLength: 1.                                                 |
+| `cleaning_type`   | string                   | No       | minLength: 1.                                                 |
 | `floor`           | number or null           | No       |                                                               |
 | `is_active`       | boolean                  | No       |                                                               |
 | `_id`             | string                   | No       | pattern: ^[a-fA-F0-9]{24}$.                                   |

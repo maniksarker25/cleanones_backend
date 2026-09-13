@@ -14,9 +14,6 @@ export default {
     jwt_access_expires_in: process.env.JWT_ACCESS_EXPIRES_IN,
     jwt_refresh_expires_in: process.env.JWT_REFRESH_EXPIRES_IN,
     reset_password_ui_link: process.env.RESET_PASSWORD_UI_LINK,
-    cloudinary_cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    cloudinary_api_key: process.env.CLOUDINARY_API_KEY,
-    cloudinary_api_secret: process.env.CLOUDINARY_API_SECRET,
     super_admin_email: process.env.SUPER_ADMIN_EMAIL,
     super_admin_password: process.env.SUPER_ADMIN_PASSWORD,
     google_api_key: process.env.GOOGLE_API_KEY,
@@ -33,5 +30,24 @@ export default {
         smtp_mail: process.env.SMTP_MAIL,
         smtp_pass: process.env.SMTP_PASS,
         name: process.env.SERVICE_NAME,
+    },
+    aws: {
+        region: process.env.AWS_REGION,
+        access_key_id: process.env.AWS_ACCESS_KEY_ID,
+        secret_access_key: process.env.AWS_SECRET_ACCESS_KEY,
+        s3_bucket_name: process.env.AWS_S3_BUCKET_NAME,
+        cloudfront_url: process.env.CLOUDFRONT_URL,
+    },
+    onesignal: {
+        app_id: process.env.ONESIGNAL_APP_ID,
+        api_key: process.env.ONESIGNAL_API_KEY,
+    },
+    mocean: {
+        api_token: process.env.MOCEAN_API_TOKEN,
+    },
+    docs: {
+        port: process.env.DOCS_PORT,
+        api_url: process.env.DOCS_API_URL,
+        enabled: process.env.DOCS_ENABLED,
     },
 };

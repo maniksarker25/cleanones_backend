@@ -43,4 +43,17 @@ router.get(
     cleaningPlanController.getSingleCleaningPlan
 );
 
+router.get(
+    '/:id/eligible-workers',
+    auth(USER_ROLE.manager),
+    cleaningPlanController.getEligibleWorkers
+);
+
+router.patch(
+    '/:id/assign-workers',
+    auth(USER_ROLE.manager),
+    validateRequest(cleaningPlanValidations.assignWorkersValidationSchema),
+    cleaningPlanController.assignWorkers
+);
+
 export const cleaningPlanRoutes = router;

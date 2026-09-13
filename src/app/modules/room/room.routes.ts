@@ -28,9 +28,21 @@ router.delete(
 );
 
 router.get(
+    '/all-rooms',
+    auth(USER_ROLE.manager),
+    roomController.getAllRooms
+);
+
+router.get(
     '/all-rooms/:locationId',
     auth(USER_ROLE.manager),
     roomController.getAllRoomsByLocation
+);
+
+router.get(
+    '/my-rooms/:locationId',
+    auth(USER_ROLE.client),
+    roomController.getMyRooms
 );
 
 router.get(

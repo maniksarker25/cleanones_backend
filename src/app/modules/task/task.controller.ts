@@ -56,6 +56,20 @@ const getAllTasksByRoom = catchAsync(async (req, res) => {
     });
 });
 
+const getMyTasks = catchAsync(async (req, res) => {
+    const result = await taskServices.getMyTasksFromDB(
+        req.user.profileId as string,
+        req.params.roomId,
+        req.query
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'My tasks retrieved successfully',
+        data: result,
+    });
+});
+
 const getSingleTask = catchAsync(async (req, res) => {
     const result = await taskServices.getSingleTaskFromDB(req.params.id);
     sendResponse(res, {
@@ -71,6 +85,7 @@ const taskController = {
     updateTask,
     deleteTask,
     getAllTasksByRoom,
+    getMyTasks,
     getSingleTask,
 };
 

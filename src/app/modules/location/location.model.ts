@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { TLocation } from './location.interface';
+import { LOCATION_TYPE, TLocation } from './location.interface';
 
 const locationSchema = new Schema<TLocation>(
     {
@@ -7,6 +7,8 @@ const locationSchema = new Schema<TLocation>(
         last_updated_by: { type: Schema.Types.ObjectId, ref: 'Manager', default: null },
         name: { type: String, required: true },
         address: { type: String, required: true },
+        description: { type: String, default: null },
+        type: { type: String, enum: LOCATION_TYPE, required: true },
         is_active: { type: Boolean, default: true },
         location: {
             type: { type: String, enum: ['Point'], default: 'Point' },

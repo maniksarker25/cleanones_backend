@@ -13,6 +13,10 @@ const assignedWorkerSchema = new Schema<IAssignedWorker>(
             enum: ['Team leader', 'Co-leader', 'Normal worker'],
             required: true,
         },
+        assigned_with_conflict: {
+            type: Boolean,
+            default: false,
+        },
     },
     { _id: false }
 );
@@ -60,14 +64,18 @@ const cleaningPlanSchema = new Schema<ICleaningPlan>(
             type: [assignedWorkerSchema] as unknown as typeof assignedWorkerSchema[],
             default: [],
         },
-        start_date: {
+        date_time: {
             type: Date,
             required: true,
         },
-        start_time: {
-            type: String,
-            required: true,
-            trim: true,
+        end_date: {
+            type: Date,
+            default: null,
+        },
+        max_estimated_duration: {
+            type: Number,
+            default: 0,
+            min: 0,
         },
         note: {
             type: String,
@@ -93,6 +101,8 @@ const cleaningPlanSchema = new Schema<ICleaningPlan>(
         versionKey: false,
     }
 );
+
+cleaningPlanSchema.index({ 'assigned_workers.worker': 1, is_active: 1 });
 
 export const CleaningPlan = model<ICleaningPlan>(
     'CleaningPlan',

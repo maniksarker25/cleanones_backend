@@ -8,6 +8,7 @@ const roomSchema = new Schema<TRoom>(
         last_updated_by: { type: Schema.Types.ObjectId, ref: 'Manager', default: null },
         name: { type: String, required: true },
         room_type: { type: String, required: true },
+        cleaning_type: { type: String, required: true },
         floor: { type: Number, default: null },
         is_active: { type: Boolean, default: true },
     },

@@ -6,6 +6,7 @@ export interface TRoom {
     last_updated_by?: Types.ObjectId;
     name: string;
     room_type: string;
+    cleaning_type: string;
     floor?: number;
     is_active: boolean;
 }

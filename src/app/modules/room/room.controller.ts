@@ -43,6 +43,16 @@ const deleteRoom = catchAsync(async (req, res) => {
     });
 });
 
+const getAllRooms = catchAsync(async (req, res) => {
+    const result = await roomServices.getAllRoomsFromDB(req.query);
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Rooms retrieved successfully',
+        data: result,
+    });
+});
+
 const getAllRoomsByLocation = catchAsync(async (req, res) => {
     const result = await roomServices.getAllRoomsByLocationFromDB(
         req.params.locationId,
@@ -52,6 +62,20 @@ const getAllRoomsByLocation = catchAsync(async (req, res) => {
         statusCode: httpStatus.OK,
         success: true,
         message: 'Rooms retrieved successfully',
+        data: result,
+    });
+});
+
+const getMyRooms = catchAsync(async (req, res) => {
+    const result = await roomServices.getMyRoomsFromDB(
+        req.user.profileId as string,
+        req.params.locationId,
+        req.query
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'My rooms retrieved successfully',
         data: result,
     });
 });
@@ -70,7 +94,9 @@ const roomController = {
     createRoom,
     updateRoom,
     deleteRoom,
+    getAllRooms,
     getAllRoomsByLocation,
+    getMyRooms,
     getSingleRoom,
 };
 
