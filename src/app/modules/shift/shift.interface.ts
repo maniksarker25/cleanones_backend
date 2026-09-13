@@ -6,8 +6,6 @@ export type ShiftStatus =
     | 'completed'
     | 'cancelled';
 
-export type ShiftTaskStatus = 'UPCOMING' | 'IN_PROGRESS' | 'COMPLETED';
-
 export interface IShiftPhotoRequirement {
     title: string;
     photo_url: string | null;
@@ -54,9 +52,6 @@ export interface IShiftTask {
     // complete/approve step — see docs/SHIFT_MANAGEMENT_DESIGN.md.
     is_completed: boolean;
     completed_at?: Date | null;
-    // Defaults to UPCOMING at materialization time. Transitions to
-    // IN_PROGRESS/COMPLETED are set manually (no automatic logic yet).
-    status: ShiftTaskStatus;
 }
 
 export interface IShiftAssignedWorker {

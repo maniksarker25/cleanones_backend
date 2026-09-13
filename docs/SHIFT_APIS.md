@@ -49,8 +49,7 @@ Every shift response (real or virtual) looks like this:
         { "title": "After cleaning", "photo_url": null, "is_uploaded": false }
       ],
       "is_completed": false,
-      "completed_at": null,
-      "status": "UPCOMING"
+      "completed_at": null
     }
   ],
   "duration_minutes": 60,
@@ -74,9 +73,7 @@ Every shift response (real or virtual) looks like this:
 
 **`rooms`, `tasks`, and `assigned_workers` are frozen snapshots**, taken the moment the shift materializes (or, for a still-virtual shift, computed fresh from the plan's *current* state on every read). `room`/`task`/`worker` inside each entry are kept only for traceability — never re-resolve `name`/`room_type`/`photo_requirements` by looking up the live Room/Task/Worker document; the snapshot is authoritative for what happened (or is planned) on that specific day, even if the source document is later renamed, edited, or deactivated.
 
-**`tasks[].is_completed` is fully automatic** — it becomes `true` the moment every entry in that task's `photo_requirements` has `is_uploaded: true` (or immediately, if `is_photo_required` is `false`). There is no manual "mark complete" action and no manager approval step.
-
-**`tasks[].status`** (`"UPCOMING"` | `"IN_PROGRESS"` | `"COMPLETED"`) is a separate, independent field — it always starts at `"UPCOMING"` when the task instance is materialized. There is currently no endpoint or automatic logic that transitions it; that's a deliberate placeholder for now.
+**`tasks[].is_completed` is fully automatic** — it becomes `true` the moment every entry in that task's `photo_requirements` has `is_uploaded: true` (or immediately, if `is_photo_required` is `false`). There is no manual "mark complete" action and no manager approval step. Once every task on the shift has `is_completed: true`, the shift's own top-level `status` auto-advances to `"completed"` (see the photo-upload endpoint below).
 
 **`location`** is a frozen snapshot of the plan's Location, taken at materialization time — this is the geofence center check-in/check-out validate against. `coordinates` is `null` if the source Location has no GPS point configured.
 
@@ -236,7 +233,9 @@ Requires a worker access token. Records a photo submission for one specific task
 
 This call materializes the shift first if it was still virtual. The matching `photo_requirements` entry is set to `{ photo_url, is_uploaded: true }`, then `is_completed`/`completed_at` on that task instance is recomputed automatically from the full set of that task's requirements.
 
-**Response — `200 OK`**: the updated `Shift` document (see shape above).
+**Once every task on the shift now has `is_completed: true`, the shift's own top-level `status` is auto-advanced** from `"upcoming"`/`"in_progress"` to `"completed"` — atomically, and only in that direction (never re-triggers once already completed, never revives a `"cancelled"` shift; a shift with no tasks at all never auto-completes this way). No separate `PATCH .../status` call is needed for this specific transition, though that endpoint still exists for every other case.
+
+**Response — `200 OK`**: the updated `Shift` document (check its top-level `status` too — it may have just become `"completed"`).
 
 **Errors**:
 - `403` if the calling worker is not in this shift's `assigned_workers`.
@@ -277,6 +276,8 @@ There is **no time-window restriction** — check-in/check-out is valid any time
 2. The calling worker must be in that shift's `assigned_workers` — `403` otherwise.
 3. The submitted coordinates must be within **50 meters** (Haversine distance) of the shift's frozen `location.coordinates` — `400` otherwise, with the actual distance included in the message. If the shift's location has no GPS point configured at all, this always fails with `400` (geofencing can't be silently skipped).
 4. Check-in additionally requires the worker hasn't already checked in (`400` if so). Check-out additionally requires the worker has already checked in and hasn't already checked out (`400` if either is violated).
+
+**Check-in also auto-advances the shift's overall `status`**: the *first* successful check-in on a shift moves `status` from `"upcoming"` to `"in_progress"` automatically — no separate `PATCH .../status` call needed for this transition. This only fires when the shift is currently `"upcoming"`, so a later worker's check-in on an already `"in_progress"` (or `"completed"`/`"cancelled"`) shift leaves `status` untouched. The manual `PATCH .../status` endpoint still exists for every other transition (e.g. marking `"completed"`).
 
 **Response — `200 OK`**: the updated `Shift` document, with `assigned_workers[].check_in_at`/`check_in_coordinates` (or the `check_out_*` equivalents) set.
 

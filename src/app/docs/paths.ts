@@ -6391,7 +6391,7 @@ const paths = {
                 summary: 'Upload a required photo for one shift task',
                 operationId: 'patchShiftPlanIdDateTasksTaskIdPhoto',
                 description:
-                    'Materializes the shift for this date first if it does not exist yet. title must match one of that task instance\'s photo_requirements titles (frozen at materialization time) or this returns 400. Only a worker assigned to this shift may upload. is_completed on the task entry is recomputed automatically once every required photo is uploaded — there is no manual complete/approve step. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
+                    'Materializes the shift for this date first if it does not exist yet. title must match one of that task instance\'s photo_requirements titles (frozen at materialization time) or this returns 400. Only a worker assigned to this shift may upload. is_completed on the task entry is recomputed automatically once every required photo is uploaded — there is no manual complete/approve step. Once every task on the shift has is_completed: true, the shift\'s own top-level status auto-advances to \'completed\'. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['worker'],
                 parameters: [

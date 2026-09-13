@@ -46,11 +46,6 @@ const shiftTaskSchema = new Schema(
         photo_requirements: { type: [photoRequirementSchema], default: [] },
         is_completed: { type: Boolean, default: false },
         completed_at: { type: Date, default: null },
-        status: {
-            type: String,
-            enum: ['UPCOMING', 'IN_PROGRESS', 'COMPLETED'],
-            default: 'UPCOMING',
-        },
     },
     { _id: false }
 );

@@ -2576,18 +2576,12 @@ const schemas = {
                         is_completed: {
                             type: 'boolean',
                             description:
-                                'Auto-derived: true once every required photo_requirements entry is uploaded (or immediately if none are required). No manual complete/approve step.',
+                                "Auto-derived: true once every required photo_requirements entry is uploaded (or immediately if none are required). No manual complete/approve step. Once every task on the shift has is_completed: true, the shift's own top-level status auto-advances to 'completed'.",
                         },
                         completed_at: {
                             type: 'string',
                             format: 'date-time',
                             nullable: true,
-                        },
-                        status: {
-                            type: 'string',
-                            enum: ['UPCOMING', 'IN_PROGRESS', 'COMPLETED'],
-                            description:
-                                'Defaults to UPCOMING at materialization time. Transitions to IN_PROGRESS/COMPLETED are set manually (no automatic transition logic yet).',
                         },
                     },
                     description:
