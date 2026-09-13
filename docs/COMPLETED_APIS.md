@@ -1,6 +1,6 @@
 # cleanones-backend API reference
 
-76 documented operations from the implemented, mounted API handlers. This snapshot describes the current unfinished backend; documented contracts are not a claim that every endpoint works end to end.
+79 documented operations from the implemented, mounted API handlers. This snapshot describes the current unfinished backend; documented contracts are not a claim that every endpoint works end to end.
 
 ## Connection and authentication
 
@@ -74,6 +74,9 @@ Create a client, then its location, then a room, then tasks. Weekly tasks need a
 | GET    | `/task/single-task/{id}`                 | manager                           | [Get task](#gettasksingletaskid)                                    |
 | GET    | `/task/my-tasks/{roomId}`                | client                            | [My tasks](#gettaskmytasksroomid)                                    |
 | GET    | `/location/client-locations/{clientId}`  | manager                           | [List a client's locations](#getlocationclientlocationsclientid)    |
+| POST   | `/invoice/create-invoice`                | manager                           | [Create invoice](#postinvoicecreateinvoice)                         |
+| GET    | `/invoice/all-invoices`                  | manager                           | [List all invoices](#getinvoiceallinvoices)                         |
+| GET    | `/invoice/my-invoices`                   | worker                            | [My invoices](#getinvoicemyinvoices)                                |
 | POST   | `/auth/login`                            | Public                            | [Log in](#postauthlogin)                                            |
 | POST   | `/auth/change-password`                  | client, worker, admin, superAdmin | [Change password](#postauthchangepassword)                          |
 | POST   | `/auth/refresh-token`                    | refreshToken cookie               | [Refresh access token](#postauthrefreshtoken)                       |
@@ -1149,6 +1152,113 @@ Envelope: `success`, `message`, and `data`. **data:** object.
 | -------- | --------------------------------- | -------- | ---------- |
 | `meta`   | [Pagination](#schema-pagination) | Yes      |            |
 | `result` | array of [Task](#schema-task)    | Yes      | Each item: |
+
+## Invoices
+
+Manager-recorded worker payments.
+
+<a id="postinvoicecreateinvoice"></a>
+
+### POST /invoice/create-invoice
+
+Create invoice
+Records a payment made to a worker. The worker must exist and not be deleted, and its pending_amount (total_earning - total_paid) must be >= amount, or this returns 400. On success, amount is added to the worker's total_paid and subtracted from pending_amount, atomically (a transaction guards against two concurrent invoices overdrawing the same worker's pending balance).
+
+Required role: manager.
+
+**Additional error: HTTP 400.** Insufficient pending amount for this worker.
+
+**Access:** manager.
+
+**Request: application/json**
+
+| Field            | Type   | Required | Details              |
+| ---------------- | ------ | -------- | -------------------- |
+| `worker`         | [ObjectId](#schema-objectid) | Yes | |
+| `amount`         | number | Yes      | Must be greater than 0. |
+| `payment_method` | string | Yes      | minLength: 1.         |
+| `transaction_id` | string | No       |                       |
+| `notes`          | string | No       |                       |
+
+Example request:
+
+```json
+{
+  "worker": "507f1f77bcf86cd799439011",
+  "amount": 150.5,
+  "payment_method": "Bank Transfer",
+  "transaction_id": "TXN-2026-0912-001",
+  "notes": "September payout"
+}
+```
+
+**Response: HTTP 200**
+
+Envelope: `success`, `message`, and `data`. **data:** [Invoice](#schema-invoice).
+
+<a id="getinvoiceallinvoices"></a>
+
+### GET /invoice/all-invoices
+
+List all invoices
+Pagination is nested under data.meta; records are under data.result.
+
+Required role: manager.
+
+**Access:** manager.
+
+**Parameters**
+
+| Name         | In    | Type                          | Required | Details                                                                   |
+| ------------ | ----- | ------------------------------ | -------- | -------------------------------------------------------------------------- |
+| `worker`     | query | [ObjectId](#schema-objectid)  | No       | Filter invoices for this worker.                                          |
+| `page`       | query | integer                       | No       | Use a positive page number. Default: 1.                                   |
+| `limit`      | query | integer                       | No       | Use a positive page size. Default: 10.                                    |
+| `searchTerm` | query | string                        | No       | Case-insensitive regex search across payment_method, transaction_id, notes. |
+| `sort`       | query | string                        | No       | Single field; prefix with - for descending order. Default: "-createdAt".  |
+| `fields`     | query | string                        | No       | Comma-separated fields, for example amount,payment_method.                |
+
+**Request body:** none.
+
+**Response: HTTP 200**
+
+Envelope: `success`, `message`, and `data`. **data:** object.
+
+| Field    | Type                                | Required | Details    |
+| -------- | ------------------------------------ | -------- | ---------- |
+| `meta`   | [Pagination](#schema-pagination)    | Yes      |            |
+| `result` | array of [Invoice](#schema-invoice) | Yes      | Each item: |
+
+<a id="getinvoicemyinvoices"></a>
+
+### GET /invoice/my-invoices
+
+My invoices
+Returns invoices belonging to the authenticated worker; a `worker` query param is ignored (the caller's own scope is always enforced). Pagination is nested under data.meta; records are under data.result.
+
+Required role: worker.
+
+**Access:** worker.
+
+**Parameters**
+
+| Name         | In    | Type    | Required | Details                                                                    |
+| ------------ | ----- | ------- | -------- | ---------------------------------------------------------------------------- |
+| `page`       | query | integer | No       | Use a positive page number. Default: 1.                                     |
+| `limit`      | query | integer | No       | Use a positive page size. Default: 10.                                      |
+| `searchTerm` | query | string  | No       | Case-insensitive regex search across payment_method, transaction_id, notes. |
+| `sort`       | query | string  | No       | Single field; prefix with - for descending order. Default: "-createdAt".   |
+
+**Request body:** none.
+
+**Response: HTTP 200**
+
+Envelope: `success`, `message`, and `data`. **data:** object.
+
+| Field    | Type                                | Required | Details    |
+| -------- | ------------------------------------ | -------- | ---------- |
+| `meta`   | [Pagination](#schema-pagination)    | Yes      |            |
+| `result` | array of [Invoice](#schema-invoice) | Yes      | Each item: |
 
 ## Administration
 
@@ -2656,6 +2766,34 @@ If frequency_type is supplied as weekly or monthly, include its nonempty schedul
 | `updated_at`        | string (date-time)       | No       |                                                                      |
 | `client`            | string or object or null | No       | ObjectId on writes; populated document on reads. May be null.        |
 | `location`          | string or object or null | No       | ObjectId on writes; populated document on reads. May be null.        |
+
+<a id="schema-invoicecreate"></a>
+
+### InvoiceCreate
+
+| Field            | Type                          | Required | Details                |
+| ---------------- | ----------------------------- | -------- | ----------------------- |
+| `worker`         | [ObjectId](#schema-objectid) | Yes      |                         |
+| `amount`         | number                        | Yes      | exclusiveMinimum: 0.    |
+| `payment_method` | string                        | Yes      | minLength: 1.           |
+| `transaction_id` | string                        | No       |                         |
+| `notes`          | string                        | No       |                         |
+
+<a id="schema-invoice"></a>
+
+### Invoice
+
+| Field             | Type                      | Required | Details                                                       |
+| ----------------- | ------------------------- | -------- | -------------------------------------------------------------- |
+| `_id`             | string                    | No       | pattern: ^[a-fA-F0-9]{24}$.                                    |
+| `manager`         | string or object          | No       | ObjectId on writes; populated document on reads.               |
+| `worker`          | string or object          | No       | ObjectId on writes; populated document on reads.               |
+| `amount`          | number                    | No       | exclusiveMinimum: 0.                                            |
+| `payment_method`  | string                    | No       | minLength: 1.                                                   |
+| `transaction_id`  | string or null            | No       |                                                                 |
+| `notes`           | string or null            | No       |                                                                 |
+| `created_at`      | string (date-time)        | No       |                                                                 |
+| `updated_at`      | string (date-time)        | No       |                                                                 |
 
 <a id="schema-login"></a>
 

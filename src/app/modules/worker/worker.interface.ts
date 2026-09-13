@@ -17,6 +17,9 @@ export interface TWorker {
     employee_contract_pdf?: string;
     working_days: string[];
     hourly_rate: number;
+    total_earning: number;
+    total_paid: number;
+    pending_amount: number;
     is_profile_completed: boolean;
     id_card_front?: string;
     id_card_back?: string;

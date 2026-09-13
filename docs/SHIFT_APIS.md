@@ -276,8 +276,9 @@ There is **no time-window restriction** — check-in/check-out is valid any time
 2. The calling worker must be in that shift's `assigned_workers` — `403` otherwise.
 3. The submitted coordinates must be within **50 meters** (Haversine distance) of the shift's frozen `location.coordinates` — `400` otherwise, with the actual distance included in the message. If the shift's location has no GPS point configured at all, this always fails with `400` (geofencing can't be silently skipped).
 4. Check-in additionally requires the worker hasn't already checked in (`400` if so). Check-out additionally requires the worker has already checked in and hasn't already checked out (`400` if either is violated).
+5. **Check-out additionally requires the shift's own top-level `status` to already be `"completed"`** — `400` otherwise ("finish all tasks before checking out"). This means workers stay checked in until every task on the shift is done (all required photos uploaded — see the photo-upload endpoint's auto-completion), then any of them can check out once the shift as a whole is finished. This does not apply to check-in — you can check in as soon as you arrive, regardless of task progress.
 
-**Check-in also auto-advances the shift's overall `status`**: the *first* successful check-in on a shift moves `status` from `"upcoming"` to `"in_progress"` automatically — no separate `PATCH .../status` call needed for this transition. This only fires when the shift is currently `"upcoming"`, so a later worker's check-in on an already `"in_progress"` (or `"completed"`/`"cancelled"`) shift leaves `status` untouched. The manual `PATCH .../status` endpoint still exists for every other transition (e.g. marking `"completed"`).
+**Check-in also auto-advances the shift's overall `status`**: the *first* successful check-in on a shift moves `status` from `"upcoming"` to `"in_progress"` automatically — no separate `PATCH .../status` call needed for this transition. This only fires when the shift is currently `"upcoming"`, so a later worker's check-in on an already `"in_progress"` (or `"completed"`/`"cancelled"`) shift leaves `status` untouched. The manual `PATCH .../status` endpoint still exists for every other transition.
 
 **Response — `200 OK`**: the updated `Shift` document, with `assigned_workers[].check_in_at`/`check_in_coordinates` (or the `check_out_*` equivalents) set.
 
@@ -289,4 +290,4 @@ There is **no time-window restriction** — check-in/check-out is valid any time
 }
 ```
 
-**Errors**: `400` (geofence failure, missing coordinates on the location, or invalid check-in/out sequencing), `403` (not assigned to this shift), `404` (shift not materialized yet, or plan doesn't exist), `401`/`403` (not an authenticated worker).
+**Errors**: `400` (geofence failure, missing coordinates on the location, invalid check-in/out sequencing, or — check-out only — the shift isn't `"completed"` yet), `403` (not assigned to this shift), `404` (shift not materialized yet, or plan doesn't exist), `401`/`403` (not an authenticated worker).

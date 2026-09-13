@@ -1596,6 +1596,27 @@ const schemas = {
                 type: 'number',
                 default: 25,
             },
+            total_earning: {
+                type: 'number',
+                default: 0,
+                readOnly: true,
+                description:
+                    'Accrued automatically on each shift check-out (worked hours * hourly_rate at that time). Not directly settable.',
+            },
+            total_paid: {
+                type: 'number',
+                default: 0,
+                readOnly: true,
+                description:
+                    'Amount paid out to the worker so far. Increases when a manager creates an Invoice for this worker.',
+            },
+            pending_amount: {
+                type: 'number',
+                default: 0,
+                readOnly: true,
+                description:
+                    'total_earning - total_paid. Caps how much a manager can invoice for this worker at once.',
+            },
             is_profile_completed: {
                 type: 'boolean',
             },
@@ -2670,6 +2691,95 @@ const schemas = {
         },
         description:
             'A single-day occurrence of a CleaningPlan, derived from the recurrence of the active Tasks on its rooms. See docs/SHIFT_MANAGEMENT_DESIGN.md.',
+    },
+    InvoiceCreate: {
+        type: 'object',
+        properties: {
+            worker: {
+                $ref: '#/components/schemas/ObjectId',
+            },
+            amount: {
+                type: 'number',
+                exclusiveMinimum: 0,
+                example: 150.5,
+            },
+            payment_method: {
+                type: 'string',
+                minLength: 1,
+                example: 'Bank Transfer',
+            },
+            transaction_id: {
+                type: 'string',
+                example: 'TXN-2026-0912-001',
+            },
+            notes: {
+                type: 'string',
+                example: 'September payout',
+            },
+        },
+        required: ['worker', 'amount', 'payment_method'],
+    },
+    Invoice: {
+        type: 'object',
+        properties: {
+            _id: {
+                $ref: '#/components/schemas/ObjectId',
+            },
+            manager: {
+                oneOf: [
+                    { $ref: '#/components/schemas/ObjectId' },
+                    {
+                        type: 'object',
+                        properties: {
+                            _id: { $ref: '#/components/schemas/ObjectId' },
+                        },
+                    },
+                ],
+                description:
+                    'ObjectId on writes; populated document on reads.',
+            },
+            worker: {
+                oneOf: [
+                    { $ref: '#/components/schemas/ObjectId' },
+                    {
+                        type: 'object',
+                        properties: {
+                            _id: { $ref: '#/components/schemas/ObjectId' },
+                        },
+                    },
+                ],
+                description:
+                    'ObjectId on writes; populated document on reads.',
+            },
+            amount: {
+                type: 'number',
+                exclusiveMinimum: 0,
+                example: 150.5,
+            },
+            payment_method: {
+                type: 'string',
+                minLength: 1,
+                example: 'Bank Transfer',
+            },
+            transaction_id: {
+                type: 'string',
+                nullable: true,
+                example: 'TXN-2026-0912-001',
+            },
+            notes: {
+                type: 'string',
+                nullable: true,
+                example: 'September payout',
+            },
+            created_at: {
+                type: 'string',
+                format: 'date-time',
+            },
+            updated_at: {
+                type: 'string',
+                format: 'date-time',
+            },
+        },
     },
 };
 export default schemas;

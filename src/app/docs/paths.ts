@@ -6549,7 +6549,7 @@ const paths = {
                 summary: 'Check out from a shift',
                 operationId: 'patchShiftPlanIdDateCheckOut',
                 description:
-                    'Same rules as check-in (no materialization, 50m geofence, worker must be assigned) plus: the worker must already have checked in and must not already have checked out. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
+                    "Same rules as check-in (no materialization, 50m geofence, worker must be assigned) plus: the worker must already have checked in and must not already have checked out, AND the shift's own top-level status must already be 'completed' (every task's required photos uploaded) — 400 otherwise. Workers stay checked in for the duration of the actual cleaning work; check-out only becomes available once the shift as a whole is finished. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['worker'],
                 parameters: [
@@ -6602,6 +6602,230 @@ const paths = {
                                         message: { type: 'string' },
                                         data: {
                                             $ref: '#/components/schemas/Shift',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/invoice/create-invoice': {
+        post: {
+            ...{
+                tags: ['Invoices'],
+                summary: 'Create invoice',
+                operationId: 'postInvoiceCreateInvoice',
+                description:
+                    "Manager-only. Records a payment made to a worker. The worker must exist and not be deleted, and its pending_amount (total_earning - total_paid) must be >= amount, or this returns 400. On success, amount is added to the worker's total_paid and subtracted from pending_amount.\n\nRequired role: manager.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/InvoiceCreate',
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Invoice',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/invoice/all-invoices': {
+        get: {
+            ...{
+                tags: ['Invoices'],
+                summary: 'List all invoices',
+                operationId: 'getInvoiceAllInvoices',
+                description:
+                    'Manager-only. Pagination is nested under data.meta; records are under data.result.\n\nRequired role: manager.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'worker',
+                        in: 'query',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                        description: 'Filter invoices for this worker.',
+                    },
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across payment_method, transaction_id, notes.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: '-createdAt' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                    {
+                        name: 'fields',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Comma-separated fields, for example amount,payment_method.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/Invoice',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/invoice/my-invoices': {
+        get: {
+            ...{
+                tags: ['Invoices'],
+                summary: 'My invoices',
+                operationId: 'getInvoiceMyInvoices',
+                description:
+                    "Worker-only. Returns invoices belonging to the authenticated worker; a `worker` query param is ignored (the caller's own scope is always enforced). Pagination is nested under data.meta; records are under data.result.\n\nRequired role: worker.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['worker'],
+                parameters: [
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across payment_method, transaction_id, notes.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: '-createdAt' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/Invoice',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
                                         },
                                     },
                                     required: ['success', 'message'],
