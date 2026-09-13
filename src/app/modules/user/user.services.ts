@@ -23,6 +23,7 @@ import { TUserRole } from './user.interface';
 import { User } from './user.model';
 import { createToken } from './user.utils';
 import { updateUserProfileValidationSchema } from './user.validation';
+import workerValidations from '../worker/worker.validation';
 
 const generateVerifyCode = (): number => {
     return Math.floor(100000 + Math.random() * 900000);
@@ -45,6 +46,13 @@ export const registerUser = async (
         role,
         ...profileData
     } = payload;
+
+    if (role === 'worker') {
+        profileData.name = workerValidations.updateWorkerBody.parse({
+            name: profileData.name ?? [profileData.userData?.firstName, profileData.userData?.lastName]
+                .filter(Boolean).join(' '),
+        }).name;
+    }
 
     // validate password
     if (password !== confirmPassword) {

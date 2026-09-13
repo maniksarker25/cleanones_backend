@@ -405,6 +405,7 @@ const schemas = {
     WorkerCreate: {
         type: 'object',
         properties: {
+            name: { type: 'string', minLength: 1, example: 'Alex Morgan', description: 'Worker name; surrounding whitespace is trimmed.' },
             email: {
                 type: 'string',
                 format: 'email',
@@ -503,6 +504,7 @@ const schemas = {
             },
         },
         required: [
+            'name',
             'email',
             'phone',
             'worker_type',
@@ -516,6 +518,7 @@ const schemas = {
     WorkerUpdate: {
         type: 'object',
         properties: {
+            name: { type: 'string', minLength: 1, example: 'Alex Morgan', description: 'Worker name; surrounding whitespace is trimmed.' },
             email: {
                 type: 'string',
                 format: 'email',
@@ -1298,6 +1301,7 @@ const schemas = {
     Worker: {
         type: 'object',
         properties: {
+            name: { type: 'string', minLength: 1, example: 'Alex Morgan', description: 'Worker name; surrounding whitespace is trimmed.' },
             _id: {
                 type: 'string',
                 pattern: '^[a-fA-F0-9]{24}$',

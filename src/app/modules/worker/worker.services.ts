@@ -190,7 +190,7 @@ const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
         }),
     };
     const workerQuery = new QueryBuilder(Worker.find(activeWorker), safeQuery)
-        .search(['email', 'phone', 'position', 'nationality'])
+        .search(['name', 'email', 'phone', 'position', 'nationality'])
         .filter()
         .paginate()
         .sort();
