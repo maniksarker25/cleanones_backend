@@ -2877,6 +2877,11 @@ const schemas = {
                 type: 'string',
                 format: 'date-time',
             },
+            is_virtual: {
+                type: 'boolean',
+                description:
+                    'True when this occurrence has no Shift document yet (projected from the plan\'s recurrence, not persisted) — no check-in/photo actions are possible on it until it materializes. _id/createdAt/updatedAt are absent in that case.',
+            },
         },
         description:
             'A Shift without its tasks[]/rooms[]/assigned_workers[] arrays — used where a dashboard only needs the schedule/location/status, not the full detail.',

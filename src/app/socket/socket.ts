@@ -40,16 +40,27 @@ const initializeSocket = (server: HTTPServer) => {
                 ) as JwtPayload;
 
                 const currentUserId = decode.profileId;
+                const currentUserAccountId = decode.id;
                 console.log('Current user id', currentUserId);
 
                 if (!currentUserId) return socket.disconnect();
 
                 socket.join(currentUserId);
 
+                if (decode.role === 'manager') {
+                    socket.join('role:manager');
+                }
+
                 onlineUsers.add(currentUserId);
 
                 io.emit('onlineUser', Array.from(onlineUsers));
-                handleChat(io, socket, currentUserId, decode.role);
+                handleChat(
+                    io,
+                    socket,
+                    currentUserAccountId,
+                    currentUserId,
+                    decode.role
+                );
 
                 socket.on('disconnect', () => {
                     onlineUsers.delete(currentUserId);

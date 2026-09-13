@@ -6,6 +6,7 @@ import messageServices from './message.service';
 const getMessages = catchAsync(async (req, res) => {
     const result = await messageServices.getMessagesByConversationId(
         req.user.profileId,
+        req.user.role,
         req.params.id,
         req.query
     );

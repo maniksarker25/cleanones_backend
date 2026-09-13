@@ -6,10 +6,14 @@ import { authRoutes } from '../modules/auth/auth.routes';
 import { clientRoutes } from '../modules/client/client.routes';
 import { clientContactRoutes } from '../modules/client_contact/client_contact.routes';
 import { cleaningPlanRoutes } from '../modules/cleaning_plan/cleaning_plan.routes';
+import { chatRoutes } from '../modules/chat/chat.routes';
+import { chatMessageRoutes } from '../modules/chat_message/chat_message.routes';
+import { conversationRoutes } from '../modules/conversation/conversation.routes';
 import { fileUploadRoutes } from '../modules/file-upload/file-upload.routes';
 import { invoiceRoutes } from '../modules/invoice/invoice.routes';
 import { legalInfoRoutes } from '../modules/legal_info/legal_info.routes';
 import { locationRoutes } from '../modules/location/location.routes';
+import { messageRoutes } from '../modules/message/message.routes';
 import { ManageRoutes } from '../modules/manage-web/manage.routes';
 import { metaRoutes } from '../modules/meta/meta.routes';
 import { notificationRoutes } from '../modules/notification/notification.routes';
@@ -66,6 +70,22 @@ const moduleRoutes = [
     {
         path: '/additional-task',
         router: additionalTaskRoutes,
+    },
+    {
+        path: '/chat',
+        router: chatRoutes,
+    },
+    {
+        path: '/chat-message',
+        router: chatMessageRoutes,
+    },
+    {
+        path: '/conversation',
+        router: conversationRoutes,
+    },
+    {
+        path: '/message',
+        router: messageRoutes,
     },
     {
         path: '/shift',

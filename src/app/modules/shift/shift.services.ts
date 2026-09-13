@@ -354,24 +354,87 @@ export const getWorkerTodayMetaFromDB = async (workerId: string) => {
     };
 };
 
+// A materialized Shift only ever exists for TODAY at the earliest (the
+// nightly cron materializes one day at a time; nothing pre-materializes
+// further out). So "next shift" can't rely on Shift documents alone — a
+// worker's next occurrence days out is real, it just hasn't been written to
+// the DB yet. This projects forward through the recurrence patterns of the
+// worker's active plans to find it, same as the cron/virtual-preview paths
+// already do for a single day.
+const NEXT_SHIFT_PROJECTION_HORIZON_DAYS = 90;
+
 /**
- * The worker's next upcoming shift, strictly after now. Only considers
- * already-materialized Shift documents (status: 'upcoming') — a future
- * occurrence that hasn't been materialized yet (no manager action, cron
- * hasn't run) won't show up here until it is. Returns {} when there is none.
+ * The worker's next upcoming shift, strictly after now — whichever is
+ * sooner of: the nearest already-materialized Shift assigned to this worker,
+ * or the nearest not-yet-materialized occurrence projected from the
+ * recurrence patterns of the plans this worker is currently assigned to.
+ * Returns {} when there is genuinely nothing within the projection horizon.
  */
 export const getNextShiftForWorker = async (workerId: string) => {
-    const shift = await Shift.findOne({
+    const now = new Date();
+
+    const materialized = await Shift.findOne({
         'assigned_workers.worker': workerId,
         status: 'upcoming',
-        date_time: { $gt: new Date() },
+        date_time: { $gt: now },
     })
         .sort({ date_time: 1 })
         .lean();
 
-    if (!shift) return {};
-    const { tasks, rooms, assigned_workers, ...rest } = shift;
-    return rest;
+    const plans = await CleaningPlan.find({
+        'assigned_workers.worker': workerId,
+        is_active: true,
+        status: { $ne: 'completed' },
+    }).lean();
+
+    let bestVirtual: {
+        plan: (typeof plans)[number];
+        day: Date;
+        occurrenceDateTime: Date;
+        snapshot: Awaited<ReturnType<typeof buildShiftSnapshot>>;
+    } | null = null;
+
+    for (const plan of plans) {
+        const snapshot = await buildShiftSnapshot(plan);
+        const today = normalizeToUTCDateOnly(now);
+        for (let i = 0; i <= NEXT_SHIFT_PROJECTION_HORIZON_DAYS; i++) {
+            const day = new Date(today);
+            day.setUTCDate(day.getUTCDate() + i);
+            if (!anyPatternOccursOnDate(snapshot.patterns, day)) continue;
+
+            const occurrenceDateTime = combineDateWithTimeOfDay(day, plan.date_time);
+            if (occurrenceDateTime <= now) continue; // today's slot already passed
+
+            if (!bestVirtual || occurrenceDateTime < bestVirtual.occurrenceDateTime) {
+                bestVirtual = { plan, day, occurrenceDateTime, snapshot };
+            }
+            break; // nearest occurrence for THIS plan found — stop scanning further days
+        }
+    }
+
+    const materializedAt = materialized?.date_time ?? null;
+    const virtualAt = bestVirtual?.occurrenceDateTime ?? null;
+
+    if (materializedAt && (!virtualAt || materializedAt <= virtualAt)) {
+        const { tasks, rooms, assigned_workers, ...rest } = materialized!;
+        return { ...rest, is_virtual: false };
+    }
+
+    if (bestVirtual) {
+        const { plan, day, snapshot, occurrenceDateTime } = bestVirtual;
+        return {
+            cleaning_plan: plan._id,
+            date: day,
+            date_time: occurrenceDateTime,
+            location: snapshot.location,
+            duration_minutes: snapshot.durationMinutes,
+            is_worker_overridden: false,
+            status: 'upcoming' as const,
+            is_virtual: true,
+        };
+    }
+
+    return {};
 };
 
 /**

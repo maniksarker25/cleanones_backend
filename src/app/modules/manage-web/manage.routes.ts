@@ -8,33 +8,37 @@ const router = express.Router();
 
 router.post(
     '/add-about-us',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.addAboutUs
 );
-router.post('/add-faq', auth(USER_ROLE.superAdmin), ManageController.addFAQ);
+router.post(
+    '/add-faq',
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
+    ManageController.addFAQ
+);
 router.post(
     '/add-terms-conditions',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.addTermsConditions
 );
 router.post(
     '/add-partner',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.addPartner
 );
 router.post(
     '/add-contact-us',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.addContactUs
 );
 router.post(
     '/add-privacy-policy',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.addPrivacyPolicy
 );
 router.post(
     '/add-slider',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     uploadFile(),
     ManageController.addSlider
 );
@@ -48,75 +52,75 @@ router.get('/get-terms-conditions', ManageController.getTermsConditions);
 router.get('/get-contact-us', ManageController.getContactUs);
 router.patch(
     '/edit-privacy-policy/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.editPrivacyPolicy
 );
 router.patch(
     '/edit-partner/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.editPartner
 );
 router.patch(
     '/edit-slider/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     uploadFile(),
     ManageController.editSlider
 );
 router.patch(
     '/edit-faq/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.editFAQ
 );
 router.patch(
     '/edit-about-us/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.editAboutUs
 );
 
 router.patch(
     '/edit-terms-conditions/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.editTermsConditions
 );
 
 router.patch(
     '/edit-contact-us/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.editContactUs
 );
 router.delete(
     '/delete-about-us/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.deleteAboutUs
 );
 router.delete(
     '/delete-slider/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.deleteSlider
 );
 router.delete(
     '/delete-faq/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.deleteFAQ
 );
 router.delete(
     '/delete-contact-us/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.deleteContactUs
 );
 router.delete(
     '/delete-privacy-policy/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.deletePrivacyPolicy
 );
 router.delete(
     '/delete-partner/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.deletePartner
 );
 router.delete(
     '/delete-terms-conditions/:id',
-    auth(USER_ROLE.superAdmin),
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin, USER_ROLE.manager),
     ManageController.deleteTermsConditions
 );
 export const ManageRoutes = router;
