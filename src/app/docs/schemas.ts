@@ -295,6 +295,7 @@ const schemas = {
                             type: 'string',
                             minLength: 1,
                             example: 'Before cleaning',
+                            description: 'Photo label defined by the admin.',
                         },
                         photo_url: {
                             type: 'string',
@@ -360,6 +361,7 @@ const schemas = {
                             type: 'string',
                             minLength: 1,
                             example: 'Before cleaning',
+                            description: 'Photo label defined by the admin.',
                         },
                         photo_url: {
                             type: 'string',
@@ -1178,6 +1180,7 @@ const schemas = {
                             type: 'string',
                             minLength: 1,
                             example: 'Before cleaning',
+                            description: 'Photo label defined by the admin.',
                         },
                         photo_url: {
                             type: 'string',

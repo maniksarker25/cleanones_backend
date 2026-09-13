@@ -19,6 +19,52 @@ import { Shift } from './shift.model';
 
 const MONGO_DUPLICATE_KEY_ERROR = 11000;
 
+/** Saved assignments always override plan defaults, including worker removals. */
+export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
+    const day = normalizeToUTCDateOnly(date);
+    const plans = await CleaningPlan.find({
+        'assigned_workers.worker': workerId,
+        is_active: true,
+        status: { $ne: 'completed' },
+    }).select('rooms date_time end_date assigned_workers').lean();
+
+    // Include saved occurrences of candidate plans even if this worker was
+    // removed from them. Their existence must suppress a virtual fallback.
+    const saved = await Shift.find({
+        date: day,
+        $or: [
+            { 'assigned_workers.worker': workerId },
+            { cleaning_plan: { $in: plans.map((plan) => plan._id) } },
+        ],
+    }).lean();
+    const savedPlanIds = new Set(saved.map((shift) => shift.cleaning_plan.toString()));
+    const results = saved
+        .filter((shift) => shift.assigned_workers.some((entry) => entry.worker.toString() === workerId))
+        .map((shift) => ({ ...shift, is_virtual: false }));
+
+    const virtual = [];
+    for (const plan of plans) {
+        if (savedPlanIds.has(plan._id.toString())) continue;
+        const patterns = await loadTaskPatterns(plan.rooms ?? [], plan.date_time, plan.end_date ?? null);
+        if (!anyPatternOccursOnDate(patterns, day)) continue;
+        virtual.push({
+            cleaning_plan: plan._id,
+            date: day,
+            date_time: combineDateWithTimeOfDay(day, plan.date_time),
+            rooms: plan.rooms,
+            duration_minutes: await computeMaxEstimatedDuration(plan.rooms ?? []),
+            assigned_workers: plan.assigned_workers,
+            is_worker_overridden: false,
+            status: 'upcoming' as const,
+            is_virtual: true,
+        });
+    }
+    return [...results, ...virtual].sort((a, b) =>
+        a.date_time.getTime() - b.date_time.getTime() ||
+        a.cleaning_plan.toString().localeCompare(b.cleaning_plan.toString())
+    );
+};
+
 const ensurePlanExists = async (planId: string) => {
     const plan = await CleaningPlan.findById(planId);
     if (!plan)
@@ -278,6 +324,7 @@ export const updateShiftStatus = async (
 };
 
 const shiftServices = {
+    listWorkerShiftsForDate,
     getOrCreateShift,
     getShiftForDate,
     listShiftsInRange,

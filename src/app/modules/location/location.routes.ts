@@ -48,7 +48,7 @@ router.get(
 
 router.get(
     '/single-location/:id',
-    auth(USER_ROLE.manager),
+    auth(USER_ROLE.manager,USER_ROLE.client),
     locationController.getSingleLocation
 );
 

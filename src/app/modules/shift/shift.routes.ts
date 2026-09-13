@@ -7,6 +7,8 @@ import shiftValidations from './shift.validation';
 
 const router = Router();
 
+router.get('/my-shifts', auth(USER_ROLE.worker), shiftController.listMyShifts);
+
 router.get('/:planId', auth(USER_ROLE.manager), shiftController.listShifts);
 
 router.get(
