@@ -100,7 +100,7 @@ const getAllTasksByRoomFromDB = async (
         Task.find({ room: roomId, is_active: true })
             .populate('client', 'name email phone company_name')
             .populate('location', 'name address')
-            .populate('room', 'name room_type floor')
+            .populate('room', 'name room_type cleaning_type floor')
             .populate({
                 path: 'last_updated_by',
                 populate: { path: 'user', select: 'email phone' },
@@ -122,11 +122,27 @@ const getAllTasksByRoomFromDB = async (
     };
 };
 
+const getMyTasksFromDB = async (
+    clientId: string,
+    roomId: string,
+    query: Record<string, unknown>
+) => {
+    const room = await Room.findOne({ _id: roomId, is_active: true }).populate<{
+        location: { client: string };
+    }>('location');
+
+    if (!room || room.location?.client?.toString() !== clientId) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Room not found');
+    }
+
+    return getAllTasksByRoomFromDB(roomId, query);
+};
+
 const getSingleTaskFromDB = async (id: string) => {
     const task = await Task.findById(id)
         .populate('client', 'name email phone company_name')
         .populate('location', 'name address')
-        .populate('room', 'name room_type floor')
+        .populate('room', 'name room_type cleaning_type floor')
         .populate({
             path: 'last_updated_by',
             populate: { path: 'user', select: 'email phone' },
@@ -144,6 +160,7 @@ const taskServices = {
     updateTaskIntoDB,
     deleteTaskFromDB,
     getAllTasksByRoomFromDB,
+    getMyTasksFromDB,
     getSingleTaskFromDB,
 };
 

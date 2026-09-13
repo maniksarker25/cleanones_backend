@@ -34,6 +34,12 @@ router.get(
 );
 
 router.get(
+    '/my-tasks/:roomId',
+    auth(USER_ROLE.client),
+    taskController.getMyTasks
+);
+
+router.get(
     '/single-task/:id',
     auth(USER_ROLE.manager),
     taskController.getSingleTask

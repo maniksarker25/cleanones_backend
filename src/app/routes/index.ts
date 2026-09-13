@@ -11,6 +11,7 @@ import { ManageRoutes } from '../modules/manage-web/manage.routes';
 import { metaRoutes } from '../modules/meta/meta.routes';
 import { notificationRoutes } from '../modules/notification/notification.routes';
 import { roomRoutes } from '../modules/room/room.routes';
+import { shiftRoutes } from '../modules/shift/shift.routes';
 import { superAdminRoutes } from '../modules/superAdmin/superAdmin.routes';
 import { taskRoutes } from '../modules/task/task.routes';
 import { userRoutes } from '../modules/user/user.routes';
@@ -54,6 +55,10 @@ const moduleRoutes = [
     {
         path: '/additional-task',
         router: additionalTaskRoutes,
+    },
+    {
+        path: '/shift',
+        router: shiftRoutes,
     },
 
     {

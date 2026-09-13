@@ -16,6 +16,7 @@ import router from './app/routes';
 import { setupSwagger } from './app/docs/swagger';
 
 import './app/events/listeners';
+import './app/modules/shift/shift.cron';
 const app: Application = express();
 // VERY IMPORTANT (for proxy / nginx)
 app.set('trust proxy', 1);
