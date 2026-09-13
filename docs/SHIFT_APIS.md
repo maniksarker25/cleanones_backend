@@ -1,6 +1,6 @@
 # Shift Management APIs
 
-Base path: `/api/v1/shift`. Manager endpoints require `Authorization: Bearer <manager-access-token>`. `/my-shifts`, the photo-upload endpoint, and check-in/check-out require a worker access token.
+Base path: `/api/v1/shift`. Manager endpoints require `Authorization: Bearer <manager-access-token>`. `/my-shifts`, the photo-upload endpoint, and check-in/check-out require a worker access token. `GET /:planId/:date` accepts either (see its section for the worker-specific ownership check).
 
 A **Shift** is a single-day occurrence of a `CleaningPlan`, derived from the recurrence (`frequency_type`/`days_of_week`/`days_of_month`) of the active `Task` documents on that plan's rooms. See `docs/SHIFT_MANAGEMENT_DESIGN.md` for how occurrences, materialization, snapshotting, and conflict-checking work.
 
@@ -10,7 +10,7 @@ A **Shift** is a single-day occurrence of a `CleaningPlan`, derived from the rec
 | --- | --- | --- |
 | GET | `/my-shifts?date=YYYY-MM-DD` | List the authenticated worker's shifts for one date |
 | GET | `/:planId` | List a plan's occurrences in a date range |
-| GET | `/:planId/:date` | Get one occurrence |
+| GET | `/:planId/:date` | Get one occurrence (manager: any; worker: only if assigned) |
 | PATCH | `/:planId/:date/assign-workers` | Replace workers for one specific occurrence |
 | PATCH | `/:planId/:date/status` | Update one occurrence's status |
 | PATCH | `/:planId/:date/tasks/:taskId/photo` | Upload a required photo for one shift task (worker) |
@@ -127,7 +127,10 @@ List every occurrence between two dates.
 
 ## `GET /api/v1/shift/:planId/:date`
 
-Get a single occurrence. Same shape as one item from the list endpoint.
+Get a single occurrence. Same shape as one item from the list endpoint. Accepts either a manager or a worker access token.
+
+- **Manager**: can view any shift.
+- **Worker**: only allowed to view a shift they are actually in `assigned_workers` for (checked against the real record if materialized, or the live plan default if still virtual) — `403` otherwise.
 
 **`404`** if the plan doesn't exist, or the plan has no occurrence on that date at all.
 

@@ -43,7 +43,7 @@ export function createOpenApiDocument(serverUrl = '/api/v1') {
             ],
             [
                 'Additional tasks',
-                'Client-requested extra tasks on a cleaning plan, subject to manager approval.',
+                'Extra tasks created by clients or managers. Manager-created tasks are automatically approved.',
             ],
             ['Administration', 'Administrator account management.'],
             [

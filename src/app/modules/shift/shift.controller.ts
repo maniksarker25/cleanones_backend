@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import AppError from '../../error/appError';
 import catchAsync from '../../utilities/catchasync';
 import sendResponse from '../../utilities/sendResponse';
+import { USER_ROLE } from '../user/user.constant';
 import shiftServices from './shift.services';
 import shiftValidations from './shift.validation';
 
@@ -55,9 +56,14 @@ const listShifts = catchAsync(async (req, res) => {
 
 const getShift = catchAsync(async (req, res) => {
     const date = parseDateParam(req.params.date);
+    const requestingWorkerId =
+        req.user.role === USER_ROLE.worker
+            ? (req.user.profileId as string)
+            : undefined;
     const result = await shiftServices.getShiftForDate(
         req.params.planId,
-        date
+        date,
+        requestingWorkerId
     );
     if (!result) {
         throw new AppError(

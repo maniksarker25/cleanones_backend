@@ -11,7 +11,7 @@ const router = Router();
 
 router.post(
     '/create-additional-task',
-    auth(USER_ROLE.client),
+    auth(USER_ROLE.client, USER_ROLE.manager),
     validateRequest(
         additionalTaskValidations.createAdditionalTaskValidationSchema
     ),
