@@ -10,6 +10,7 @@ import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
 import { Worker } from '../worker/worker.model';
+import { haversineDistanceMeters } from './geo.util';
 import { findWorkerConflictOnDate } from './shift.availability.services';
 import { IShift } from './shift.interface';
 import { Shift } from './shift.model';
@@ -34,6 +35,7 @@ const ensureActivePlan = async (planId: string | Types.ObjectId) => {
 const buildVirtualShift = async (
     plan: {
         _id: Types.ObjectId;
+        location: Types.ObjectId;
         rooms: Types.ObjectId[];
         assigned_workers: IAssignedWorker[];
         date_time: Date;
@@ -48,6 +50,7 @@ const buildVirtualShift = async (
         cleaning_plan: plan._id,
         date: day,
         date_time: combineDateWithTimeOfDay(day, plan.date_time),
+        location: snapshot.location,
         rooms: snapshot.rooms,
         tasks: snapshot.tasks,
         duration_minutes: snapshot.durationMinutes,
@@ -99,6 +102,7 @@ export const getOrCreateShift = async (
             cleaning_plan: plan._id,
             date: day,
             date_time: combineDateWithTimeOfDay(day, plan.date_time),
+            location: snapshot.location,
             rooms: snapshot.rooms,
             tasks: snapshot.tasks,
             duration_minutes: snapshot.durationMinutes,
@@ -169,6 +173,7 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
             cleaning_plan: plan._id,
             date: day,
             date_time: combineDateWithTimeOfDay(day, plan.date_time),
+            location: snapshot.location,
             rooms: snapshot.rooms,
             tasks: snapshot.tasks,
             duration_minutes: snapshot.durationMinutes,
@@ -189,7 +194,7 @@ export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
         is_active: true,
         status: { $ne: 'completed' },
     })
-        .select('rooms date_time end_date assigned_workers')
+        .select('location rooms date_time end_date assigned_workers')
         .lean();
 
     // Include saved occurrences of candidate plans even if this worker was
@@ -394,6 +399,118 @@ export const uploadShiftTaskPhoto = async (
     return Shift.findById(shift._id);
 };
 
+const GEOFENCE_RADIUS_METERS = 50;
+
+/**
+ * Shared lookup + eligibility check for check-in/check-out. Deliberately
+ * does NOT call getOrCreateShift — check-in only ever applies to a shift that
+ * already exists (materialized by the daily cron or an earlier manager edit).
+ * There's no reason to check into a shift that hasn't happened yet, and if
+ * the cron hasn't run for some reason, there's nothing to check into.
+ */
+const findAssignedShiftOrThrow = async (
+    workerId: string,
+    planId: string,
+    date: Date
+) => {
+    const day = normalizeToUTCDateOnly(date);
+    const shift = await Shift.findOne({ cleaning_plan: planId, date: day });
+    if (!shift) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Shift not found');
+    }
+    const workerIndex = shift.assigned_workers.findIndex(
+        (aw) => aw.worker.toString() === workerId
+    );
+    if (workerIndex === -1) {
+        throw new AppError(
+            httpStatus.FORBIDDEN,
+            'You are not assigned to this shift'
+        );
+    }
+    return { shift, workerIndex };
+};
+
+/**
+ * Validates the worker's submitted GPS position against the shift's frozen
+ * location snapshot. No time-window restriction — valid any time on the
+ * shift's date, only distance is enforced. A location with no configured
+ * coordinates always fails closed (geofencing can't be skipped silently).
+ */
+const assertWithinGeofence = (
+    shift: { location: { coordinates: { coordinates: [number, number] } | null } },
+    coordinates: [number, number]
+) => {
+    if (!shift.location.coordinates) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'This location has no GPS coordinates configured; check-in cannot be validated'
+        );
+    }
+    const distance = haversineDistanceMeters(
+        coordinates,
+        shift.location.coordinates.coordinates
+    );
+    if (distance > GEOFENCE_RADIUS_METERS) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            `You must be within ${GEOFENCE_RADIUS_METERS}m of the location to check in (currently ${Math.round(distance)}m away)`
+        );
+    }
+};
+
+export const checkInToShift = async (
+    workerId: string,
+    planId: string,
+    date: Date,
+    coordinates: [number, number]
+) => {
+    const { shift, workerIndex } = await findAssignedShiftOrThrow(workerId, planId, date);
+    assertWithinGeofence(shift, coordinates);
+
+    if (shift.assigned_workers[workerIndex].check_in_at) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
+    }
+
+    return Shift.findOneAndUpdate(
+        { _id: shift._id, 'assigned_workers.worker': workerId },
+        {
+            $set: {
+                'assigned_workers.$.check_in_at': new Date(),
+                'assigned_workers.$.check_in_coordinates': coordinates,
+            },
+        },
+        { new: true }
+    );
+};
+
+export const checkOutFromShift = async (
+    workerId: string,
+    planId: string,
+    date: Date,
+    coordinates: [number, number]
+) => {
+    const { shift, workerIndex } = await findAssignedShiftOrThrow(workerId, planId, date);
+    assertWithinGeofence(shift, coordinates);
+
+    if (!shift.assigned_workers[workerIndex].check_in_at) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'You have not checked in for this shift yet');
+    }
+    if (shift.assigned_workers[workerIndex].check_out_at) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Already checked out for this shift');
+    }
+
+    return Shift.findOneAndUpdate(
+        { _id: shift._id, 'assigned_workers.worker': workerId },
+        {
+            $set: {
+                'assigned_workers.$.check_out_at': new Date(),
+                'assigned_workers.$.check_out_coordinates': coordinates,
+            },
+        },
+        { new: true }
+    );
+};
+
 const shiftServices = {
     listWorkerShiftsForDate,
     getOrCreateShift,
@@ -402,6 +519,8 @@ const shiftServices = {
     assignWorkersToShift,
     updateShiftStatus,
     uploadShiftTaskPhoto,
+    checkInToShift,
+    checkOutFromShift,
 };
 
 export default shiftServices;

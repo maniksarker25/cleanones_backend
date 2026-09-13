@@ -1,6 +1,6 @@
 # Shift Management APIs
 
-Base path: `/api/v1/shift`. Manager endpoints require `Authorization: Bearer <manager-access-token>`. `/my-shifts` and the photo-upload endpoint require a worker access token.
+Base path: `/api/v1/shift`. Manager endpoints require `Authorization: Bearer <manager-access-token>`. `/my-shifts`, the photo-upload endpoint, and check-in/check-out require a worker access token.
 
 A **Shift** is a single-day occurrence of a `CleaningPlan`, derived from the recurrence (`frequency_type`/`days_of_week`/`days_of_month`) of the active `Task` documents on that plan's rooms. See `docs/SHIFT_MANAGEMENT_DESIGN.md` for how occurrences, materialization, snapshotting, and conflict-checking work.
 
@@ -14,6 +14,8 @@ A **Shift** is a single-day occurrence of a `CleaningPlan`, derived from the rec
 | PATCH | `/:planId/:date/assign-workers` | Replace workers for one specific occurrence |
 | PATCH | `/:planId/:date/status` | Update one occurrence's status |
 | PATCH | `/:planId/:date/tasks/:taskId/photo` | Upload a required photo for one shift task (worker) |
+| PATCH | `/:planId/:date/check-in` | Check in to an already-materialized shift (worker) |
+| PATCH | `/:planId/:date/check-out` | Check out from an already-materialized shift (worker) |
 
 `:date` is always an ISO calendar date (`YYYY-MM-DD`). `:planId` is a `CleaningPlan` ID. `:taskId` is the source `Task`'s ID (matches a `tasks[].task` entry on the shift).
 
@@ -27,6 +29,11 @@ Every shift response (real or virtual) looks like this:
   "cleaning_plan": "6520f1a2b3c4d5e6f7890999",
   "date": "2026-02-11T00:00:00.000Z",
   "date_time": "2026-02-11T09:00:00.000Z",
+  "location": {
+    "location": "6520f1a2b3c4d5e6f7890002",
+    "name": "Downtown Office",
+    "coordinates": { "type": "Point", "coordinates": [90.4125, 23.8103] }
+  },
   "rooms": [
     { "room": "6520f1a2b3c4d5e6f7890010", "name": "Lobby", "room_type": "common" }
   ],
@@ -48,7 +55,16 @@ Every shift response (real or virtual) looks like this:
   ],
   "duration_minutes": 60,
   "assigned_workers": [
-    { "worker": "6520f1a2b3c4d5e6f7890124", "name": "Rafiq Islam", "role": "Team leader", "assigned_with_conflict": false }
+    {
+      "worker": "6520f1a2b3c4d5e6f7890124",
+      "name": "Rafiq Islam",
+      "role": "Team leader",
+      "assigned_with_conflict": false,
+      "check_in_at": null,
+      "check_in_coordinates": null,
+      "check_out_at": null,
+      "check_out_coordinates": null
+    }
   ],
   "is_worker_overridden": false,
   "status": "upcoming",
@@ -61,6 +77,8 @@ Every shift response (real or virtual) looks like this:
 **`tasks[].is_completed` is fully automatic** — it becomes `true` the moment every entry in that task's `photo_requirements` has `is_uploaded: true` (or immediately, if `is_photo_required` is `false`). There is no manual "mark complete" action and no manager approval step.
 
 **`tasks[].status`** (`"UPCOMING"` | `"IN_PROGRESS"` | `"COMPLETED"`) is a separate, independent field — it always starts at `"UPCOMING"` when the task instance is materialized. There is currently no endpoint or automatic logic that transitions it; that's a deliberate placeholder for now.
+
+**`location`** is a frozen snapshot of the plan's Location, taken at materialization time — this is the geofence center check-in/check-out validate against. `coordinates` is `null` if the source Location has no GPS point configured.
 
 ## Virtual vs. real shifts
 
@@ -222,3 +240,49 @@ This call materializes the shift first if it was still virtual. The matching `ph
 - `400` if `title` doesn't match any of that task's requirements, or if this plan has no occurrence on the given date.
 - `404` if the plan doesn't exist, or `taskId` doesn't match any task instance on this shift.
 - `401`/`403` if not an authenticated worker.
+
+---
+
+## `PATCH /api/v1/shift/:planId/:date/check-in` and `.../check-out`
+
+Requires a worker access token. Records the calling worker's check-in or check-out time and GPS position for a shift.
+
+**These two endpoints are the one exception to "writes materialize a virtual shift."** They only ever operate on an **already-materialized** shift (created earlier by the daily cron or a manager edit) — if no `Shift` document exists yet for `(planId, date)`, this returns `404`, it does **not** create one. There's no reason to check into a shift that hasn't happened yet, and check-in only makes practical sense for today, by which point the cron has already materialized it.
+
+There is **no time-window restriction** — check-in/check-out is valid any time on the shift's date, only the location is validated.
+
+**Path params**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `planId` | ObjectId | Cleaning plan ID |
+| `date` | string | ISO date `YYYY-MM-DD` |
+
+**Request body**
+
+```json
+{ "latitude": 23.8103, "longitude": 90.4125 }
+```
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `latitude` | number | yes | -90 to 90 |
+| `longitude` | number | yes | -180 to 180 |
+
+**Validation applied (both endpoints)**:
+1. The shift must already exist (materialized) — `404` otherwise.
+2. The calling worker must be in that shift's `assigned_workers` — `403` otherwise.
+3. The submitted coordinates must be within **50 meters** (Haversine distance) of the shift's frozen `location.coordinates` — `400` otherwise, with the actual distance included in the message. If the shift's location has no GPS point configured at all, this always fails with `400` (geofencing can't be silently skipped).
+4. Check-in additionally requires the worker hasn't already checked in (`400` if so). Check-out additionally requires the worker has already checked in and hasn't already checked out (`400` if either is violated).
+
+**Response — `200 OK`**: the updated `Shift` document, with `assigned_workers[].check_in_at`/`check_in_coordinates` (or the `check_out_*` equivalents) set.
+
+```json
+{
+  "success": true,
+  "message": "Checked in successfully",
+  "data": { "...": "full Shift document" }
+}
+```
+
+**Errors**: `400` (geofence failure, missing coordinates on the location, or invalid check-in/out sequencing), `403` (not assigned to this shift), `404` (shift not materialized yet, or plan doesn't exist), `401`/`403` (not an authenticated worker).

@@ -65,8 +65,8 @@ const approveAdditionalTask = catchAsync(async (req, res) => {
 const getAllAdditionalTasksByPlan = catchAsync(async (req, res) => {
     const result =
         await additionalTaskServices.getAllAdditionalTasksByPlanFromDB(
-            req.params.planId,
-            req.query
+            req.query,
+            { role: req.user.role as string, profileId: req.user.profileId as string }
         );
     sendResponse(res, {
         statusCode: httpStatus.OK,

@@ -10,6 +10,23 @@ const photoRequirementSchema = new Schema(
     { _id: false }
 );
 
+const geoPointSchema = new Schema(
+    {
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], default: undefined },
+    },
+    { _id: false }
+);
+
+const shiftLocationSchema = new Schema(
+    {
+        location: { type: Schema.Types.ObjectId, ref: 'Location', required: true },
+        name: { type: String, required: true },
+        coordinates: { type: geoPointSchema, default: null },
+    },
+    { _id: false }
+);
+
 const shiftRoomSchema = new Schema(
     {
         room: { type: Schema.Types.ObjectId, ref: 'Room', required: true },
@@ -48,6 +65,10 @@ const shiftAssignedWorkerSchema = new Schema(
             required: true,
         },
         assigned_with_conflict: { type: Boolean, default: false },
+        check_in_at: { type: Date, default: null },
+        check_in_coordinates: { type: [Number], default: null },
+        check_out_at: { type: Date, default: null },
+        check_out_coordinates: { type: [Number], default: null },
     },
     { _id: false }
 );
@@ -66,6 +87,10 @@ const shiftSchema = new Schema<IShift>(
         },
         date_time: {
             type: Date,
+            required: true,
+        },
+        location: {
+            type: shiftLocationSchema,
             required: true,
         },
         rooms: {

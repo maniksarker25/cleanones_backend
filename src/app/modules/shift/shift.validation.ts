@@ -34,6 +34,13 @@ const uploadTaskPhotoValidationSchema = z.object({
     }),
 });
 
+const checkInOutValidationSchema = z.object({
+    body: z.object({
+        latitude: z.coerce.number({ required_error: 'latitude is required' }).min(-90).max(90),
+        longitude: z.coerce.number({ required_error: 'longitude is required' }).min(-180).max(180),
+    }),
+});
+
 const shiftValidations = {
     workerShiftsQuery: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use YYYY-MM-DD').refine(
@@ -47,6 +54,7 @@ const shiftValidations = {
     assignWorkersValidationSchema,
     updateStatusValidationSchema,
     uploadTaskPhotoValidationSchema,
+    checkInOutValidationSchema,
 };
 
 export default shiftValidations;

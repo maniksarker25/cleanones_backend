@@ -2510,6 +2510,31 @@ const schemas = {
                 format: 'date-time',
                 description: "This occurrence's actual start timestamp.",
             },
+            location: {
+                type: 'object',
+                properties: {
+                    location: { $ref: '#/components/schemas/ObjectId' },
+                    name: { type: 'string' },
+                    coordinates: {
+                        type: 'object',
+                        nullable: true,
+                        properties: {
+                            type: { type: 'string', enum: ['Point'] },
+                            coordinates: {
+                                type: 'array',
+                                items: { type: 'number' },
+                                minItems: 2,
+                                maxItems: 2,
+                                description: '[longitude, latitude]',
+                            },
+                        },
+                        description:
+                            'null when the source Location has no GPS point configured — check-in cannot be validated for such a shift.',
+                    },
+                },
+                description:
+                    "Frozen snapshot of the plan's location, used as the geofence center for check-in/check-out.",
+            },
             rooms: {
                 type: 'array',
                 items: {
@@ -2598,6 +2623,32 @@ const schemas = {
                             type: 'boolean',
                             description:
                                 'True if this worker was assigned via force=true despite a scheduling conflict.',
+                        },
+                        check_in_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                        },
+                        check_in_coordinates: {
+                            type: 'array',
+                            items: { type: 'number' },
+                            minItems: 2,
+                            maxItems: 2,
+                            nullable: true,
+                            description: '[longitude, latitude] the worker checked in from.',
+                        },
+                        check_out_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                        },
+                        check_out_coordinates: {
+                            type: 'array',
+                            items: { type: 'number' },
+                            minItems: 2,
+                            maxItems: 2,
+                            nullable: true,
+                            description: '[longitude, latitude] the worker checked out from.',
                         },
                     },
                 },

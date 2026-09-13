@@ -125,6 +125,38 @@ const uploadTaskPhoto = catchAsync(async (req, res) => {
     });
 });
 
+const checkIn = catchAsync(async (req, res) => {
+    const date = parseDateParam(req.params.date);
+    const result = await shiftServices.checkInToShift(
+        req.user.profileId as string,
+        req.params.planId,
+        date,
+        [req.body.longitude, req.body.latitude]
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Checked in successfully',
+        data: result,
+    });
+});
+
+const checkOut = catchAsync(async (req, res) => {
+    const date = parseDateParam(req.params.date);
+    const result = await shiftServices.checkOutFromShift(
+        req.user.profileId as string,
+        req.params.planId,
+        date,
+        [req.body.longitude, req.body.latitude]
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Checked out successfully',
+        data: result,
+    });
+});
+
 const shiftController = {
     listMyShifts,
     listShifts,
@@ -132,6 +164,8 @@ const shiftController = {
     assignWorkers,
     updateStatus,
     uploadTaskPhoto,
+    checkIn,
+    checkOut,
 };
 
 export default shiftController;
