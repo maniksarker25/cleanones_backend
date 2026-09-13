@@ -159,6 +159,37 @@ const deleteCleaningPlanFromDB = async (managerId: string, id: string) => {
 
 // ─── Get All ───────────────────────────────────────────────────────────────────
 
+const getMyCleaningPlansFromDB = async (
+    clientId: string,
+    query: Record<string, unknown>
+) => {
+    const allowedQuery: Record<string, unknown> = {};
+    for (const key of ['page', 'limit', 'searchTerm', 'sort', 'location']) {
+        if (query[key] !== undefined) {
+            if (typeof query[key] !== 'string') {
+                throw new AppError(httpStatus.BAD_REQUEST, `Invalid ${key}`);
+            }
+            allowedQuery[key] = query[key];
+        }
+    }
+    for (const key of ['page', 'limit']) {
+        if (allowedQuery[key] !== undefined) {
+            const value = Number(allowedQuery[key]);
+            if (!Number.isSafeInteger(value) || value < 1) {
+                throw new AppError(httpStatus.BAD_REQUEST, `${key} must be a positive integer`);
+            }
+        }
+    }
+    if (allowedQuery.location && !Types.ObjectId.isValid(allowedQuery.location as string)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid location ID');
+    }
+    return getAllCleaningPlansFromDB({
+        ...allowedQuery,
+        client: clientId,
+        is_active: true,
+    });
+};
+
 const getAllCleaningPlansFromDB = async (
     query: Record<string, unknown>
 ) => {
@@ -568,6 +599,7 @@ const assignWorkersToPlan = async (
 // ───────────────────────────────────────────────────────────────────────────────
 
 const cleaningPlanServices = {
+    getMyCleaningPlansFromDB,
     createCleaningPlanIntoDB,
     updateCleaningPlanIntoDB,
     deleteCleaningPlanFromDB,

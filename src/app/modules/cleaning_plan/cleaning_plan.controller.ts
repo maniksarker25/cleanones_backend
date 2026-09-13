@@ -55,6 +55,19 @@ const getAllCleaningPlans = catchAsync(async (req, res) => {
     });
 });
 
+const getMyCleaningPlans = catchAsync(async (req, res) => {
+    const result = await cleaningPlanServices.getMyCleaningPlansFromDB(
+        req.user.profileId as string,
+        req.query
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'My cleaning plans retrieved successfully',
+        data: result,
+    });
+});
+
 const getSingleCleaningPlan = catchAsync(async (req, res) => {
     const result = await cleaningPlanServices.getSingleCleaningPlanFromDB(
         req.params.id
@@ -96,6 +109,7 @@ const assignWorkers = catchAsync(async (req, res) => {
 });
 
 const cleaningPlanController = {
+    getMyCleaningPlans,
     createCleaningPlan,
     updateCleaningPlan,
     deleteCleaningPlan,

@@ -6,6 +6,11 @@ import cleaningPlanController from './cleaning_plan.controller';
 import cleaningPlanValidations from './cleaning_plan.validation';
 
 const router = Router();
+router.get(
+    '/get-my-cleaning-plans',
+    auth(USER_ROLE.client),
+    cleaningPlanController.getMyCleaningPlans
+);
 
 router.post(
     '/create-cleaning-plan',

@@ -73,6 +73,26 @@ test('Every mounted module route is documented or explicitly unfinished', () => 
             ts.ScriptTarget.Latest,
             true
         );
+        const routerRoles = [];
+        function readRouterAuth(node) {
+            if (
+                ts.isCallExpression(node) &&
+                node.expression.getText(routeAst) === 'router.use'
+            ) {
+                for (const middleware of node.arguments) {
+                    if (
+                        ts.isCallExpression(middleware) &&
+                        middleware.expression.getText(routeAst) === 'auth'
+                    ) {
+                        routerRoles.push(
+                            ...middleware.arguments.map((a) => a.name.text)
+                        );
+                    }
+                }
+            }
+            ts.forEachChild(node, readRouterAuth);
+        }
+        readRouterAuth(routeAst);
         function readRoute(node) {
             if (
                 ts.isCallExpression(node) &&
@@ -99,7 +119,7 @@ test('Every mounted module route is documented or explicitly unfinished', () => 
                     );
                     const roles = auth
                         ? auth.arguments.map((a) => a.name.text).sort()
-                        : [];
+                        : [...routerRoles].sort();
                     assert.deepEqual(
                         [...(docs[routePath][method]['x-roles'] || [])].sort(),
                         roles,

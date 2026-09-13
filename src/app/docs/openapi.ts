@@ -31,6 +31,7 @@ export function createOpenApiDocument(serverUrl = '/api/v1') {
             ['Authentication', 'Login, tokens and password recovery.'],
             ['Users', 'Registration, verification, profiles and account management.'],
             ['Clients', 'Manager-managed customer accounts.'],
+            ['Client contacts', 'Manager-only contact creation, updates, deletion and retrieval.'],
             ['Locations', 'Client sites and room counts.'],
             ['Rooms', 'Rooms within a location and task counts.'],
             ['Tasks', 'Daily, weekly and monthly task definitions.'],

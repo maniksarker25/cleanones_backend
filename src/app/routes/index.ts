@@ -3,6 +3,7 @@ import { AdminRoutes } from '../modules/admin/admin.routes';
 import { additionalTaskRoutes } from '../modules/additional_task/additional_task.routes';
 import { authRoutes } from '../modules/auth/auth.routes';
 import { clientRoutes } from '../modules/client/client.routes';
+import { clientContactRoutes } from '../modules/client_contact/client_contact.routes';
 import { cleaningPlanRoutes } from '../modules/cleaning_plan/cleaning_plan.routes';
 import { fileUploadRoutes } from '../modules/file-upload/file-upload.routes';
 import { legalInfoRoutes } from '../modules/legal_info/legal_info.routes';
@@ -20,6 +21,10 @@ import { workerRoutes } from '../modules/worker/worker.routes';
 const router = Router();
 
 const moduleRoutes = [
+    {
+        path: '/client-contact',
+        router: clientContactRoutes,
+    },
     {
         path: '/worker',
         router: workerRoutes,
