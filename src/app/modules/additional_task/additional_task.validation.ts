@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+const queryBoolean = z.enum(['true', 'false']).transform((value) => value === 'true').optional();
+export const additionalTaskListQuerySchema = z.object({
+    planId: z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid planId').optional(),
+    page: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),
+    limit: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),
+    searchTerm: z.string().optional(),
+    sort: z.string().regex(/^-?(name|description|duration_minutes|date_time|created_at|updated_at|is_approved|is_completed)$/).optional(),
+    is_approved: queryBoolean,
+    is_completed: queryBoolean,
+    is_photo_required: queryBoolean,
+});
+
 const photoRequirementSchema = z.object({
     title: z.string().min(1, 'Photo title is required').trim(),
     photo_url: z.string().nullable().optional(),

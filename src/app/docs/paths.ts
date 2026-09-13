@@ -2697,22 +2697,22 @@ const paths = {
             },
         },
     },
-    '/additional-task/all-additional-tasks/{planId}': {
+    '/additional-task/all-additional-tasks': {
         get: {
             ...{
                 tags: ['Additional tasks'],
-                summary: 'List additional tasks for a cleaning plan',
-                operationId: 'getAdditionalTaskAllAdditionalTasksPlanId',
+                summary: 'List additional tasks',
+                operationId: 'getAdditionalTaskAllAdditionalTasks',
                 description:
-                    'The referenced cleaning plan must exist and be active. Pagination is nested under data.meta; records are under data.result. Any unrecognized query key is applied as an equality filter on the underlying collection, so pass query parameters carefully.\n\nRequired role: manager, client.',
+                    'Without planId, managers can list all additional tasks; clients can list tasks only from their own active plans. With planId, clients must own the selected plan. Pagination is nested under data.meta; records are under data.result. Boolean filters is_approved, is_completed and is_photo_required accept true or false. Unknown query keys are ignored. Invalid query values return 400.\n\nRequired role: manager, client.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager', 'client'],
                 parameters: [
                     {
                         name: 'planId',
-                        in: 'path',
-                        required: true,
-                        description: 'MongoDB document identifier.',
+                        in: 'query',
+                        required: false,
+                        description: 'Optional cleaning plan ID. The plan must exist and be active.',
                         schema: { $ref: '#/components/schemas/ObjectId' },
                     },
                     {
@@ -6403,6 +6403,148 @@ const paths = {
                                     },
                                 },
                                 required: ['title', 'photo_url'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Shift',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/{planId}/{date}/check-in': {
+        patch: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Check in to a shift',
+                operationId: 'patchShiftPlanIdDateCheckIn',
+                description:
+                    'Does NOT materialize a virtual shift — only an already-materialized shift (created by the daily cron or an earlier edit) can be checked into; 404 otherwise. No time-window restriction: valid any time on the shift\'s date. The submitted coordinates must be within 50 meters of the shift\'s frozen location snapshot (Haversine distance) or this returns 400; a location with no configured GPS point always fails closed. Only a worker assigned to this shift may check in, and only once. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['worker'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'date',
+                        in: 'path',
+                        required: true,
+                        description: 'ISO date (YYYY-MM-DD).',
+                        schema: { type: 'string', format: 'date' },
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    latitude: { type: 'number', minimum: -90, maximum: 90 },
+                                    longitude: { type: 'number', minimum: -180, maximum: 180 },
+                                },
+                                required: ['latitude', 'longitude'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/Shift',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/{planId}/{date}/check-out': {
+        patch: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Check out from a shift',
+                operationId: 'patchShiftPlanIdDateCheckOut',
+                description:
+                    'Same rules as check-in (no materialization, 50m geofence, worker must be assigned) plus: the worker must already have checked in and must not already have checked out. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['worker'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'date',
+                        in: 'path',
+                        required: true,
+                        description: 'ISO date (YYYY-MM-DD).',
+                        schema: { type: 'string', format: 'date' },
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    latitude: { type: 'number', minimum: -90, maximum: 90 },
+                                    longitude: { type: 'number', minimum: -180, maximum: 180 },
+                                },
+                                required: ['latitude', 'longitude'],
                             },
                         },
                     },

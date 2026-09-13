@@ -47,7 +47,7 @@ router.patch(
 // ─── Shared get routes ────────────────────────────────────────────────────────
 
 router.get(
-    '/all-additional-tasks/:planId',
+    '/all-additional-tasks',
     auth(USER_ROLE.manager, USER_ROLE.client),
     additionalTaskController.getAllAdditionalTasksByPlan
 );

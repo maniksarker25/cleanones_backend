@@ -38,4 +38,18 @@ router.patch(
     shiftController.uploadTaskPhoto
 );
 
+router.patch(
+    '/:planId/:date/check-in',
+    auth(USER_ROLE.worker),
+    validateRequest(shiftValidations.checkInOutValidationSchema),
+    shiftController.checkIn
+);
+
+router.patch(
+    '/:planId/:date/check-out',
+    auth(USER_ROLE.worker),
+    validateRequest(shiftValidations.checkInOutValidationSchema),
+    shiftController.checkOut
+);
+
 export const shiftRoutes = router;

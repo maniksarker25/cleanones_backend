@@ -4,6 +4,8 @@ import AppError from '../../error/appError';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { IAdditionalTask } from './additional_task.interface';
 import { AdditionalTask } from './additional_task.model';
+import { additionalTaskListQuerySchema } from './additional_task.validation';
+import { USER_ROLE } from '../user/user.constant';
 
 const ensureCleaningPlanExists = async (planId: string) => {
     const plan = await CleaningPlan.findOne({ _id: planId, is_active: true });
@@ -92,23 +94,34 @@ const deleteAdditionalTaskFromDB = async (id: string) => {
 // ─── Get all by Cleaning Plan ─────────────────────────────────────────────────
 
 const getAllAdditionalTasksByPlanFromDB = async (
-    planId: string,
-    query: Record<string, unknown>
+    query: Record<string, unknown>,
+    requester: { role: string; profileId: string }
 ) => {
-    await ensureCleaningPlanExists(planId);
-
-    const searchTerm = query.searchTerm as string | undefined;
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 10;
-    const skip = (page - 1) * limit;
-    const sort = query.sort as string | undefined;
-
+    const parsed = additionalTaskListQuerySchema.safeParse(query);
+    if (!parsed.success) {
+        throw new AppError(httpStatus.BAD_REQUEST, parsed.error.issues[0].message);
+    }
+    const { planId, searchTerm, sort } = parsed.data;
     const filters: Record<string, unknown> = {};
-    Object.keys(query).forEach((key) => {
-        if (!['searchTerm', 'page', 'limit', 'sort', 'fields'].includes(key)) {
-            filters[key] = query[key];
+    if (planId) {
+        const plan = await ensureCleaningPlanExists(planId);
+        if (requester.role === USER_ROLE.client && plan.client.toString() !== requester.profileId) {
+            throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
         }
-    });
+        filters.cleaning_plan_id = new Types.ObjectId(planId);
+    } else if (requester.role === USER_ROLE.client) {
+        const plans = await CleaningPlan.find({ client: requester.profileId, is_active: true }).select('_id');
+        filters.cleaning_plan_id = { $in: plans.map((plan) => plan._id) };
+    }
+
+    const page = parsed.data.page ?? 1;
+    const limit = parsed.data.limit ?? 10;
+    const skip = (page - 1) * limit;
+    for (const key of ['is_approved', 'is_completed', 'is_photo_required'] as const) {
+        if (parsed.data[key] !== undefined) {
+            filters[key] = parsed.data[key];
+        }
+    }
 
     const sortOrder = sort?.startsWith('-') ? -1 : 1;
     const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
@@ -116,7 +129,6 @@ const getAllAdditionalTasksByPlanFromDB = async (
     const pipeline: PipelineStage[] = [
         {
             $match: {
-                cleaning_plan_id: new Types.ObjectId(planId),
                 ...filters,
             },
         },

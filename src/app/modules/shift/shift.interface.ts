@@ -28,6 +28,17 @@ export interface IShiftRoom {
     room_type: string;
 }
 
+export interface IShiftLocation {
+    location: Types.ObjectId;
+    name: string;
+    // null when the source Location has no GPS point configured — check-in
+    // cannot be geofence-validated for such a shift (see shift.services.ts).
+    coordinates: {
+        type: 'Point';
+        coordinates: [number, number];
+    } | null;
+}
+
 export interface IShiftTask {
     task: Types.ObjectId;
     room: Types.ObjectId;
@@ -53,6 +64,14 @@ export interface IShiftAssignedWorker {
     name: string;
     role: 'Team leader' | 'Co-leader' | 'Normal worker';
     assigned_with_conflict: boolean;
+    // Set only on an already-materialized shift (check-in never creates one —
+    // see checkInToShift in shift.services.ts). No time-window restriction:
+    // valid any time on the shift's date. Coordinates are kept as evidence of
+    // where the worker actually was, in addition to passing the geofence.
+    check_in_at?: Date | null;
+    check_in_coordinates?: [number, number] | null;
+    check_out_at?: Date | null;
+    check_out_coordinates?: [number, number] | null;
 }
 
 export interface IShift {
@@ -61,6 +80,7 @@ export interface IShift {
     date: Date;
     // Actual start timestamp for this occurrence (date + plan's time-of-day).
     date_time: Date;
+    location: IShiftLocation;
     rooms: IShiftRoom[];
     tasks: IShiftTask[];
     duration_minutes: number;

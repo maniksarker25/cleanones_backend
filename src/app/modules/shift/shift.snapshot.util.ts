@@ -1,16 +1,19 @@
 import { Types } from 'mongoose';
 import { RecurrencePattern, taskToPattern } from '../cleaning_plan/availability.util';
 import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
+import { Location } from '../location/location.model';
 import { Room } from '../room/room.model';
 import { Task } from '../task/task.model';
 import { Worker } from '../worker/worker.model';
 import {
     IShiftAssignedWorker,
+    IShiftLocation,
     IShiftRoom,
     IShiftTask,
 } from './shift.interface';
 
 interface PlanLike {
+    location: Types.ObjectId | string;
     rooms: (Types.ObjectId | string)[];
     assigned_workers: IAssignedWorker[];
     date_time: Date;
@@ -18,6 +21,7 @@ interface PlanLike {
 }
 
 export interface ShiftSnapshot {
+    location: IShiftLocation;
     rooms: IShiftRoom[];
     tasks: IShiftTask[];
     assignedWorkers: IShiftAssignedWorker[];
@@ -43,7 +47,8 @@ const isTaskAutoCompleted = (
  * identical by construction.
  */
 export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot> => {
-    const [rooms, tasks, workers] = await Promise.all([
+    const [location, rooms, tasks, workers] = await Promise.all([
+        Location.findById(plan.location).select('name location').lean(),
         Room.find({ _id: { $in: plan.rooms } })
             .select('name room_type')
             .lean(),
@@ -56,6 +61,15 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
             .select('name')
             .lean(),
     ]);
+    if (!location) {
+        throw new Error(`Location ${plan.location} not found while building shift snapshot`);
+    }
+
+    const locationSnapshot: IShiftLocation = {
+        location: new Types.ObjectId(location._id),
+        name: location.name,
+        coordinates: location.location ?? null,
+    };
 
     const roomSnapshots: IShiftRoom[] = rooms.map((r) => ({
         room: r._id,
@@ -102,6 +116,7 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
     );
 
     return {
+        location: locationSnapshot,
         rooms: roomSnapshots,
         tasks: taskSnapshots,
         assignedWorkers,
