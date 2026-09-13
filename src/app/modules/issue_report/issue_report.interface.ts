@@ -7,4 +7,5 @@ export interface IIssueReport {
     severity: (typeof ISSUE_SEVERITY)[number];
     location: Types.ObjectId;
     description: string;
+    isResolved: boolean;
 }

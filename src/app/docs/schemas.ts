@@ -1,5 +1,110 @@
 // Shared OpenAPI 3.0 schemas. Keep in sync with validation, models and services.
 const schemas = {
+    "IssueReportCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "issueType",
+            "severity",
+            "location",
+            "description"
+        ],
+        "properties": {
+            "issueType": {
+                "type": "string",
+                "minLength": 1,
+                "example": "Damaged equipment"
+            },
+            "severity": {
+                "type": "string",
+                "enum": [
+                    "Low",
+                    "Medium",
+                    "High"
+                ]
+            },
+            "location": {
+                "$ref": "#/components/schemas/ObjectId"
+            },
+            "description": {
+                "type": "string",
+                "minLength": 1,
+                "example": "The floor scrubber is leaking."
+            }
+        }
+    },
+    "IssueReportUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+            "issueType": {
+                "type": "string",
+                "minLength": 1,
+                "example": "Damaged equipment"
+            },
+            "severity": {
+                "type": "string",
+                "enum": [
+                    "Low",
+                    "Medium",
+                    "High"
+                ]
+            },
+            "location": {
+                "$ref": "#/components/schemas/ObjectId"
+            },
+            "description": {
+                "type": "string",
+                "minLength": 1,
+                "example": "The floor scrubber is leaking."
+            },
+            "isResolved": {
+                "type": "boolean"
+            }
+        }
+    },
+    "IssueReport": {
+        "type": "object",
+        "properties": {
+            "_id": {
+                "$ref": "#/components/schemas/ObjectId"
+            },
+            "issueType": {
+                "type": "string",
+                "minLength": 1,
+                "example": "Damaged equipment"
+            },
+            "severity": {
+                "type": "string",
+                "enum": [
+                    "Low",
+                    "Medium",
+                    "High"
+                ]
+            },
+            "location": {
+                "$ref": "#/components/schemas/ObjectId"
+            },
+            "description": {
+                "type": "string",
+                "minLength": 1,
+                "example": "The floor scrubber is leaking."
+            },
+            "isResolved": {
+                "type": "boolean",
+                "default": false
+            },
+            "createdAt": {
+                "type": "string",
+                "format": "date-time"
+            },
+            "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+            }
+        }
+    },
     ClientContactCreate: {
         type: 'object',
         additionalProperties: false,
