@@ -3,6 +3,7 @@ import AppError from '../../error/appError';
 import catchAsync from '../../utilities/catchasync';
 import sendResponse from '../../utilities/sendResponse';
 import { USER_ROLE } from '../user/user.constant';
+import { WorkerType } from '../worker/worker.constant';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import shiftServices from './shift.services';
 import shiftValidations from './shift.validation';
@@ -119,6 +120,64 @@ const getWorkerPerformance = catchAsync(async (req, res) => {
         statusCode: httpStatus.OK,
         success: true,
         message: 'Worker performance retrieved successfully',
+        data: result,
+    });
+});
+
+const ATTENDANCE_SUMMARY_PERIODS = ['today', 'weekly', 'monthly'] as const;
+
+const getWorkersAttendanceSummary = catchAsync(async (req, res) => {
+    const period = (req.query.period as string | undefined) ?? 'today';
+    if (!ATTENDANCE_SUMMARY_PERIODS.includes(period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number])) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            "period must be one of 'today', 'weekly', 'monthly'"
+        );
+    }
+
+    const result = await shiftServices.getWorkersAttendanceSummaryFromDB(
+        period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number]
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Workers attendance summary retrieved successfully',
+        data: result,
+    });
+});
+
+const getWorkersAttendanceList = catchAsync(async (req, res) => {
+    const period = (req.query.period as string | undefined) ?? 'today';
+    if (!ATTENDANCE_SUMMARY_PERIODS.includes(period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number])) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            "period must be one of 'today', 'weekly', 'monthly'"
+        );
+    }
+
+    const typeParam = req.query.type as string | undefined;
+    let workerType: WorkerType | undefined;
+    if (typeParam && typeParam.toLowerCase() !== 'all') {
+        if (!Object.values(WorkerType).includes(typeParam as WorkerType)) {
+            throw new AppError(
+                httpStatus.BAD_REQUEST,
+                "type must be one of 'all', 'Employee', 'Freelancer'"
+            );
+        }
+        workerType = typeParam as WorkerType;
+    }
+
+    const searchTerm = (req.query.search as string | undefined)?.trim() || undefined;
+
+    const result = await shiftServices.getWorkersAttendanceListFromDB(
+        period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number],
+        searchTerm,
+        workerType
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Workers attendance list retrieved successfully',
         data: result,
     });
 });
@@ -246,6 +305,22 @@ const uploadTaskPhoto = catchAsync(async (req, res) => {
     });
 });
 
+const markTaskComplete = catchAsync(async (req, res) => {
+    const date = parseDateParam(req.params.date);
+    const result = await shiftServices.markShiftTaskComplete(
+        req.user.profileId as string,
+        req.params.planId,
+        date,
+        req.params.taskId
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Task marked as completed',
+        data: result,
+    });
+});
+
 const checkIn = catchAsync(async (req, res) => {
     const date = parseDateParam(req.params.date);
     const result = await shiftServices.checkInToShift(
@@ -288,11 +363,14 @@ const shiftController = {
     getSingleLiveShift,
     getMyLiveStatus,
     getWorkerPerformance,
+    getWorkersAttendanceSummary,
+    getWorkersAttendanceList,
     listShifts,
     getShift,
     assignWorkers,
     updateStatus,
     uploadTaskPhoto,
+    markTaskComplete,
     checkIn,
     checkOut,
 };
