@@ -16,6 +16,7 @@ import { Location } from '../location/location.model';
 import { Room } from '../room/room.model';
 import { Task } from '../task/task.model';
 import { AdditionalTask } from '../additional_task/additional_task.model';
+import { Worker } from '../worker/worker.model';
 
 const createClientIntoDB = async (
     managerId: string,
@@ -507,12 +508,317 @@ const getClientOverviewFromDB = async (clientId: string) => {
     };
 };
 
+const getClientScheduleRosterFromDB = async (
+    clientId: string,
+    queryDate?: string
+) => {
+    const client = await Client.findById(clientId);
+    if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+
+    // 1. Resolve date window
+    let targetDate: Date;
+    if (queryDate && typeof queryDate === 'string' && !isNaN(new Date(queryDate).getTime())) {
+        targetDate = new Date(queryDate);
+    } else {
+        targetDate = new Date();
+    }
+
+    const dateStart = new Date(targetDate);
+    dateStart.setHours(0, 0, 0, 0);
+    const dateEnd = new Date(targetDate);
+    dateEnd.setHours(23, 59, 59, 999);
+
+    const dayOfWeekStr = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][dateStart.getDay()];
+    const dayOfMonthNum = dateStart.getDate();
+    const dateStr = dateStart.toISOString().split('T')[0];
+
+    // 2. Find client's cleaning plans
+    const clientPlans = await CleaningPlan.find({
+        client: clientId,
+        is_active: true,
+        status: { $ne: 'completed' },
+    })
+        .populate('location')
+        .populate('assigned_workers.worker', 'name email phone profile_photo')
+        .lean();
+
+    const clientPlanIds = clientPlans.map((p) => p._id);
+    const planRoomIds = clientPlans.flatMap((p) => p.rooms || []);
+
+    // 3. Find materialized shifts for this date window
+    const savedShifts = await Shift.find({
+        cleaning_plan: { $in: clientPlanIds },
+        date: { $gte: dateStart, $lte: dateEnd },
+    })
+        .populate('location.location')
+        .populate('cleaning_plan', 'title max_estimated_duration')
+        .populate('assigned_workers.worker')
+        .lean();
+
+    const savedPlanIds = new Set(savedShifts.map((s) => s.cleaning_plan?._id?.toString() || s.cleaning_plan?.toString()));
+
+    // 4. Find active tasks matching frequency for this day (same logic as overview API)
+    const matchingTasks = await Task.find({
+        room: { $in: planRoomIds },
+        is_active: true,
+        $or: [
+            { frequency_type: 'daily' },
+            { frequency_type: 'weekly', days_of_week: dayOfWeekStr },
+            { frequency_type: 'monthly', days_of_month: dayOfMonthNum },
+        ],
+    }).select('room duration_minutes').lean();
+
+    const activeRoomsSet = new Set(matchingTasks.map((t) => t.room.toString()));
+
+    // Map tasks duration per room
+    const roomTaskDurations = new Map<string, number>();
+    for (const t of matchingTasks) {
+        const roomId = t.room.toString();
+        roomTaskDurations.set(
+            roomId,
+            (roomTaskDurations.get(roomId) || 0) + (t.duration_minutes || 0)
+        );
+    }
+
+    // Format helper for "HH:mm"
+    const formatTime = (d: Date): string => {
+        const h = String(d.getHours()).padStart(2, '0');
+        const m = String(d.getMinutes()).padStart(2, '0');
+        return `${h}:${m}`;
+    };
+
+    // Helper to calculate end time given a start Date and duration in minutes
+    const calculateEndTime = (startDate: Date, durationMinutes: number): string => {
+        const durationMs = (durationMinutes || 60) * 60 * 1000;
+        const endDate = new Date(startDate.getTime() + durationMs);
+        return formatTime(endDate);
+    };
+
+    const rosterShifts: Array<{
+        id: string;
+        shiftId: string;
+        planId: string;
+        planTitle: string;
+        workerName: string;
+        workerId: string;
+        workerRole: string;
+        location: string;
+        locationAddress: string;
+        date: string;
+        startTime: string;
+        endTime: string;
+        durationMinutes: number;
+        status: string;
+        roomsCount: number;
+        tasksCount: number;
+        assignedWorkers: Array<{ name: string; role?: string }>;
+    }> = [];
+
+    const teamMembersSet = new Set<string>();
+
+    // 5. Process materialized shifts first
+    for (const shift of savedShifts) {
+        const locationName =
+            (shift.location as any)?.name ||
+            (shift.location as any)?.location?.name ||
+            'CleanOnes HQ';
+        const locationAddress =
+            (shift.location as any)?.location?.address || '';
+        const planId =
+            (shift.cleaning_plan as any)?._id?.toString() ||
+            shift.cleaning_plan?.toString() ||
+            '';
+        const planTitle =
+            (shift.cleaning_plan as any)?.title || 'Cleaning Plan';
+
+        const startTime = shift.date_time ? formatTime(new Date(shift.date_time)) : '08:00';
+        const durationMinutes = shift.duration_minutes || 480;
+        const endTime = shift.date_time
+            ? calculateEndTime(new Date(shift.date_time), durationMinutes)
+            : '16:00';
+
+        const workers = shift.assigned_workers || [];
+        const assignedWorkers = workers.map((w) => ({
+            name: w.name || (w.worker as any)?.name || 'Specialist',
+            role: w.role || 'Specialist',
+        }));
+
+        if (workers.length === 0) {
+            rosterShifts.push({
+                id: `${shift._id}_unassigned`,
+                shiftId: shift._id.toString(),
+                planId,
+                planTitle,
+                workerName: 'Unassigned Specialist',
+                workerId: '',
+                workerRole: 'Specialist',
+                location: locationName,
+                locationAddress,
+                date: dateStr,
+                startTime,
+                endTime,
+                durationMinutes,
+                status: shift.status || 'upcoming',
+                roomsCount: shift.rooms?.length || 0,
+                tasksCount: shift.tasks?.length || 0,
+                assignedWorkers,
+            });
+            teamMembersSet.add('Unassigned Specialist');
+        } else {
+            for (const aw of workers) {
+                const workerName =
+                    aw.name ||
+                    (aw.worker as any)?.name ||
+                    'Specialist';
+                teamMembersSet.add(workerName);
+                rosterShifts.push({
+                    id: `${shift._id}_${(aw.worker as any)?._id || aw.name}`,
+                    shiftId: shift._id.toString(),
+                    planId,
+                    planTitle,
+                    workerName,
+                    workerId: (aw.worker as any)?._id?.toString() || '',
+                    workerRole: aw.role || 'Specialist',
+                    location: locationName,
+                    locationAddress,
+                    date: dateStr,
+                    startTime,
+                    endTime,
+                    durationMinutes,
+                    status: shift.status || 'upcoming',
+                    roomsCount: shift.rooms?.length || 0,
+                    tasksCount: shift.tasks?.length || 0,
+                    assignedWorkers,
+                });
+            }
+        }
+    }
+
+    // 6. Process plans that occur on this date but are not yet materialized
+    for (const plan of clientPlans) {
+        if (savedPlanIds.has(plan._id.toString())) continue;
+
+        const planRooms = (plan.rooms || []).map((r: any) => r.toString());
+        const hasMatchingTask = planRooms.some((r: string) => activeRoomsSet.has(r));
+
+        if (!hasMatchingTask && planRooms.length > 0) {
+            continue;
+        }
+
+        const locationName = (plan.location as any)?.name || 'CleanOnes HQ';
+        const locationAddress = (plan.location as any)?.address || '';
+        const planId = plan._id.toString();
+        const planTitle = plan.title || 'Cleaning Plan';
+
+        let planTasksDuration = 0;
+        let planTasksCount = 0;
+        for (const roomId of planRooms) {
+            planTasksDuration += roomTaskDurations.get(roomId) || 0;
+            if (activeRoomsSet.has(roomId)) {
+                planTasksCount++;
+            }
+        }
+        const durationMinutes =
+            planTasksDuration > 0
+                ? planTasksDuration
+                : plan.max_estimated_duration || 480;
+
+        let planStartTimeObj = new Date(dateStart);
+        if (plan.date_time) {
+            const pt = new Date(plan.date_time);
+            planStartTimeObj.setHours(pt.getHours(), pt.getMinutes(), 0, 0);
+        } else {
+            planStartTimeObj.setHours(8, 0, 0, 0);
+        }
+
+        const startTime = formatTime(planStartTimeObj);
+        const endTime = calculateEndTime(planStartTimeObj, durationMinutes);
+
+        const workers = plan.assigned_workers || [];
+        const assignedWorkers = workers.map((w) => ({
+            name: (w.worker as any)?.name || 'Specialist',
+            role: w.role || 'Specialist',
+        }));
+
+        if (workers.length === 0) {
+            rosterShifts.push({
+                id: `${plan._id}_unassigned`,
+                shiftId: plan._id.toString(),
+                planId,
+                planTitle,
+                workerName: 'Unassigned Specialist',
+                workerId: '',
+                workerRole: 'Specialist',
+                location: locationName,
+                locationAddress,
+                date: dateStr,
+                startTime,
+                endTime,
+                durationMinutes,
+                status: 'upcoming',
+                roomsCount: planRooms.length,
+                tasksCount: planTasksCount,
+                assignedWorkers,
+            });
+            teamMembersSet.add('Unassigned Specialist');
+        } else {
+            for (const aw of workers) {
+                const workerName =
+                    (aw.worker as any)?.name ||
+                    'Specialist';
+                teamMembersSet.add(workerName);
+                rosterShifts.push({
+                    id: `${plan._id}_${(aw.worker as any)?._id || workerName}`,
+                    shiftId: plan._id.toString(),
+                    planId,
+                    planTitle,
+                    workerName,
+                    workerId: (aw.worker as any)?._id?.toString() || '',
+                    workerRole: aw.role || 'Specialist',
+                    location: locationName,
+                    locationAddress,
+                    date: dateStr,
+                    startTime,
+                    endTime,
+                    durationMinutes,
+                    status: 'upcoming',
+                    roomsCount: planRooms.length,
+                    tasksCount: planTasksCount,
+                    assignedWorkers,
+                });
+            }
+        }
+    }
+
+    const teamMembers = Array.from(teamMembersSet);
+    const distinctShiftIds = new Set(rosterShifts.map((s) => s.shiftId));
+    const totalShifts = distinctShiftIds.size;
+    const totalHours = Number(
+        (
+            rosterShifts.reduce((acc, s) => acc + s.durationMinutes / 60, 0)
+        ).toFixed(1)
+    );
+    const totalMembers = teamMembers.length;
+
+    return {
+        date: dateStr,
+        stats: {
+            totalShifts,
+            totalHours,
+            totalMembers,
+        },
+        teamMembers,
+        shifts: rosterShifts,
+    };
+};
+
 const clientServices = {
     createClientIntoDB,
     updateClientIntoDB,
     deleteClientFromDB,
     getAllClientsFromDB,
     getClientOverviewFromDB,
+    getClientScheduleRosterFromDB,
 };
 
 export default clientServices;

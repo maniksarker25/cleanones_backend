@@ -65,12 +65,26 @@ const getClientOverview = catchAsync(async (req, res) => {
     });
 });
 
+const getClientScheduleRoster = catchAsync(async (req, res) => {
+    const result = await clientServices.getClientScheduleRosterFromDB(
+        req.user.profileId as string,
+        req.query.date as string | undefined
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Client schedule roster retrieved successfully',
+        data: result,
+    });
+});
+
 const clientController = {
     createClient,
     updateClient,
     deleteClient,
     getAllClients,
     getClientOverview,
+    getClientScheduleRoster,
 };
 
 export default clientController;
