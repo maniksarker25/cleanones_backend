@@ -10,6 +10,23 @@ import Notification from './notification.model';
 import mongoose from 'mongoose';
 import { Device } from '../device/device.model';
 import sendPushNotification from './helpers/sendPushNotification';
+import {
+    ENUM_NOTIFICATION_TYPE,
+    NOTIFICATION_ACTION,
+    NOTIFICATION_ENTITY_TYPE,
+} from './notification.enum';
+
+export interface SendNotificationParams {
+    /** Client/Worker/Manager profile id (or 'admin' for the superAdmin bucket). */
+    receiver: string;
+    title: string;
+    message: string;
+    type: ENUM_NOTIFICATION_TYPE;
+    entity?: NOTIFICATION_ENTITY_TYPE;
+    action?: (typeof NOTIFICATION_ACTION)[keyof typeof NOTIFICATION_ACTION];
+    entityId?: string;
+    meta?: Record<string, unknown>;
+}
 const getAllNotificationFromDB = async (
     query: Record<string, any>,
     user: JwtPayload
@@ -124,11 +141,10 @@ const sendNotification = async ({
     message,
     type,
     entity,
-    action = 'VIEW',
+    action = NOTIFICATION_ACTION.VIEW,
     entityId,
     meta = {},
-}: any) => {
-    console.log('Sending notificatn....................');
+}: SendNotificationParams) => {
     const notification = await Notification.create({
         receiver,
         title,
@@ -143,26 +159,27 @@ const sendNotification = async ({
     });
 
     const userId = receiver.toString();
-    console.log('userid', userId);
-    const io = getIO();
-    const online = isUserOnline(userId);
 
-    // 1. REALTIME (socket)
-    if (online) {
-        io.to(userId).emit('notification', notification);
-        return notification;
+    // Realtime delivery is best-effort: the socket server may not be
+    // initialized (e.g. scripts/tests), and a receiver who isn't currently
+    // connected just falls through to the push branch below regardless.
+    try {
+        if (isUserOnline(userId)) {
+            getIO().to(userId).emit('notification', notification);
+            return notification;
+        }
+    } catch (error) {
+        console.error('Realtime notification delivery failed:', error);
     }
 
-    // 2. OFFLINE PUSH (NEW SYSTEM)
+    // Offline push via OneSignal, using whatever devices this receiver has
+    // registered (see device.service.ts's upsertDevice).
     const devices = await Device.find({
         userId: new mongoose.Types.ObjectId(userId),
         isActive: true,
     }).select('playerId');
 
-    console.log('devices', devices);
-
     const playerIds = devices.map((d: any) => d.playerId).filter(Boolean);
-    console.log('playerids', playerIds);
     if (playerIds.length > 0) {
         await sendPushNotification({
             playerIds,

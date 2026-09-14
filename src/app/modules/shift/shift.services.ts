@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import mongoose, { Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { emitAppEvent } from '../../events/eventEmitter';
 import {
     anyPatternOccursOnDate,
     combineDateWithTimeOfDay,
@@ -10,6 +11,7 @@ import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Client } from '../client/client.model';
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
+import { WorkerType } from '../worker/worker.constant';
 import { Worker } from '../worker/worker.model';
 import { haversineDistanceMeters } from './geo.util';
 import { findWorkerConflictOnDate } from './shift.availability.services';
@@ -813,6 +815,183 @@ export const getWorkerPerformanceFromDB = async (
     };
 };
 
+export type TAttendanceSummaryPeriod = 'today' | 'weekly' | 'monthly';
+
+/** [start, end) UTC bounds for the requested period, anchored on `now`. Weekly runs Monday-Sunday. */
+const getAttendanceSummaryPeriodRange = (
+    period: TAttendanceSummaryPeriod,
+    now: Date
+): { start: Date; end: Date } => {
+    const today = normalizeToUTCDateOnly(now);
+
+    if (period === 'today') {
+        const end = new Date(today);
+        end.setUTCDate(end.getUTCDate() + 1);
+        return { start: today, end };
+    }
+
+    if (period === 'weekly') {
+        const dayIndex = today.getUTCDay(); // 0 = Sun .. 6 = Sat
+        const diffToMonday = dayIndex === 0 ? 6 : dayIndex - 1;
+        const start = new Date(today);
+        start.setUTCDate(start.getUTCDate() - diffToMonday);
+        const end = new Date(start);
+        end.setUTCDate(end.getUTCDate() + 7);
+        return { start, end };
+    }
+
+    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+    return { start, end };
+};
+
+/**
+ * Manager-facing attendance summary metadata aggregated across ALL workers
+ * for `period` ('today' | 'weekly' | 'monthly').
+ *
+ * Definitions (each assigned-worker entry across every shift in the period
+ * counts separately — a shift with 3 assigned workers contributes up to 3
+ * check-ins):
+ * - completed_shifts: shifts with status 'completed' whose date falls in the period.
+ * - total_hours: sum of (check_out_at - check_in_at) across every worker's
+ *   completed check-ins in the period, in hours, rounded to 2 decimals.
+ * - punctuality_percentage: of all worker check-ins that happened during the
+ *   period, the share that were on-time (check_in_at <= shift's scheduled
+ *   date_time, no grace period — same rule as getWorkerPerformanceFromDB's
+ *   `late`). 0 when there were no check-ins in the period.
+ */
+export const getWorkersAttendanceSummaryFromDB = async (
+    period: TAttendanceSummaryPeriod
+) => {
+    const now = new Date();
+    const { start, end } = getAttendanceSummaryPeriodRange(period, now);
+
+    const shifts = await Shift.find({
+        date: { $gte: start, $lt: end },
+    }).lean();
+
+    let completedShifts = 0;
+    let workedMs = 0;
+    let checkedInCount = 0;
+    let onTimeCount = 0;
+    let lateCount = 0;
+
+    for (const shift of shifts) {
+        if (shift.status === 'completed') completedShifts += 1;
+
+        for (const entry of shift.assigned_workers) {
+            if (entry.check_in_at && entry.check_out_at) {
+                workedMs += entry.check_out_at.getTime() - entry.check_in_at.getTime();
+            }
+
+            if (entry.check_in_at) {
+                checkedInCount += 1;
+                if (entry.check_in_at > shift.date_time) {
+                    lateCount += 1;
+                } else {
+                    onTimeCount += 1;
+                }
+            }
+        }
+    }
+
+    const punctualityPercentage =
+        checkedInCount > 0
+            ? roundToTwoDecimals((onTimeCount / checkedInCount) * 100)
+            : 0;
+
+    return {
+        period,
+        start_date: start,
+        end_date: end,
+        total_hours: roundToTwoDecimals(workedMs / 3_600_000),
+        completed_shifts: completedShifts,
+        punctuality_percentage: punctualityPercentage,
+        on_time_check_ins: onTimeCount,
+        late_check_ins: lateCount,
+    };
+};
+
+/**
+ * Manager-facing per-worker attendance rows for `period`, optionally
+ * filtered by worker name (`searchTerm`) and/or `workerType`. One row per
+ * active worker matching the filters, even those with zero shifts in the
+ * period (hours_worked/total_shifts/late_days all 0).
+ *
+ * - total_shifts: count of shifts this worker was assigned to in the period.
+ * - hours_worked: sum of (check_out_at - check_in_at) across this worker's
+ *   completed check-ins in the period, in hours, rounded to 2 decimals.
+ * - late_days: count of this worker's check-ins after the shift's scheduled
+ *   date_time (no grace period — same rule used across this module).
+ */
+export const getWorkersAttendanceListFromDB = async (
+    period: TAttendanceSummaryPeriod,
+    searchTerm?: string,
+    workerType?: WorkerType
+) => {
+    const now = new Date();
+    const { start, end } = getAttendanceSummaryPeriodRange(period, now);
+
+    const workerFilter: Record<string, unknown> = { isDeleted: { $ne: true } };
+    if (workerType) workerFilter.worker_type = workerType;
+    if (searchTerm) {
+        const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        workerFilter.name = { $regex: escaped, $options: 'i' };
+    }
+
+    const workers = await Worker.find(workerFilter)
+        .select('name worker_type')
+        .lean();
+
+    if (!workers.length) return [];
+
+    const workerIds = new Set(workers.map((w) => w._id.toString()));
+
+    const shifts = await Shift.find({
+        date: { $gte: start, $lt: end },
+        'assigned_workers.worker': { $in: workers.map((w) => w._id) },
+    }).lean();
+
+    const statsByWorker = new Map<
+        string,
+        { hoursWorkedMs: number; totalShifts: number; lateDays: number }
+    >();
+
+    for (const shift of shifts) {
+        for (const entry of shift.assigned_workers) {
+            const workerId = entry.worker.toString();
+            if (!workerIds.has(workerId)) continue;
+
+            const stats = statsByWorker.get(workerId) ?? {
+                hoursWorkedMs: 0,
+                totalShifts: 0,
+                lateDays: 0,
+            };
+            stats.totalShifts += 1;
+            if (entry.check_in_at && entry.check_out_at) {
+                stats.hoursWorkedMs +=
+                    entry.check_out_at.getTime() - entry.check_in_at.getTime();
+            }
+            if (entry.check_in_at && entry.check_in_at > shift.date_time) {
+                stats.lateDays += 1;
+            }
+            statsByWorker.set(workerId, stats);
+        }
+    }
+
+    return workers.map((worker) => {
+        const stats = statsByWorker.get(worker._id.toString());
+        return {
+            worker_id: worker._id,
+            name: worker.name,
+            worker_type: worker.worker_type,
+            hours_worked: roundToTwoDecimals((stats?.hoursWorkedMs ?? 0) / 3_600_000),
+            total_shifts: stats?.totalShifts ?? 0,
+            late_days: stats?.lateDays ?? 0,
+        };
+    });
+};
+
 /**
  * Reassigns workers for one specific occurrence only, materializing the
  * shift first if it doesn't exist yet. Mirrors the plan-level assignment
@@ -907,8 +1086,10 @@ export const updateShiftStatus = async (
 /**
  * Records a worker's photo submission for one task instance within one
  * shift, materializing the shift first if needed. `is_completed` on that
- * task entry is recomputed automatically — there is no manual
- * complete/approve step (see docs/SHIFT_MANAGEMENT_DESIGN.md).
+ * task entry is recomputed automatically from its photo requirements — for
+ * a photo-required task there is no manual complete/approve step (see
+ * docs/SHIFT_MANAGEMENT_DESIGN.md). Tasks with no photo requirement are
+ * NOT completed by this function — see markShiftTaskComplete.
  */
 export const uploadShiftTaskPhoto = async (
     workerId: string,
@@ -989,6 +1170,60 @@ export const uploadShiftTaskPhoto = async (
 };
 
 /**
+ * Worker-initiated completion for one task instance that has NO photo
+ * requirement (is_photo_required: false) — these are no longer completed
+ * automatically at shift creation, so the assigned worker must explicitly
+ * mark them done. Rejects tasks that DO require a photo — those complete
+ * only via uploadShiftTaskPhoto once every requirement is uploaded.
+ */
+export const markShiftTaskComplete = async (
+    workerId: string,
+    planId: string,
+    date: Date,
+    taskId: string
+) => {
+    const shift = await getOrCreateShift(planId, date);
+
+    const isAssigned = shift.assigned_workers.some(
+        (aw) => aw.worker.toString() === workerId
+    );
+    if (!isAssigned) {
+        throw new AppError(
+            httpStatus.FORBIDDEN,
+            'You are not assigned to this shift'
+        );
+    }
+
+    const task = shift.tasks.find((t) => t.task.toString() === taskId);
+    if (!task) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Task not found on this shift');
+    }
+    if (task.is_photo_required) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'This task requires photo(s) — upload the required photo(s) to complete it'
+        );
+    }
+    if (task.is_completed) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Task is already completed');
+    }
+
+    await Shift.updateOne(
+        { _id: shift._id, 'tasks.task': taskId },
+        {
+            $set: {
+                'tasks.$.is_completed': true,
+                'tasks.$.completed_at': new Date(),
+            },
+        }
+    );
+
+    await maybeAutoCompleteShift(shift._id);
+
+    return Shift.findById(shift._id);
+};
+
+/**
  * If every task on the shift is now is_completed, auto-advances the shift's
  * own status to 'completed' — atomically, and only from
  * 'upcoming'/'in_progress' (never re-triggers, and never revives a cancelled
@@ -996,15 +1231,33 @@ export const uploadShiftTaskPhoto = async (
  * there's nothing to judge completion by.
  */
 const maybeAutoCompleteShift = async (shiftId: Types.ObjectId) => {
-    const shift = await Shift.findById(shiftId).select('tasks status').lean();
+    const shift = await Shift.findById(shiftId)
+        .select('tasks status cleaning_plan')
+        .lean();
     if (!shift || !shift.tasks.length) return;
     const allTasksCompleted = shift.tasks.every((t) => t.is_completed);
     if (!allTasksCompleted) return;
 
-    await Shift.updateOne(
+    const updateResult = await Shift.updateOne(
         { _id: shiftId, status: { $in: ['upcoming', 'in_progress'] } },
         { $set: { status: 'completed' } }
     );
+
+    // Only the caller that actually flips the status fires the event — a
+    // shift already 'completed' (e.g. this ran again after another task
+    // update) must not re-notify everyone.
+    if (updateResult.modifiedCount > 0) {
+        const plan = await CleaningPlan.findById(shift.cleaning_plan)
+            .select('client')
+            .lean();
+        if (plan) {
+            emitAppEvent('shift.completed', {
+                shiftId: shiftId.toString(),
+                planId: shift.cleaning_plan.toString(),
+                clientId: plan.client.toString(),
+            });
+        }
+    }
 };
 
 const GEOFENCE_RADIUS_METERS = 50;
@@ -1087,6 +1340,7 @@ export const checkInToShift = async (
     // makes the "not already checked in" check part of the atomic write
     // itself — not just the read above — so two concurrent check-ins from
     // the same worker can never both succeed.
+    const checkedInAt = new Date();
     const result = await Shift.findOneAndUpdate(
         {
             _id: shift._id,
@@ -1094,7 +1348,7 @@ export const checkInToShift = async (
         },
         {
             $set: {
-                'assigned_workers.$.check_in_at': new Date(),
+                'assigned_workers.$.check_in_at': checkedInAt,
                 'assigned_workers.$.check_in_coordinates': coordinates,
             },
         },
@@ -1103,6 +1357,13 @@ export const checkInToShift = async (
     if (!result) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
     }
+
+    emitAppEvent('shift.checked_in', {
+        shiftId: shift._id.toString(),
+        planId,
+        workerId,
+        at: checkedInAt,
+    });
 
     // The first check-in on the shift moves it out of "upcoming". Gated on
     // the shift's CURRENT status (not just "any check-in happened") so a
@@ -1204,6 +1465,13 @@ export const checkOutFromShift = async (
         await session.commitTransaction();
         session.endSession();
 
+        emitAppEvent('shift.checked_out', {
+            shiftId: shift._id.toString(),
+            planId,
+            workerId,
+            at: checkOutAt,
+        });
+
         return result;
     } catch (error) {
         await session.abortTransaction();
@@ -1226,9 +1494,12 @@ const shiftServices = {
     getTodayLiveShiftsFromDB,
     getSingleLiveShiftFromDB,
     getWorkerPerformanceFromDB,
+    getWorkersAttendanceSummaryFromDB,
+    getWorkersAttendanceListFromDB,
     assignWorkersToShift,
     updateShiftStatus,
     uploadShiftTaskPhoto,
+    markShiftTaskComplete,
     checkInToShift,
     checkOutFromShift,
 };
