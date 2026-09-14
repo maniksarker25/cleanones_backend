@@ -28,6 +28,7 @@ export function createOpenApiDocument(serverUrl = '/api/v1') {
             },
         ],
         tags: [
+            ['Question suggestions', 'Public questions and answers managed by managers.'],
             ['Issue reports', 'Worker-reported issues managed by managers.'],
             ['Authentication', 'Login, tokens and password recovery.'],
             ['Users', 'Registration, verification, profiles and account management.'],

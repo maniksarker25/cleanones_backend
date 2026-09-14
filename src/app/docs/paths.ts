@@ -1,5 +1,6 @@
 // Reviewed HTTP contracts; keep aligned with routes, controllers and services.
 import userPaths from './user.paths';
+import questionSuggestionPaths from './question_suggestion.paths';
 import issueReportPaths from './issue_report.paths';
 import clientContactPaths from './client_contact.paths';
 const errors = {
@@ -66,6 +67,7 @@ const errors = {
     },
 };
 const paths = {
+    ...questionSuggestionPaths,
     ...issueReportPaths,
     ...clientContactPaths,
     ...userPaths,
