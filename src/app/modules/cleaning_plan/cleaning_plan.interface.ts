@@ -39,7 +39,6 @@ export interface ICleaningPlan {
     note?: string | null;
     status: CleaningPlanStatus;
     is_active: boolean;
-    additional_tasks:Types.ObjectId[];
     createdAt:Date;
     updatedAt:Date;
 }

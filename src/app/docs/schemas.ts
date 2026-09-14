@@ -1871,27 +1871,10 @@ const schemas = {
             },
             additional_tasks: {
                 type: 'array',
-                items: {
-                    oneOf: [
-                        {
-                            type: 'string',
-                            pattern: '^[a-fA-F0-9]{24}$',
-                            example: '507f1f77bcf86cd799439011',
-                        },
-                        {
-                            type: 'object',
-                            properties: {
-                                _id: {
-                                    type: 'string',
-                                    pattern: '^[a-fA-F0-9]{24}$',
-                                    example: '507f1f77bcf86cd799439011',
-                                },
-                            },
-                        },
-                    ],
-                },
+                items: { $ref: '#/components/schemas/AdditionalTask' },
+                readOnly: true,
                 description:
-                    'ObjectIds on writes. The single-plan read populates full additional-task documents; the list read omits this field entirely.',
+                    'Not stored on the plan document. Populated by the single-plan read via a lookup against the additional-tasks collection (matched by cleaning_plan_id); the list read omits this field entirely.',
             },
             total_room: {
                 type: 'integer',

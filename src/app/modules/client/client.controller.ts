@@ -53,11 +53,24 @@ const getAllClients = catchAsync(async (req, res) => {
     });
 });
 
+const getClientOverview = catchAsync(async (req, res) => {
+    const result = await clientServices.getClientOverviewFromDB(
+        req.user.profileId as string
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Client overview retrieved successfully',
+        data: result,
+    });
+});
+
 const clientController = {
     createClient,
     updateClient,
     deleteClient,
     getAllClients,
+    getClientOverview,
 };
 
 export default clientController;

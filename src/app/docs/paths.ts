@@ -2120,7 +2120,7 @@ const paths = {
                 summary: 'Get my cleaning plans',
                 operationId: 'getMyCleaningPlans',
                 description:
-                    'Pagination is nested under data.meta; records are under data.result. Returns only active plans belonging to the authenticated client. rooms, assigned_workers and additional_tasks are omitted from list results, replaced by total_room, total_assigned_worker and total_additional_task counts. Supports page, limit, searchTerm, sort and an optional location ObjectId filter. Other query keys are ignored; client ownership and active status cannot be overridden.\n\nRequired role: client.',
+                    'Pagination is nested under data.meta; records are under data.result. Returns only active plans belonging to the authenticated client. rooms and assigned_workers are omitted from list results, replaced by total_room, total_assigned_worker and total_additional_task counts (the latter computed from the additional-tasks collection). Supports page, limit, searchTerm, sort and an optional location ObjectId filter. Other query keys are ignored; client ownership and active status cannot be overridden.\n\nRequired role: client.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['client'],
                 parameters: [
@@ -2200,7 +2200,7 @@ const paths = {
                 summary: 'List cleaning plans',
                 operationId: 'getCleaningPlanAllCleaningPlans',
                 description:
-                    'Pagination is nested under data.meta; records are under data.result. Defaults to active plans. rooms, assigned_workers and additional_tasks are omitted from list results, replaced by total_room, total_assigned_worker and total_additional_task counts. Any unrecognized query key is applied as an equality filter on the underlying collection, so pass query parameters carefully.\n\nRequired role: manager.',
+                    'Pagination is nested under data.meta; records are under data.result. Defaults to active plans. rooms and assigned_workers are omitted from list results, replaced by total_room, total_assigned_worker and total_additional_task counts (the latter computed from the additional-tasks collection). Any unrecognized query key is applied as an equality filter on the underlying collection, so pass query parameters carefully.\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -2280,7 +2280,7 @@ const paths = {
                 summary: 'Get cleaning plan',
                 operationId: 'getCleaningPlanSingleCleaningPlanId',
                 description:
-                    "Includes populated references, full rooms/assigned_workers/additional_tasks documents (each room's active tasks[] populated in full), and single-plan aggregation totals. The service does not exclude inactive records.\n\nRequired role: manager.",
+                    "Includes populated references and full rooms/assigned_workers documents (each room's active tasks[] populated in full). additional_tasks is populated via a lookup against the additional-tasks collection (matched by cleaning_plan_id, not stored on the plan), plus single-plan aggregation totals. The service does not exclude inactive records.\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -2489,7 +2489,7 @@ const paths = {
                 summary: 'Create additional task',
                 operationId: 'postAdditionalTaskCreateAdditionalTask',
                 description:
-                    'The referenced cleaning plan must exist and be active. The new task ID is pushed onto the plan\'s additional_tasks array. is_completed is forced to false.\n\nRequired role: client or manager. Manager-created tasks are automatically approved (is_approved: true); client-created tasks require approval (is_approved: false). Approval is determined by the authenticated role and cannot be overridden by the request body.',
+                    'The referenced cleaning plan must exist and be active. The task is linked to the plan via its cleaning_plan_id field only (no array is maintained on the plan document). is_completed is forced to false.\n\nRequired role: client or manager. Manager-created tasks are automatically approved (is_approved: true); client-created tasks require approval (is_approved: false). Approval is determined by the authenticated role and cannot be overridden by the request body.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['client', 'manager'],
                 parameters: [],
@@ -2632,7 +2632,7 @@ const paths = {
                 summary: 'Delete additional task',
                 operationId: 'deleteAdditionalTaskDeleteAdditionalTaskId',
                 description:
-                    "Permanently deletes the task and pulls its ID from the parent cleaning plan's additional_tasks array. Unlike most delete endpoints in this API, the response data is a status message object, not the deleted document or null.\n\nRequired role: client.",
+                    'Permanently deletes the task. Unlike most delete endpoints in this API, the response data is a status message object, not the deleted document or null.\n\nRequired role: client.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['client'],
                 parameters: [
