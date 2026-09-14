@@ -2837,7 +2837,7 @@ const paths = {
                 tags: ['Additional tasks'],
                 summary: 'Get additional task',
                 operationId: 'getAdditionalTaskSingleAdditionalTaskId',
-                description: 'Required role: manager, client.',
+                description: 'Required role: manager, client. cleaning_plan_id contains the full cleaning plan detail response, including populated client, location, rooms, assigned worker profiles, additional tasks, manager and last_updated_by, plus totals. Manager profiles exclude user. Returns 404 if the task or cleaning plan does not exist.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager', 'client'],
                 parameters: [
@@ -2867,7 +2867,7 @@ const paths = {
                                         },
                                         message: { type: 'string' },
                                         data: {
-                                            $ref: '#/components/schemas/AdditionalTask',
+                                            $ref: '#/components/schemas/AdditionalTaskDetail',
                                         },
                                     },
                                     required: ['success', 'message'],
@@ -6157,7 +6157,7 @@ const paths = {
             tags: ['Shifts'],
             summary: 'List my shifts for a specific date',
             operationId: 'getShiftMyShifts',
-            description: 'Returns the authenticated worker\'s saved and virtual shifts across cleaning plans, ordered by start time. Saved assignments override plan defaults, including worker removals. Includes completed and cancelled saved shifts. Virtual occurrences use active, non-completed plans and current task recurrence; past virtual entries are not historical snapshots. This read never creates shifts. Required role: worker.',
+            description: 'Returns the authenticated worker\'s saved and virtual shifts across cleaning plans, ordered by start time. Saved assignments override plan defaults, including worker removals. Includes completed and cancelled saved shifts. Virtual occurrences use active, non-completed plans and current task recurrence; past virtual entries are not historical snapshots. cleaning_plan is an object containing _id and title; title is null if the plan is missing. This read never creates shifts. Required role: worker.',
             security: [{ bearerAuth: [] }],
             'x-roles': ['worker'],
             parameters: [{
@@ -6178,7 +6178,7 @@ const paths = {
                                 properties: {
                                     success: { type: 'boolean', enum: [true] },
                                     message: { type: 'string', example: 'Shifts retrieved successfully' },
-                                    data: { type: 'array', items: { $ref: '#/components/schemas/Shift' } },
+                                    data: { type: 'array', items: { $ref: '#/components/schemas/MyShift' } },
                                 },
                                 required: ['success', 'message', 'data'],
                             },

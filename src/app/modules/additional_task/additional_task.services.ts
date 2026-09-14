@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
+import cleaningPlanServices from '../cleaning_plan/cleaning_plan.services';
 import { IAdditionalTask } from './additional_task.interface';
 import { AdditionalTask } from './additional_task.model';
 import { additionalTaskListQuerySchema } from './additional_task.validation';
@@ -171,10 +172,13 @@ const getAllAdditionalTasksByPlanFromDB = async (
 // ─── Get Single ───────────────────────────────────────────────────────────────
 
 const getSingleAdditionalTaskFromDB = async (id: string) => {
-    const task = await AdditionalTask.findById(id);
+    const task = await AdditionalTask.findById(id).lean();
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
-    return task;
+    const cleaningPlan = await cleaningPlanServices.getSingleCleaningPlanFromDB(
+        task.cleaning_plan_id.toString()
+    );
+    return { ...task, cleaning_plan_id: cleaningPlan };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

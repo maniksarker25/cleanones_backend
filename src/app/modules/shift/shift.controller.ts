@@ -3,6 +3,7 @@ import AppError from '../../error/appError';
 import catchAsync from '../../utilities/catchasync';
 import sendResponse from '../../utilities/sendResponse';
 import { USER_ROLE } from '../user/user.constant';
+import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import shiftServices from './shift.services';
 import shiftValidations from './shift.validation';
 
@@ -12,11 +13,24 @@ const listMyShifts = catchAsync(async (req, res) => {
         req.user.profileId as string,
         new Date(date)
     );
+    const plans = result.length
+        ? await CleaningPlan.find({
+            _id: { $in: [...new Set(result.map((shift) => shift.cleaning_plan.toString()))] },
+        }).select('title').lean()
+        : [];
+    const planTitles = new Map(plans.map((plan) => [plan._id.toString(), plan.title]));
+    const shifts = result.map((shift) => ({
+        ...shift,
+        cleaning_plan: {
+            _id: shift.cleaning_plan,
+            title: planTitles.get(shift.cleaning_plan.toString()) ?? null,
+        },
+    }));
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
         message: 'Shifts retrieved successfully',
-        data: result,
+        data: shifts,
     });
 });
 
