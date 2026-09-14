@@ -10,6 +10,7 @@ import {
 import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Client } from '../client/client.model';
+import { Task } from '../task/task.model';
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
 import { WorkerType } from '../worker/worker.constant';
 import { Worker } from '../worker/worker.model';
@@ -181,6 +182,145 @@ export const resyncTodayShiftWorkersIfDue = async (
         { assigned_workers: nextAssignedWorkers },
         { new: true, runValidators: true }
     );
+};
+
+/**
+ * If today's shift for a plan touching these rooms is already materialized
+ * AND still 'upcoming', syncs its `tasks[]` to match the rooms' current
+ * active Tasks — additions, removals, AND edits (name/duration_minutes/
+ * is_photo_required/photo_requirements) to a task that still exists. Called
+ * after a Task is created, updated, or (soft-)deleted, so any edit on a room
+ * is reflected in today's shift the same way it already is for
+ * future/virtual occurrences (those are built live from the plan's current
+ * state every time, so they need no fixup at all).
+ *
+ * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts —
+ * work already underway or finished must never be retroactively altered by
+ * a plan/task edit made afterward.
+ *
+ * For a task that still exists, `photo_requirements` is re-merged by
+ * `title`: a requirement the worker already uploaded keeps its
+ * `photo_url`/`is_uploaded` (edits never erase upload progress), a
+ * brand-new requirement title starts unset, and a removed title simply
+ * drops out. `is_completed` is then recomputed the normal way for a
+ * photo-required task (true once every merged requirement is uploaded); for
+ * a no-photo task it's left exactly as-is, since that one is only ever
+ * changed by the worker's explicit mark-complete action, never by a plan
+ * edit.
+ */
+export const resyncTodayShiftTasksForRoomsIfDue = async (
+    roomIds: (Types.ObjectId | string)[]
+) => {
+    const today = normalizeToUTCDateOnly(new Date());
+
+    const plans = await CleaningPlan.find({
+        rooms: { $in: roomIds },
+        is_active: true,
+        status: { $ne: 'completed' },
+    })
+        .select('rooms')
+        .lean();
+
+    for (const plan of plans) {
+        const shift = await Shift.findOne({
+            cleaning_plan: plan._id,
+            date: today,
+            status: 'upcoming',
+        });
+        if (!shift) continue;
+
+        const activeTasks = await Task.find({
+            room: { $in: plan.rooms },
+            is_active: true,
+        })
+            .select('room name duration_minutes is_photo_required photo_requirements')
+            .lean();
+
+        const existingByTaskId = new Map(
+            shift.tasks.map((t) => [t.task.toString(), t])
+        );
+
+        let changed = activeTasks.length !== shift.tasks.length;
+
+        const nextTasks = activeTasks.map((t) => {
+            const existing = existingByTaskId.get(t._id.toString());
+
+            const photoRequirements = (t.photo_requirements ?? []).map((pr) => {
+                const previous = existing?.photo_requirements.find(
+                    (p) => p.title === pr.title
+                );
+                return previous
+                    ? {
+                          title: pr.title,
+                          photo_url: previous.photo_url,
+                          is_uploaded: previous.is_uploaded,
+                      }
+                    : { title: pr.title, photo_url: null, is_uploaded: false };
+            });
+
+            if (!existing) {
+                changed = true;
+                return {
+                    task: t._id,
+                    room: t.room,
+                    name: t.name,
+                    duration_minutes: t.duration_minutes ?? 0,
+                    is_photo_required: t.is_photo_required,
+                    photo_requirements: photoRequirements,
+                    is_completed: false,
+                    completed_at: null,
+                };
+            }
+
+            const isCompleted = t.is_photo_required
+                ? photoRequirements.every((p) => p.is_uploaded)
+                : existing.is_completed;
+            const completedAt =
+                isCompleted === existing.is_completed
+                    ? existing.completed_at
+                    : isCompleted
+                      ? new Date()
+                      : null;
+
+            const updated = {
+                task: t._id,
+                room: t.room,
+                name: t.name,
+                duration_minutes: t.duration_minutes ?? 0,
+                is_photo_required: t.is_photo_required,
+                photo_requirements: photoRequirements,
+                is_completed: isCompleted,
+                completed_at: completedAt,
+            };
+
+            if (
+                existing.name !== updated.name ||
+                existing.duration_minutes !== updated.duration_minutes ||
+                existing.is_photo_required !== updated.is_photo_required ||
+                existing.is_completed !== updated.is_completed ||
+                JSON.stringify(existing.photo_requirements) !==
+                    JSON.stringify(updated.photo_requirements)
+            ) {
+                changed = true;
+            }
+
+            return updated;
+        });
+
+        if (!changed) continue;
+
+        const durationMinutes = nextTasks.reduce(
+            (sum, t) => sum + (t.duration_minutes || 0),
+            0
+        );
+
+        await Shift.updateOne(
+            { _id: shift._id, status: 'upcoming' },
+            { $set: { tasks: nextTasks, duration_minutes: durationMinutes } }
+        );
+
+        await maybeAutoCompleteShift(shift._id);
+    }
 };
 
 /**
@@ -1484,6 +1624,7 @@ const shiftServices = {
     listWorkerShiftsForDate,
     getOrCreateShift,
     resyncTodayShiftWorkersIfDue,
+    resyncTodayShiftTasksForRoomsIfDue,
     getShiftForDate,
     listShiftsInRange,
     getClientLiveShiftsFromDB,

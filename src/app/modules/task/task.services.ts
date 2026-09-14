@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
 import { Room } from '../room/room.model';
+import shiftServices from '../shift/shift.services';
 import { TTask } from './task.interface';
 import { Task } from './task.model';
 
@@ -47,6 +48,8 @@ const createTaskIntoDB = async (
         last_updated_by: managerId,
     });
 
+    await shiftServices.resyncTodayShiftTasksForRoomsIfDue([hierarchy.room]);
+
     return result;
 };
 
@@ -69,6 +72,8 @@ const updateTaskIntoDB = async (
         }
     );
 
+    await shiftServices.resyncTodayShiftTasksForRoomsIfDue([task.room]);
+
     return result;
 };
 
@@ -83,6 +88,8 @@ const deleteTaskFromDB = async (managerId: string, id: string) => {
         { is_active: false, last_updated_by: managerId },
         { new: true }
     );
+
+    await shiftServices.resyncTodayShiftTasksForRoomsIfDue([task.room]);
 
     return result;
 };
