@@ -2,6 +2,8 @@ import httpStatus from 'http-status';
 import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { Client } from '../client/client.model';
+import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
+import { Worker } from '../worker/worker.model';
 import { TLocation } from './location.interface';
 import { Location } from './location.model';
 
@@ -16,6 +18,16 @@ const ensureClientExists = async (clientId: string) => {
     }
 
     return client;
+};
+
+const ensureWorkerExists = async (workerId: string) => {
+    const worker = await Worker.findOne({ _id: workerId, isDeleted: false });
+
+    if (!worker) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
+    }
+
+    return worker;
 };
 
 const createLocationIntoDB = async (
@@ -372,6 +384,147 @@ const getClientLocationsFromDB = async (
     };
 };
 
+/**
+ * Every location a worker is currently working: derived from the distinct
+ * `location` of the worker's active, non-completed cleaning plans — not a
+ * direct relation on Location/Worker itself.
+ */
+const getWorkerLocationsFromDB = async (
+    workerId: string,
+    query: Record<string, unknown>
+) => {
+    await ensureWorkerExists(workerId);
+
+    const locationIds = await CleaningPlan.find({
+        'assigned_workers.worker': workerId,
+        is_active: true,
+        status: { $ne: 'completed' },
+    }).distinct('location');
+
+    const searchTerm = query.searchTerm as string | undefined;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const sort = query.sort as string | undefined;
+
+    const filters: any = {};
+    Object.keys(query).forEach((key) => {
+        if (
+            !['searchTerm', 'page', 'limit', 'sort', 'fields'].includes(key)
+        ) {
+            filters[key] =
+                key === 'client'
+                    ? new Types.ObjectId(query[key] as string)
+                    : query[key];
+        }
+    });
+
+    const sortOrder = sort?.startsWith('-') ? -1 : 1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+
+    const pipeline: PipelineStage[] = [
+        {
+            $match: {
+                _id: { $in: locationIds },
+                is_active: true,
+                ...filters,
+            },
+        },
+    ];
+
+    if (searchTerm) {
+        pipeline.push({
+            $match: {
+                $or: ['name', 'address'].map((field) => ({
+                    [field]: { $regex: searchTerm, $options: 'i' },
+                })),
+            },
+        });
+    }
+
+    pipeline.push({
+        $facet: {
+            metadata: [{ $count: 'total' }],
+            data: [
+                { $sort: { [sortField]: sortOrder } },
+                { $skip: skip },
+                { $limit: limit },
+                {
+                    $lookup: {
+                        from: 'clients',
+                        localField: 'client',
+                        foreignField: '_id',
+                        as: 'client',
+                    },
+                },
+                {
+                    $unwind: {
+                        path: '$client',
+                        preserveNullAndEmptyArrays: true,
+                    },
+                },
+                {
+                    $lookup: {
+                        from: 'rooms',
+                        let: { locationId: '$_id' },
+                        pipeline: [
+                            {
+                                $match: {
+                                    $expr: {
+                                        $and: [
+                                            {
+                                                $eq: [
+                                                    '$location',
+                                                    '$$locationId',
+                                                ],
+                                            },
+                                            { $eq: ['$is_active', true] },
+                                        ],
+                                    },
+                                },
+                            },
+                            { $count: 'count' },
+                        ],
+                        as: 'roomCount',
+                    },
+                },
+                {
+                    $addFields: {
+                        total_room: {
+                            $ifNull: [
+                                { $arrayElemAt: ['$roomCount.count', 0] },
+                                0,
+                            ],
+                        },
+                    },
+                },
+                {
+                    $project: {
+                        roomCount: 0,
+                        'client.password': 0,
+                        'client.isDeleted': 0,
+                    },
+                },
+            ],
+        },
+    });
+
+    const [aggResult] = await Location.aggregate(pipeline);
+
+    const total = aggResult?.metadata?.[0]?.total || 0;
+    const result = aggResult?.data || [];
+
+    return {
+        meta: {
+            page,
+            limit,
+            total,
+            totalPage: Math.ceil(total / limit),
+        },
+        result,
+    };
+};
+
 const getMyLocationsFromDB = async (
     clientId: string,
     query: Record<string, unknown>
@@ -565,6 +718,7 @@ const locationServices = {
     deleteLocationFromDB,
     getAllLocationsFromDB,
     getClientLocationsFromDB,
+    getWorkerLocationsFromDB,
     getMyLocationsFromDB,
     getSingleLocationFromDB,
 };

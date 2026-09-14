@@ -438,6 +438,119 @@ export const getNextShiftForWorker = async (workerId: string) => {
 };
 
 /**
+ * Manager-facing worker performance for one calendar month (UTC), combining
+ * already-materialized Shift documents (the only source of truth for
+ * completed/in_progress/late/absent/worked-hours — those require real
+ * check-in/check-out data) with not-yet-materialized future occurrences of
+ * the worker's currently active plans (so total_shift/total_upcoming for a
+ * mostly-future month aren't artificially low just because the cron hasn't
+ * caught up to those days yet).
+ *
+ * Definitions:
+ * - late: this worker's own check_in_at is after the shift's scheduled date_time (no grace period).
+ * - absent: the shift's calendar date is in the past, status isn't 'cancelled',
+ *   and this worker never checked in. Only ever true for materialized shifts —
+ *   if a plan's occurrence was never materialized at all (e.g. the cron
+ *   didn't run that day), there is no record to judge absence from.
+ * - total_work: sum of (check_out_at - check_in_at) across this worker's
+ *   completed check-ins this month, in hours, rounded to 2 decimals.
+ */
+export const getWorkerPerformanceFromDB = async (
+    workerId: string,
+    month?: number,
+    year?: number
+) => {
+    const now = new Date();
+    const targetYear = year ?? now.getUTCFullYear();
+    const targetMonth = month ?? now.getUTCMonth() + 1; // 1-12
+    if (targetMonth < 1 || targetMonth > 12) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'month must be between 1 and 12');
+    }
+
+    const monthStart = new Date(Date.UTC(targetYear, targetMonth - 1, 1));
+    const monthEnd = new Date(Date.UTC(targetYear, targetMonth, 0)); // last day of the month
+    const today = normalizeToUTCDateOnly(now);
+
+    const materialized = await Shift.find({
+        'assigned_workers.worker': workerId,
+        date: { $gte: monthStart, $lte: monthEnd },
+    }).lean();
+
+    const materializedKeys = new Set(
+        materialized.map((s) => `${s.cleaning_plan.toString()}|${s.date.toISOString()}`)
+    );
+
+    // Not-yet-materialized occurrences: only ever future (today-or-later, and
+    // within this month), only from plans the worker is CURRENTLY assigned
+    // to, skipping any (plan, day) pair that's already materialized.
+    const plans = await CleaningPlan.find({
+        'assigned_workers.worker': workerId,
+        is_active: true,
+        status: { $ne: 'completed' },
+    }).lean();
+
+    const projectionStart = today > monthStart ? today : monthStart;
+    let virtualCount = 0;
+    if (projectionStart <= monthEnd) {
+        for (const plan of plans) {
+            const snapshot = await buildShiftSnapshot(plan);
+            for (
+                let day = new Date(projectionStart);
+                day <= monthEnd;
+                day.setUTCDate(day.getUTCDate() + 1)
+            ) {
+                const key = `${plan._id.toString()}|${day.toISOString()}`;
+                if (materializedKeys.has(key)) continue;
+                if (!anyPatternOccursOnDate(snapshot.patterns, day)) continue;
+                virtualCount += 1;
+            }
+        }
+    }
+
+    let completed = 0;
+    let inProgress = 0;
+    let upcomingMaterialized = 0;
+    let late = 0;
+    let absent = 0;
+    let workedMs = 0;
+
+    for (const shift of materialized) {
+        if (shift.status === 'completed') completed += 1;
+        if (shift.status === 'in_progress') inProgress += 1;
+        if (shift.status === 'upcoming') upcomingMaterialized += 1;
+
+        const entry = shift.assigned_workers.find(
+            (aw) => aw.worker.toString() === workerId
+        );
+        if (!entry) continue;
+
+        if (entry.check_in_at && entry.check_in_at > shift.date_time) {
+            late += 1;
+        }
+
+        if (shift.date < today && shift.status !== 'cancelled' && !entry.check_in_at) {
+            absent += 1;
+        }
+
+        if (entry.check_in_at && entry.check_out_at) {
+            workedMs += entry.check_out_at.getTime() - entry.check_in_at.getTime();
+        }
+    }
+
+    return {
+        month: targetMonth,
+        year: targetYear,
+        total_shift_on_this_month: materialized.length + virtualCount,
+        total_completed_on_this_month: completed,
+        total_in_progress: inProgress,
+        total_upcoming_on_this_month: upcomingMaterialized + virtualCount,
+        total_late_on_this_month: late,
+        total_absent_on_this_month: absent,
+        total_work_on_this_month: roundToTwoDecimals(workedMs / 3_600_000),
+    };
+};
+
+/**
  * Reassigns workers for one specific occurrence only, materializing the
  * shift first if it doesn't exist yet. Mirrors the plan-level assignment
  * rules: ineligible workers are always rejected; scheduling conflicts are
@@ -842,6 +955,7 @@ const shiftServices = {
     getActiveShiftForWorker,
     getWorkerTodayMetaFromDB,
     getNextShiftForWorker,
+    getWorkerPerformanceFromDB,
     assignWorkersToShift,
     updateShiftStatus,
     uploadShiftTaskPhoto,

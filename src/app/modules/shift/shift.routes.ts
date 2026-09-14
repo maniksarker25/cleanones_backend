@@ -33,6 +33,12 @@ router.get(
     shiftController.getMyLiveStatus
 );
 
+router.get(
+    '/worker-performance/:workerId',
+    auth(USER_ROLE.manager),
+    shiftController.getWorkerPerformance
+);
+
 router.get('/:planId', auth(USER_ROLE.manager), shiftController.listShifts);
 
 router.get(
