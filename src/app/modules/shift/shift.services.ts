@@ -765,6 +765,164 @@ export const getTodayLiveShiftMetaFromDB = async () => {
     };
 };
 
+// ─── Manager report (week/month/quarter/year) ───────────────────────────────
+
+export const REPORT_PERIODS = ['week', 'month', 'quarter', 'year'] as const;
+export type TReportPeriod = (typeof REPORT_PERIODS)[number];
+
+/**
+ * "This week/month/quarter/year" as an inclusive [from, to] range of
+ * UTC-normalized calendar days — same UTC-day convention the rest of the
+ * shift system uses (see normalizeToUTCDateOnly), so a shift's `date` field
+ * compares directly against these without extra conversion. Week starts
+ * Monday (ISO week), matching the Mon..Sun labels on the dashboard.
+ */
+const getReportDateRange = (period: TReportPeriod, now: Date) => {
+    const today = normalizeToUTCDateOnly(now);
+
+    if (period === 'week') {
+        const dayOfWeek = today.getUTCDay(); // 0=Sun..6=Sat
+        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        const from = new Date(today);
+        from.setUTCDate(from.getUTCDate() + diffToMonday);
+        const to = new Date(from);
+        to.setUTCDate(to.getUTCDate() + 6);
+        return { from, to };
+    }
+
+    if (period === 'month') {
+        const from = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+        const to = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
+        return { from, to };
+    }
+
+    if (period === 'quarter') {
+        const quarterStartMonth = Math.floor(today.getUTCMonth() / 3) * 3;
+        const from = new Date(Date.UTC(today.getUTCFullYear(), quarterStartMonth, 1));
+        const to = new Date(Date.UTC(today.getUTCFullYear(), quarterStartMonth + 3, 0));
+        return { from, to };
+    }
+
+    // year
+    const from = new Date(Date.UTC(today.getUTCFullYear(), 0, 1));
+    const to = new Date(Date.UTC(today.getUTCFullYear(), 11, 31));
+    return { from, to };
+};
+
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTH_LABELS = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/**
+ * Bucket granularity per period — deliberately gets finer as the range gets
+ * shorter and coarser as it gets longer, so every period renders a readable
+ * number of bars: week -> 1 bar/day (7 total), month -> 1 bar/day (28-31),
+ * quarter -> 1 bar/week (~13), year -> 1 bar/month (12).
+ */
+const buildShiftTrendBuckets = (
+    period: TReportPeriod,
+    from: Date,
+    to: Date,
+    shiftDates: Date[]
+) => {
+    if (period === 'week') {
+        return WEEKDAY_LABELS.map((label, index) => {
+            const date = new Date(from);
+            date.setUTCDate(date.getUTCDate() + index);
+            const count = shiftDates.filter((d) => d.getTime() === date.getTime()).length;
+            return { label, date: date.toISOString().slice(0, 10), total_shift: count };
+        });
+    }
+
+    if (period === 'month') {
+        const daysInMonth = to.getUTCDate();
+        return Array.from({ length: daysInMonth }, (_, i) => {
+            const date = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), i + 1));
+            const count = shiftDates.filter((d) => d.getTime() === date.getTime()).length;
+            return { label: String(i + 1), date: date.toISOString().slice(0, 10), total_shift: count };
+        });
+    }
+
+    if (period === 'quarter') {
+        const buckets: { label: string; date: string; total_shift: number }[] = [];
+        let cursor = new Date(from);
+        let weekIndex = 1;
+        while (cursor <= to) {
+            const bucketEnd = new Date(cursor);
+            bucketEnd.setUTCDate(bucketEnd.getUTCDate() + 6);
+            const cappedEnd = bucketEnd > to ? to : bucketEnd;
+            const count = shiftDates.filter(
+                (d) => d >= cursor && d <= cappedEnd
+            ).length;
+            buckets.push({
+                label: `Week ${weekIndex}`,
+                date: cursor.toISOString().slice(0, 10),
+                total_shift: count,
+            });
+            cursor = new Date(cappedEnd);
+            cursor.setUTCDate(cursor.getUTCDate() + 1);
+            weekIndex += 1;
+        }
+        return buckets;
+    }
+
+    // year
+    return MONTH_LABELS.map((label, monthIndex) => {
+        const count = shiftDates.filter(
+            (d) => d.getUTCFullYear() === from.getUTCFullYear() && d.getUTCMonth() === monthIndex
+        ).length;
+        return { label, total_shift: count };
+    });
+};
+
+/**
+ * Manager dashboard report: total shifts + total issue reports for the
+ * selected period, a shift-count trend chart bucketed per
+ * buildShiftTrendBuckets, and an issue-report status breakdown (PENDING /
+ * IN_PROGRESS / RESOLVED) — all scoped to the same [from, to] range, unlike
+ * getTodayLiveShiftMetaFromDB's today_total_worker_late/total_issue_report
+ * which are point-in-time, not period-scoped.
+ */
+export const getManagerReportFromDB = async (period: TReportPeriod) => {
+    const now = new Date();
+    const { from, to } = getReportDateRange(period, now);
+    const toExclusive = new Date(to);
+    toExclusive.setUTCDate(toExclusive.getUTCDate() + 1);
+
+    const [shifts, issueReports] = await Promise.all([
+        Shift.find({ date: { $gte: from, $lt: toExclusive } })
+            .select('date')
+            .lean(),
+        IssueReport.find({ createdAt: { $gte: from, $lt: toExclusive } })
+            .select('status')
+            .lean(),
+    ]);
+
+    const shiftDates = shifts.map((s) => s.date);
+
+    const issueReportStatus = {
+        PENDING: issueReports.filter((r) => r.status === 'PENDING').length,
+        IN_PROGRESS: issueReports.filter((r) => r.status === 'IN_PROGRESS').length,
+        RESOLVED: issueReports.filter((r) => r.status === 'RESOLVED').length,
+    };
+
+    return {
+        period,
+        range: {
+            from: from.toISOString().slice(0, 10),
+            to: to.toISOString().slice(0, 10),
+        },
+        summary: {
+            total_shift: shifts.length,
+            total_issue_report: issueReports.length,
+        },
+        shift_trends: buildShiftTrendBuckets(period, from, to, shiftDates),
+        issue_report_status: issueReportStatus,
+    };
+};
+
 const MAX_PAGE_SIZE = 100;
 
 const parseObjectIdQueryParam = (
@@ -2062,6 +2220,7 @@ const shiftServices = {
     getWorkerTodayMetaFromDB,
     getNextShiftForWorker,
     getTodayLiveShiftMetaFromDB,
+    getManagerReportFromDB,
     getTodayLiveShiftsFromDB,
     getSingleLiveShiftFromDB,
     getWorkerPerformanceFromDB,

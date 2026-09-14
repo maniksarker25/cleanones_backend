@@ -64,6 +64,12 @@ router.get(
 );
 
 router.get(
+    '/report',
+    auth(USER_ROLE.manager),
+    shiftController.getManagerReport
+);
+
+router.get(
     '/today-live-shifts',
     auth(USER_ROLE.manager),
     shiftController.getTodayLiveShifts

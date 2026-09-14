@@ -81,6 +81,17 @@ const getTodayLiveShiftMeta = catchAsync(async (_req, res) => {
     });
 });
 
+const getManagerReport = catchAsync(async (req, res) => {
+    const { period } = shiftValidations.managerReportQuery.parse(req.query);
+    const result = await shiftServices.getManagerReportFromDB(period);
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Manager report retrieved successfully',
+        data: result,
+    });
+});
+
 const getTodayLiveShifts = catchAsync(async (req, res) => {
     const result = await shiftServices.getTodayLiveShiftsFromDB(req.query);
     sendResponse(res, {
@@ -421,6 +432,7 @@ const shiftController = {
     getMyTodayMeta,
     getMyNextShift,
     getTodayLiveShiftMeta,
+    getManagerReport,
     getTodayLiveShifts,
     getSingleLiveShift,
     getMyLiveStatus,

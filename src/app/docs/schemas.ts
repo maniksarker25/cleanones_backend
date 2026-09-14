@@ -3185,6 +3185,78 @@ const schemas = {
             'total_issue_report',
         ],
     },
+    ManagerReportTrendPoint: {
+        type: 'object',
+        properties: {
+            label: {
+                type: 'string',
+                description:
+                    "period=week: 'Mon'..'Sun'. period=month: day-of-month as a string ('1'..'31'). period=quarter: 'Week 1', 'Week 2', ... period=year: 'Jan'..'Dec'.",
+                example: 'Mon',
+            },
+            date: {
+                type: 'string',
+                format: 'date',
+                description:
+                    'The bucket\'s first day (YYYY-MM-DD). Omitted for period=year, where a month is the whole bucket.',
+                example: '2026-09-14',
+            },
+            total_shift: {
+                type: 'integer',
+                description: 'Shifts materialized within this bucket.',
+            },
+        },
+        required: ['label', 'total_shift'],
+    },
+    ManagerReport: {
+        type: 'object',
+        properties: {
+            period: {
+                type: 'string',
+                enum: ['week', 'month', 'quarter', 'year'],
+            },
+            range: {
+                type: 'object',
+                description: 'The resolved [from, to] calendar range for "this" week/month/quarter/year, inclusive, UTC calendar days.',
+                properties: {
+                    from: { type: 'string', format: 'date', example: '2026-09-14' },
+                    to: { type: 'string', format: 'date', example: '2026-09-20' },
+                },
+                required: ['from', 'to'],
+            },
+            summary: {
+                type: 'object',
+                properties: {
+                    total_shift: {
+                        type: 'integer',
+                        description: 'Shifts materialized within the selected period.',
+                    },
+                    total_issue_report: {
+                        type: 'integer',
+                        description: 'Issue reports filed (any status) within the selected period — unlike TodayLiveShiftMeta.total_issue_report, this IS period-scoped.',
+                    },
+                },
+                required: ['total_shift', 'total_issue_report'],
+            },
+            shift_trends: {
+                type: 'array',
+                description:
+                    'Bucket granularity scales with the period so every chart renders a readable number of bars: week -> 1 bar/day (7), month -> 1 bar/day (28-31), quarter -> 1 bar/week (~13), year -> 1 bar/month (12). Bucket total_shift values always sum to summary.total_shift.',
+                items: { $ref: '#/components/schemas/ManagerReportTrendPoint' },
+            },
+            issue_report_status: {
+                type: 'object',
+                description: 'Issue reports filed within the selected period, grouped by current status (not by when they were resolved).',
+                properties: {
+                    PENDING: { type: 'integer' },
+                    IN_PROGRESS: { type: 'integer' },
+                    RESOLVED: { type: 'integer' },
+                },
+                required: ['PENDING', 'IN_PROGRESS', 'RESOLVED'],
+            },
+        },
+        required: ['period', 'range', 'summary', 'shift_trends', 'issue_report_status'],
+    },
     ShiftListItem: {
         allOf: [
             { $ref: '#/components/schemas/ShiftSummary' },

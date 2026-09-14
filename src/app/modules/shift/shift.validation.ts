@@ -41,6 +41,14 @@ const checkInOutValidationSchema = z.object({
     }),
 });
 
+const managerReportQuery = z
+    .object({
+        period: z.enum(['week', 'month', 'quarter', 'year'], {
+            required_error: 'period is required',
+        }),
+    })
+    .strict();
+
 const shiftValidations = {
     workerShiftsQuery: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use YYYY-MM-DD').refine(
@@ -51,6 +59,7 @@ const shiftValidations = {
             'Date must be a valid calendar date'
         ),
     }).strict(),
+    managerReportQuery,
     assignWorkersValidationSchema,
     updateStatusValidationSchema,
     uploadTaskPhotoValidationSchema,
