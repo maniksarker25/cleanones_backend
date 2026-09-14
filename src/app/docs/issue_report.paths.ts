@@ -345,6 +345,112 @@ const issueReportPaths = {
             },
         },
     },
+    '/issue-report/get-my-issue-report': {
+        get: {
+            tags: ['Issue reports'],
+            summary: 'List my issue reports',
+            operationId: 'getmyissuereports',
+            description:
+                'Required role: worker. Only reports created by the authenticated worker are returned. Older reports without a worker reference are excluded. Returns an array in data, newest first, without pagination.',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            'x-roles': ['worker'],
+            parameters: [],
+            responses: {
+                '200': {
+                    description: 'List my issue reports successful.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: {
+                                        type: 'boolean',
+                                        enum: [true],
+                                    },
+                                    message: {
+                                        type: 'string',
+                                    },
+                                    data: {
+                                        type: 'array',
+                                        items: {
+                                            $ref: '#/components/schemas/IssueReport',
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                '400': {
+                    description: 'Invalid ID or model validation failure.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '401': {
+                    description:
+                        'Missing or invalid token, or role not allowed.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '403': {
+                    description: 'Inactive account.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '404': {
+                    description:
+                        'Report, active location or authenticated profile not found.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '429': {
+                    description: 'Rate limit exceeded.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '500': {
+                    description:
+                        'Server error; request validation failures currently return 500.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/issue-report/all-issue-reports': {
         get: {
             tags: ['Issue reports'],

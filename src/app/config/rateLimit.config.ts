@@ -2,7 +2,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 // Global API limiter
 export const apiLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
+    windowMs: 10 * 60 * 1000, // 1 minute
     max: 60, // 60 requests per minute
 
     standardHeaders: true,
@@ -17,7 +17,7 @@ export const apiLimiter = rateLimit({
 // Auth limiter (strict)
 export const authLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 3,
+    max: 30,
 
     standardHeaders: true,
     legacyHeaders: false,
@@ -48,7 +48,7 @@ export const authLimiter = rateLimit({
 // OTP / sensitive actions
 export const otpLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
-    max: 3,
+    max: 30,
     message: {
         success: false,
         message: 'Too many OTP requests. Slow down.',

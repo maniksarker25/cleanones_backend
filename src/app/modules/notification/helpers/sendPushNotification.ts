@@ -7,6 +7,15 @@ interface INotificationPayload {
     heading?: string;
     url?: string;
     data?: object;
+    /**
+     * OneSignal collapse key (`collapse_id` on iOS/APNs, `android_group` +
+     * `android_group_message` on Android). When set, a new push with the
+     * same collapseId REPLACES the previous unread one for that key in the
+     * OS notification tray instead of stacking as a separate alert — pass
+     * something like a chat id so 20 messages while offline show up as one
+     * tray entry, not twenty.
+     */
+    collapseId?: string;
 }
 
 const sendPushNotification = async ({
@@ -15,6 +24,7 @@ const sendPushNotification = async ({
     heading = 'Notification',
     url,
     data,
+    collapseId,
 }: INotificationPayload) => {
     if (!playerIds?.length) return;
 
@@ -28,6 +38,14 @@ const sendPushNotification = async ({
                 headings: { en: heading },
                 url,
                 data,
+                ...(collapseId && {
+                    collapse_id: collapseId,
+                    android_group: collapseId,
+                    // Android also needs an explicit summary text when
+                    // grouping, otherwise it just shows the latest message
+                    // with no "N more" indication.
+                    android_group_message: { en: 'You have new messages' },
+                }),
             },
             {
                 headers: {

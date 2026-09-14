@@ -44,7 +44,7 @@ app.use('/uploads', express.static('uploads'));
 
 setupSwagger(app);
 
-app.use(rateLimiters.apiLimiter);
+// app.use(rateLimiters.apiLimiter);
 app.use('/api/v1', router);
 app.post('/contact-us', sendContactUsEmail);
 
