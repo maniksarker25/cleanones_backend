@@ -1,34 +1,29 @@
 import { onAppEvent } from '../eventEmitter';
 import { errorLogger } from '../../shared/logger';
-import {
-    ENUM_NOTIFICATION_TYPE,
-    NOTIFICATION_ACTION,
-    NOTIFICATION_ENTITY,
-} from '../../modules/notification/notification.enum';
 import NotificationService from '../../modules/notification/notification.services';
 
 // Realtime delivery to connected sockets already happens directly inside
 // chat_message.services.ts (createChatMessage's broadcastToChat). This event
-// exists only so a recipient who ISN'T currently connected still gets
-// something — sendNotification's own online/offline branch will actually
-// skip the push if they turn out to be online after all, so this is safe to
-// fire unconditionally for every recipient rather than needing the caller to
-// pre-filter by presence.
+// exists only to cover offline recipients with an OS push — deliberately
+// via sendChatPushNotification, NOT sendNotification: chat messages don't
+// get a Notification row (would flood the generic notification list, one
+// row per message) and the push is collapsed per-chat (see
+// sendChatPushNotification's own comment) so an offline recipient gets one
+// "new messages" tray entry, not one per message. sendChatPushNotification
+// already no-ops for an online recipient, so this is safe to call
+// unconditionally for every recipient without pre-filtering by presence.
 onAppEvent('chat.message_received', async (payload) => {
     await Promise.all(
         payload.recipientProfileIds.map((receiver) =>
-            NotificationService.sendNotification({
+            NotificationService.sendChatPushNotification({
                 receiver,
                 title: 'New message',
                 message: payload.preview,
-                type: ENUM_NOTIFICATION_TYPE.NEW_CHAT_MESSAGE,
-                entity: NOTIFICATION_ENTITY.CHAT,
-                action: NOTIFICATION_ACTION.VIEW,
-                entityId: payload.chatId,
-                meta: { chatType: payload.chatType },
+                chatId: payload.chatId,
+                data: { chatType: payload.chatType },
             }).catch((err) =>
                 errorLogger.error(
-                    'chat.message_received notification failed',
+                    'chat.message_received push notification failed',
                     err
                 )
             )

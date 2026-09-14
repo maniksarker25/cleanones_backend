@@ -4,7 +4,7 @@ import sendResponse from '../../utilities/sendResponse';
 import services from './issue_report.services';
 
 const createIssueReport = catchAsync(async (req, res) => {
-    const result = await services.createIssueReportIntoDB(req.body);
+    const result = await services.createIssueReportIntoDB(req.body, req.user.profileId as string);
     sendResponse(res, {
         statusCode: httpStatus.CREATED,
         success: true,
@@ -46,7 +46,18 @@ const getAllIssueReports = catchAsync(async (req, res) => {
     });
 });
 
+const getMyIssueReports = catchAsync(async (req, res) => {
+    const result = await services.getMyIssueReportsFromDB(req.user.profileId as string);
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'My issue reports retrieved successfully',
+        data: result,
+    });
+});
+
 export default {
+    getMyIssueReports,
     createIssueReport,
     updateIssueReport,
     deleteIssueReport,

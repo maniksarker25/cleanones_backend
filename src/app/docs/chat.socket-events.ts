@@ -204,7 +204,7 @@ const chatSocketEvents = {
             broadcast: 'the receiver\'s own room only (io.to(profileId)) — not chat-specific',
             payload: '$ref Notification schema',
             description:
-                "General app notification (cleaning plan created/worker assigned/removed/deleted, additional task created/approved/rejected, shift checked in/out/completed, new chat message while you weren't in the chat room). Only sent if the receiver is currently online; otherwise NotificationService.sendNotification() falls back to a OneSignal push instead and this event never fires for that notification. See GET /notification/get-notifications for the same data over REST.",
+                "General app notification (cleaning plan created/worker assigned/removed/deleted, additional task created/approved/rejected, shift checked in/out/completed). Only sent if the receiver is currently online; otherwise NotificationService.sendNotification() falls back to a OneSignal push instead and this event never fires for that notification. See GET /notification/get-notifications for the same data over REST. Chat messages do NOT go through this event or the Notification collection at all — see the note on offline chat push below.",
         },
     ],
 };
