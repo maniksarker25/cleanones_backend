@@ -9,6 +9,8 @@ import { TUser } from '../user/user.interface';
 import { User } from '../user/user.model';
 import { TClient } from './client.interface';
 import { Client } from './client.model';
+import { Shift } from '../shift/shift.model';
+import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 
 const createClientIntoDB = async (
     managerId: string,
@@ -185,11 +187,103 @@ const getAllClientsFromDB = async (query: Record<string, unknown>) => {
     };
 };
 
+const getClientOverviewFromDB = async (clientId: string) => {
+    const client = await Client.findById(clientId);
+    if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const clientPlans = await CleaningPlan.find({ client: clientId }).select('_id');
+    const clientPlanIds = clientPlans.map(p => p._id);
+
+    const todaysShifts = await Shift.find({
+        date: { $gte: todayStart, $lte: todayEnd },
+        cleaning_plan: { $in: clientPlanIds }
+    }).populate('location.location');
+
+    const inProgressShifts = todaysShifts.filter(s => s.status === 'in_progress');
+    const completedShifts = todaysShifts.filter(s => s.status === 'completed');
+
+    const activeCount = inProgressShifts.length;
+    let total_hours = 0;
+    let hours_completed = 0;
+    let total_rooms = 0;
+    let rooms_completed = 0;
+    let location_name = '';
+
+    todaysShifts.forEach(shift => {
+        total_hours += (shift.duration_minutes || 0) / 60;
+        total_rooms += (shift.rooms?.length || 0);
+        location_name = shift.location?.name || location_name;
+        if (shift.status === 'completed') {
+            hours_completed += (shift.duration_minutes || 0) / 60;
+            rooms_completed += (shift.rooms?.length || 0);
+        } else if (shift.status === 'in_progress') {
+            // Rough estimate for in_progress
+            hours_completed += ((shift.duration_minutes || 0) / 60) * 0.5;
+            rooms_completed += Math.floor((shift.rooms?.length || 0) * 0.5);
+        }
+    });
+
+    const progress_percentage = total_hours > 0 ? Math.round((hours_completed / total_hours) * 100) : 0;
+    const next_visit = todaysShifts.find(s => s.status === 'upcoming');
+    const last_completed = completedShifts[completedShifts.length - 1];
+
+    return {
+        greeting_name: client.name || 'Client',
+        current_date_str: new Date().toLocaleDateString('en-US', { weekday: "long", month: "long", day: "numeric", year: "numeric" }),
+        todays_progress: {
+            hours_completed: parseFloat(hours_completed.toFixed(1)),
+            total_hours: parseFloat(total_hours.toFixed(1)),
+            hours_completed_str: `${Math.floor(hours_completed)}h ${Math.round((hours_completed % 1) * 60)}m Completed`,
+            hours_remaining_str: `${Math.floor(total_hours - hours_completed)}h ${Math.round(((total_hours - hours_completed) % 1) * 60)}m Remaining`,
+            rooms_completed,
+            total_rooms,
+            progress_percentage,
+            status_badge: activeCount > 0 ? 'Active Service' : (todaysShifts.length > 0 ? 'Scheduled Today' : 'No Service Today'),
+            location_name: location_name || (client.company_name) || 'N/A',
+            service_time_slot: '09:00 AM - 05:00 PM',
+            tracking_note: 'Room tracking is updated in real-time as cleaners check in/out of rooms.',
+        },
+        metrics_grid: {
+            next_visit: {
+                time_str: next_visit ? 'Today' : 'No Upcoming',
+                team_name: 'CleanOnes',
+                specialists_count: next_visit?.assigned_workers?.length || 0,
+            },
+            on_site_now: {
+                specialists_count: inProgressShifts.reduce((acc, s) => acc + (s.assigned_workers?.length || 0), 0),
+                sub_text: activeCount > 0 ? 'Currently Active' : 'No Team On Site',
+            },
+            last_completed: {
+                worked_str: last_completed ? 'Today' : 'No Recent',
+                sub_text: 'Completed',
+            },
+        },
+        live_status: {
+            active_count: activeCount,
+            specialists: [],
+        },
+        quick_actions: [],
+        next_visitors: {
+            scheduled_time_str: next_visit ? 'Today' : 'No Schedule',
+            team_name: 'CleanOnes',
+            specialists_count: next_visit?.assigned_workers?.length || 0,
+            team_avatars: [],
+            description: 'Please contact support for more details.',
+        },
+    };
+};
+
 const clientServices = {
     createClientIntoDB,
     updateClientIntoDB,
     deleteClientFromDB,
     getAllClientsFromDB,
+    getClientOverviewFromDB,
 };
 
 export default clientServices;
