@@ -6,7 +6,11 @@ import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
 import { Worker } from '../worker/worker.model';
-import { getOrCreateShift, resyncTodayShiftWorkersIfDue } from '../shift/shift.services';
+import {
+    getOrCreateShift,
+    resyncTodayShiftRoomsIfDue,
+    resyncTodayShiftWorkersIfDue,
+} from '../shift/shift.services';
 import {
     assertWorkersAssignable,
     computeMaxEstimatedDuration,
@@ -186,6 +190,15 @@ const updateCleaningPlanIntoDB = async (
         (rooms !== undefined || assigned_workers?.length || date_time !== undefined)
     ) {
         await materializeTodayShiftIfDue(result._id);
+    }
+
+    // getOrCreateShift/materializeTodayShiftIfDue above is a no-op once
+    // today's shift already exists, so a room added/removed on the plan
+    // after that point needs its own sync — otherwise today's already-
+    // materialized shift keeps showing whatever rooms/tasks existed at
+    // materialization time until the next midnight cron.
+    if (result && rooms !== undefined) {
+        await resyncTodayShiftRoomsIfDue(result._id, result.rooms);
     }
 
     if (result && assigned_workers?.length) {

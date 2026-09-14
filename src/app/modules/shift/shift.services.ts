@@ -10,6 +10,7 @@ import {
 import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Client } from '../client/client.model';
+import { Room } from '../room/room.model';
 import { Task } from '../task/task.model';
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
 import { WorkerType } from '../worker/worker.constant';
@@ -185,18 +186,12 @@ export const resyncTodayShiftWorkersIfDue = async (
 };
 
 /**
- * If today's shift for a plan touching these rooms is already materialized
- * AND still 'upcoming', syncs its `tasks[]` to match the rooms' current
- * active Tasks — additions, removals, AND edits (name/duration_minutes/
- * is_photo_required/photo_requirements) to a task that still exists. Called
- * after a Task is created, updated, or (soft-)deleted, so any edit on a room
- * is reflected in today's shift the same way it already is for
- * future/virtual occurrences (those are built live from the plan's current
- * state every time, so they need no fixup at all).
- *
- * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts —
- * work already underway or finished must never be retroactively altered by
- * a plan/task edit made afterward.
+ * Recomputes a shift's `tasks[]` from the current active Tasks under
+ * `roomIds` — additions, removals, AND edits (name/duration_minutes/
+ * is_photo_required/photo_requirements) to a task that still exists.
+ * Shared by both resync entry points below (one triggered by a Task edit,
+ * the other by a plan's room-list edit), so the merge rules can't drift
+ * between them.
  *
  * For a task that still exists, `photo_requirements` is re-merged by
  * `title`: a requirement the worker already uploaded keeps its
@@ -207,6 +202,108 @@ export const resyncTodayShiftWorkersIfDue = async (
  * a no-photo task it's left exactly as-is, since that one is only ever
  * changed by the worker's explicit mark-complete action, never by a plan
  * edit.
+ */
+const computeSyncedShiftTasks = async (
+    shift: Pick<IShift, 'tasks'>,
+    roomIds: (Types.ObjectId | string)[]
+) => {
+    const activeTasks = await Task.find({
+        room: { $in: roomIds },
+        is_active: true,
+    })
+        .select('room name duration_minutes is_photo_required photo_requirements')
+        .lean();
+
+    const existingByTaskId = new Map(
+        shift.tasks.map((t) => [t.task.toString(), t])
+    );
+
+    let changed = activeTasks.length !== shift.tasks.length;
+
+    const nextTasks = activeTasks.map((t) => {
+        const existing = existingByTaskId.get(t._id.toString());
+
+        const photoRequirements = (t.photo_requirements ?? []).map((pr) => {
+            const previous = existing?.photo_requirements.find(
+                (p) => p.title === pr.title
+            );
+            return previous
+                ? {
+                      title: pr.title,
+                      photo_url: previous.photo_url,
+                      is_uploaded: previous.is_uploaded,
+                  }
+                : { title: pr.title, photo_url: null, is_uploaded: false };
+        });
+
+        if (!existing) {
+            changed = true;
+            return {
+                task: t._id,
+                room: t.room,
+                name: t.name,
+                duration_minutes: t.duration_minutes ?? 0,
+                is_photo_required: t.is_photo_required,
+                photo_requirements: photoRequirements,
+                is_completed: false,
+                completed_at: null,
+            };
+        }
+
+        const isCompleted = t.is_photo_required
+            ? photoRequirements.every((p) => p.is_uploaded)
+            : existing.is_completed;
+        const completedAt =
+            isCompleted === existing.is_completed
+                ? existing.completed_at
+                : isCompleted
+                  ? new Date()
+                  : null;
+
+        const updated = {
+            task: t._id,
+            room: t.room,
+            name: t.name,
+            duration_minutes: t.duration_minutes ?? 0,
+            is_photo_required: t.is_photo_required,
+            photo_requirements: photoRequirements,
+            is_completed: isCompleted,
+            completed_at: completedAt,
+        };
+
+        if (
+            existing.name !== updated.name ||
+            existing.duration_minutes !== updated.duration_minutes ||
+            existing.is_photo_required !== updated.is_photo_required ||
+            existing.is_completed !== updated.is_completed ||
+            JSON.stringify(existing.photo_requirements) !==
+                JSON.stringify(updated.photo_requirements)
+        ) {
+            changed = true;
+        }
+
+        return updated;
+    });
+
+    const durationMinutes = nextTasks.reduce(
+        (sum, t) => sum + (t.duration_minutes || 0),
+        0
+    );
+
+    return { tasks: nextTasks, durationMinutes, changed };
+};
+
+/**
+ * If today's shift for a plan touching these rooms is already materialized
+ * AND still 'upcoming', syncs its `tasks[]` to match the rooms' current
+ * active Tasks. Called after a Task is created, updated, or (soft-)deleted,
+ * so any edit on a room is reflected in today's shift the same way it
+ * already is for future/virtual occurrences (those are built live from the
+ * plan's current state every time, so they need no fixup at all).
+ *
+ * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts —
+ * work already underway or finished must never be retroactively altered by
+ * a plan/task edit made afterward.
  */
 export const resyncTodayShiftTasksForRoomsIfDue = async (
     roomIds: (Types.ObjectId | string)[]
@@ -229,98 +326,66 @@ export const resyncTodayShiftTasksForRoomsIfDue = async (
         });
         if (!shift) continue;
 
-        const activeTasks = await Task.find({
-            room: { $in: plan.rooms },
-            is_active: true,
-        })
-            .select('room name duration_minutes is_photo_required photo_requirements')
-            .lean();
-
-        const existingByTaskId = new Map(
-            shift.tasks.map((t) => [t.task.toString(), t])
+        const { tasks, durationMinutes, changed } = await computeSyncedShiftTasks(
+            shift,
+            plan.rooms
         );
-
-        let changed = activeTasks.length !== shift.tasks.length;
-
-        const nextTasks = activeTasks.map((t) => {
-            const existing = existingByTaskId.get(t._id.toString());
-
-            const photoRequirements = (t.photo_requirements ?? []).map((pr) => {
-                const previous = existing?.photo_requirements.find(
-                    (p) => p.title === pr.title
-                );
-                return previous
-                    ? {
-                          title: pr.title,
-                          photo_url: previous.photo_url,
-                          is_uploaded: previous.is_uploaded,
-                      }
-                    : { title: pr.title, photo_url: null, is_uploaded: false };
-            });
-
-            if (!existing) {
-                changed = true;
-                return {
-                    task: t._id,
-                    room: t.room,
-                    name: t.name,
-                    duration_minutes: t.duration_minutes ?? 0,
-                    is_photo_required: t.is_photo_required,
-                    photo_requirements: photoRequirements,
-                    is_completed: false,
-                    completed_at: null,
-                };
-            }
-
-            const isCompleted = t.is_photo_required
-                ? photoRequirements.every((p) => p.is_uploaded)
-                : existing.is_completed;
-            const completedAt =
-                isCompleted === existing.is_completed
-                    ? existing.completed_at
-                    : isCompleted
-                      ? new Date()
-                      : null;
-
-            const updated = {
-                task: t._id,
-                room: t.room,
-                name: t.name,
-                duration_minutes: t.duration_minutes ?? 0,
-                is_photo_required: t.is_photo_required,
-                photo_requirements: photoRequirements,
-                is_completed: isCompleted,
-                completed_at: completedAt,
-            };
-
-            if (
-                existing.name !== updated.name ||
-                existing.duration_minutes !== updated.duration_minutes ||
-                existing.is_photo_required !== updated.is_photo_required ||
-                existing.is_completed !== updated.is_completed ||
-                JSON.stringify(existing.photo_requirements) !==
-                    JSON.stringify(updated.photo_requirements)
-            ) {
-                changed = true;
-            }
-
-            return updated;
-        });
-
         if (!changed) continue;
-
-        const durationMinutes = nextTasks.reduce(
-            (sum, t) => sum + (t.duration_minutes || 0),
-            0
-        );
 
         await Shift.updateOne(
             { _id: shift._id, status: 'upcoming' },
-            { $set: { tasks: nextTasks, duration_minutes: durationMinutes } }
+            { $set: { tasks, duration_minutes: durationMinutes } }
         );
 
         await maybeAutoCompleteShift(shift._id);
     }
+};
+
+/**
+ * If today's shift for this plan is already materialized AND still
+ * 'upcoming', syncs its `rooms[]` AND `tasks[]` to match the plan's current
+ * room list. Covers the gap resyncTodayShiftTasksForRoomsIfDue can't: that
+ * one only fires for a room already in the plan's rooms array, so assigning
+ * a brand-new room (with its own tasks) onto the plan via a plan update
+ * never touched an already-materialized today's shift — it would keep
+ * showing whatever rooms/tasks existed at materialization time until the
+ * next midnight cron. Called from cleaning_plan.services.ts whenever a
+ * plan's `rooms` array changes.
+ *
+ * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts,
+ * same reasoning as resyncTodayShiftTasksForRoomsIfDue.
+ */
+export const resyncTodayShiftRoomsIfDue = async (
+    planId: Types.ObjectId | string,
+    roomIds: (Types.ObjectId | string)[]
+) => {
+    const today = normalizeToUTCDateOnly(new Date());
+    const shift = await Shift.findOne({
+        cleaning_plan: planId,
+        date: today,
+        status: 'upcoming',
+    });
+    if (!shift) return null;
+
+    const rooms = await Room.find({ _id: { $in: roomIds } })
+        .select('name room_type')
+        .lean();
+    const nextRooms = rooms.map((r) => ({
+        room: r._id,
+        name: r.name,
+        room_type: r.room_type,
+    }));
+
+    const { tasks, durationMinutes } = await computeSyncedShiftTasks(shift, roomIds);
+
+    await Shift.updateOne(
+        { _id: shift._id, status: 'upcoming' },
+        { $set: { rooms: nextRooms, tasks, duration_minutes: durationMinutes } }
+    );
+
+    await maybeAutoCompleteShift(shift._id);
+
+    return null;
 };
 
 /**
@@ -1625,6 +1690,7 @@ const shiftServices = {
     getOrCreateShift,
     resyncTodayShiftWorkersIfDue,
     resyncTodayShiftTasksForRoomsIfDue,
+    resyncTodayShiftRoomsIfDue,
     getShiftForDate,
     listShiftsInRange,
     getClientLiveShiftsFromDB,
