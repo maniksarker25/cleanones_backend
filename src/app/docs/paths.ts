@@ -3,6 +3,8 @@ import userPaths from './user.paths';
 import questionSuggestionPaths from './question_suggestion.paths';
 import issueReportPaths from './issue_report.paths';
 import clientContactPaths from './client_contact.paths';
+import chatPaths from './chat.paths';
+import chatMessagePaths from './chat_message.paths';
 const errors = {
     '400': {
         description: 'Invalid ID, model validation, or business rule failure.',
@@ -71,6 +73,8 @@ const paths = {
     ...issueReportPaths,
     ...clientContactPaths,
     ...userPaths,
+    ...chatPaths,
+    ...chatMessagePaths,
     '/client/create-client': {
         post: {
             ...{
@@ -2274,7 +2278,7 @@ const paths = {
                 summary: 'Get cleaning plan',
                 operationId: 'getCleaningPlanSingleCleaningPlanId',
                 description:
-                    'Includes populated references, full rooms/assigned_workers/additional_tasks documents, and single-plan aggregation totals. The service does not exclude inactive records.\n\nRequired role: manager.',
+                    "Includes populated references, full rooms/assigned_workers/additional_tasks documents (each room's active tasks[] populated in full), and single-plan aggregation totals. The service does not exclude inactive records.\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [

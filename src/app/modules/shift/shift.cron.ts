@@ -41,9 +41,14 @@ export const materializeTodaysShifts = async () => {
     return created;
 };
 
-// Runs once daily, shortly after midnight, materializing today's occurrences
-// for every plan whose rooms' tasks recur on this date.
-cron.schedule('5 0 * * *', async () => {
+// Runs every 2 hours (not just once at midnight) materializing today's
+// occurrences for every plan whose rooms' tasks recur on this date. Safe to
+// run this often: getOrCreateShift + the unique cleaning_plan+date index make
+// every run a no-op for plans already materialized. Running more frequently
+// is pure resilience — if the server is down (or mid-deploy) at the midnight
+// run, the next run within 2 hours catches up instead of leaving that day's
+// shifts unmaterialized until someone happens to touch the plan.
+cron.schedule('5 */2 * * *', async () => {
     try {
         console.log('Shift materialization cron started');
         const created = await materializeTodaysShifts();
