@@ -3,8 +3,8 @@ import catchAsync from '../../utilities/catchasync';
 import sendResponse from '../../utilities/sendResponse';
 import chatServices from './chat.services';
 
-const getMyGroups = catchAsync(async (req, res) => {
-    const result = await chatServices.getMyGroupsFromDB(
+const getMyChats = catchAsync(async (req, res) => {
+    const result = await chatServices.getMyChatsFromDB(
         req.user.profileId as string,
         req.user.role as string,
         req.query
@@ -12,21 +12,7 @@ const getMyGroups = catchAsync(async (req, res) => {
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
-        message: 'Chat groups retrieved successfully',
-        data: result,
-    });
-});
-
-const getMyDirectChats = catchAsync(async (req, res) => {
-    const result = await chatServices.getMyDirectChatsFromDB(
-        req.user.profileId as string,
-        req.user.role as string,
-        req.query
-    );
-    sendResponse(res, {
-        statusCode: httpStatus.OK,
-        success: true,
-        message: 'Direct chats retrieved successfully',
+        message: 'Chats retrieved successfully',
         data: result,
     });
 });
@@ -60,8 +46,7 @@ const renameChatGroup = catchAsync(async (req, res) => {
 });
 
 const chatController = {
-    getMyGroups,
-    getMyDirectChats,
+    getMyChats,
     getGroupMembers,
     renameChatGroup,
 };

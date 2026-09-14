@@ -5,7 +5,7 @@ import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
 import { Worker } from '../worker/worker.model';
-import { getOrCreateShift } from '../shift/shift.services';
+import { getOrCreateShift, resyncTodayShiftWorkersIfDue } from '../shift/shift.services';
 import {
     assertWorkersAssignable,
     computeMaxEstimatedDuration,
@@ -182,6 +182,7 @@ const updateCleaningPlanIntoDB = async (
             result._id,
             result.assigned_workers.map((aw) => aw.worker)
         );
+        await resyncTodayShiftWorkersIfDue(result._id, result.assigned_workers);
     }
 
     return result;
@@ -464,6 +465,26 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
                 as: 'rooms',
                 pipeline: [
                     { $project: { location: 0, last_updated_by: 0 } },
+                    {
+                        $lookup: {
+                            from: 'tasks',
+                            let: { roomId: '$_id' },
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $and: [
+                                                { $eq: ['$room', '$$roomId'] },
+                                                { $eq: ['$is_active', true] },
+                                            ],
+                                        },
+                                    },
+                                },
+                                { $project: { client: 0, location: 0, room: 0, last_updated_by: 0 } },
+                            ],
+                            as: 'tasks',
+                        },
+                    },
                 ],
             },
         },
@@ -616,6 +637,7 @@ const assignWorkersToPlan = async (
             result._id,
             result.assigned_workers.map((aw) => aw.worker)
         );
+        await resyncTodayShiftWorkersIfDue(result._id, result.assigned_workers);
     }
 
     return result;

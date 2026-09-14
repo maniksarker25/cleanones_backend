@@ -8,15 +8,9 @@ import chatValidations from './chat.validation';
 const router = Router();
 
 router.get(
-    '/my-groups',
+    '/my-chats',
     auth(USER_ROLE.manager, USER_ROLE.client, USER_ROLE.worker),
-    chatController.getMyGroups
-);
-
-router.get(
-    '/my-direct-chats',
-    auth(USER_ROLE.client, USER_ROLE.worker),
-    chatController.getMyDirectChats
+    chatController.getMyChats
 );
 
 router.get(
