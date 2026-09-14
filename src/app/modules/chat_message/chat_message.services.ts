@@ -1,5 +1,6 @@
 import httpStatus from 'http-status';
 import AppError from '../../error/appError';
+import { emitAppEvent } from '../../events/eventEmitter';
 import { getIO } from '../../socket/socket';
 import chatServices from '../chat/chat.services';
 import { Chat } from '../chat/chat.model';
@@ -102,6 +103,30 @@ const createChatMessage = async (params: {
     // 'worker' chats (manager-visible) get group:new-message.
     const event = chat.type === 'direct' ? 'message:new' : 'group:new-message';
     broadcastToChat(chat, event, populated);
+
+    // Offline push fallback (sendNotification itself no-ops the push side if
+    // the recipient turns out to be online) — deliberately excludes managers
+    // even for group/worker/client chats: they already get full realtime
+    // coverage via the role:manager room, and pushing every manager's device
+    // for every single message across every chat would be noise, not signal.
+    const recipientProfileIds = [
+        chat.client ? chat.client.toString() : null,
+        ...chat.workers.map((workerId) => workerId.toString()),
+    ].filter(
+        (id): id is string => !!id && id !== profileId
+    );
+
+    if (recipientProfileIds.length) {
+        emitAppEvent('chat.message_received', {
+            chatId: chatId,
+            chatType: chat.type,
+            senderUserId,
+            recipientProfileIds,
+            preview: populated.text?.trim()
+                ? populated.text.slice(0, 120)
+                : 'Sent an attachment',
+        });
+    }
 
     return populated;
 };
