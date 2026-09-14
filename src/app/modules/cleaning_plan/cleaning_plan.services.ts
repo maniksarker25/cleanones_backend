@@ -327,6 +327,26 @@ const getAllCleaningPlansFromDB = async (
                     },
                 },
                 {
+                    $lookup: {
+                        from: 'tasks',
+                        let: { planRooms: { $ifNull: ['$rooms', []] } },
+                        pipeline: [
+                            {
+                                $match: {
+                                    $expr: {
+                                        $and: [
+                                            { $in: ['$room', '$$planRooms'] },
+                                            { $eq: ['$is_active', true] },
+                                        ],
+                                    },
+                                },
+                            },
+                            { $project: { _id: 1 } },
+                        ],
+                        as: '_planTasks',
+                    },
+                },
+                {
                     $addFields: {
                         total_room: { $size: { $ifNull: ['$rooms', []] } },
                         total_assigned_worker: {
@@ -335,6 +355,8 @@ const getAllCleaningPlansFromDB = async (
                         total_additional_task: {
                             $size: { $ifNull: ['$additional_tasks', []] },
                         },
+                        total_tasks: { $size: '$_planTasks' },
+                        total_task: { $size: '$_planTasks' },
                     },
                 },
                 {
@@ -408,6 +430,7 @@ const getAllCleaningPlansFromDB = async (
                         rooms: 0,
                         assigned_workers: 0,
                         additional_tasks: 0,
+                        _planTasks: 0,
                     },
                 },
             ],
