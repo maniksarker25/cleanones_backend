@@ -229,7 +229,7 @@ const verifyResetOtp = async (email: string, resetCode: number) => {
     if (user.codeExpireIn < new Date(Date.now())) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Reset code is expire');
     }
-    if (user.resetCode !== Number(resetCode) && resetCode !== 111111) {
+    if (user.resetCode !== Number(resetCode)) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Reset code is invalid');
     }
     await User.findOneAndUpdate(
@@ -262,6 +262,12 @@ const resetPassword = async (payload: {
             'You need to verify reset code before reset password'
         );
     }
+    if (!user.codeExpireIn || user.codeExpireIn < new Date(Date.now())) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'Reset code is expired, please request a new one'
+        );
+    }
 
     if (user.isDeleted) {
         throw new AppError(
@@ -283,6 +289,9 @@ const resetPassword = async (payload: {
         {
             password: newHashedPassword,
             passwordChangedAt: new Date(),
+            isResetVerified: false,
+            resetCode: null,
+            codeExpireIn: null,
         }
     );
     const jwtPayload = {
@@ -339,7 +348,7 @@ const resendResetCode = async (email: string) => {
 };
 
 const getAllUserFromDB = async () => {
-    const result = await User.find();
+    const result = await User.find().select('-password -resetCode -verifyCode');
     return result;
 };
 

@@ -182,6 +182,68 @@ const getWorkersAttendanceList = catchAsync(async (req, res) => {
     });
 });
 
+const ROSTER_VIEWS = ['day', 'week', 'month'] as const;
+
+const getShiftRoster = catchAsync(async (req, res) => {
+    const view = (req.query.view as string | undefined) ?? 'day';
+    if (!ROSTER_VIEWS.includes(view as (typeof ROSTER_VIEWS)[number])) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            "view must be one of 'day', 'week', 'month'"
+        );
+    }
+
+    const date = req.query.date as string | undefined;
+    const year = req.query.year !== undefined ? Number(req.query.year) : undefined;
+    const month = req.query.month !== undefined ? Number(req.query.month) : undefined;
+    if (year !== undefined && Number.isNaN(year)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid year');
+    }
+    if (month !== undefined && Number.isNaN(month)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid month');
+    }
+
+    const typeParam = req.query.type as string | undefined;
+    let workerType: WorkerType | undefined;
+    if (typeParam && typeParam.toLowerCase() !== 'all') {
+        if (!Object.values(WorkerType).includes(typeParam as WorkerType)) {
+            throw new AppError(
+                httpStatus.BAD_REQUEST,
+                "type must be one of 'all', 'Employee', 'Freelancer'"
+            );
+        }
+        workerType = typeParam as WorkerType;
+    }
+
+    const searchTerm = (req.query.search as string | undefined)?.trim() || undefined;
+
+    const page = req.query.page !== undefined ? Number(req.query.page) : undefined;
+    const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    if (page !== undefined && (Number.isNaN(page) || page < 1)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'page must be a positive integer');
+    }
+    if (limit !== undefined && (Number.isNaN(limit) || limit < 1 || limit > 100)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'limit must be between 1 and 100');
+    }
+
+    const result = await shiftServices.getShiftRosterFromDB({
+        view: view as (typeof ROSTER_VIEWS)[number],
+        date,
+        year,
+        month,
+        searchTerm,
+        workerType,
+        page,
+        limit,
+    });
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Shift roster retrieved successfully',
+        data: result,
+    });
+});
+
 const getMyLiveStatus = catchAsync(async (req, res) => {
     const result = await shiftServices.getClientLiveShiftsFromDB(
         req.user.profileId as string
@@ -365,6 +427,7 @@ const shiftController = {
     getWorkerPerformance,
     getWorkersAttendanceSummary,
     getWorkersAttendanceList,
+    getShiftRoster,
     listShifts,
     getShift,
     assignWorkers,

@@ -3412,8 +3412,9 @@ const paths = {
                 summary: 'List users (legacy)',
                 operationId: 'getAuthAllUser',
                 description:
-                    'Current route has no authentication middleware and returns User.find() results. The user response contract is unfinished; review access and returned fields before deployment.',
-                security: [],
+                    'Returns raw User.find() results (password hashes and reset codes included — the user response contract is unfinished, review returned fields before deployment). Restricted to superAdmin/admin.\n\nRequired role: superAdmin, admin.',
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['superAdmin', 'admin'],
                 parameters: [],
             },
             responses: {
@@ -6440,6 +6441,87 @@ const paths = {
                                         type: 'array',
                                         items: { $ref: '#/components/schemas/WorkerAttendanceListItem' },
                                     },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/roster': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Shift roster (day/week/month)',
+            operationId: 'getShiftRoster',
+            description:
+                "Manager-only. Powers the \"Shift Roster\" page. One row per active worker matching the filters, for the current page ONLY (including workers with zero shifts in the range), each with its shifts grouped by ISO date across the requested range — merging already-materialized Shift documents with not-yet-materialized virtual occurrences of active plans (the same universe as every other worker-facing shift listing), so a shift shows up here whether or not the daily cron has materialized it yet. A materialized shift's own assigned_workers/status is authoritative for that day; a virtual occurrence uses the plan's current default roster and is always 'upcoming'. 'week' runs Sunday-Saturday (matching the roster UI), 'month' is the full calendar month. Pagination runs on the worker query itself (single $facet aggregation for the page + total count together), and every downstream query (plans/tasks/locations/shifts) is scoped to only that page's workers — so a larger roster does not make a single page's request more expensive. meta.total_shifts counts distinct shift occurrences in range for THIS PAGE's workers only (not roster-wide); meta.total/meta.totalPage are the roster-wide worker count/page count.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'view',
+                    in: 'query',
+                    schema: { type: 'string', enum: ['day', 'week', 'month'], default: 'day' },
+                    description: "Defaults to 'day'.",
+                },
+                {
+                    name: 'date',
+                    in: 'query',
+                    schema: { type: 'string', format: 'date' },
+                    description:
+                        "Anchors 'day' (that exact date) and 'week' (the Sunday-Saturday week containing it). ISO date (YYYY-MM-DD). Defaults to today (UTC). Ignored for view=month (use year/month instead).",
+                },
+                {
+                    name: 'year',
+                    in: 'query',
+                    schema: { type: 'integer' },
+                    description: "view=month only. Defaults to the current UTC year.",
+                },
+                {
+                    name: 'month',
+                    in: 'query',
+                    schema: { type: 'integer', minimum: 1, maximum: 12 },
+                    description: "view=month only. Defaults to the current UTC month.",
+                },
+                {
+                    name: 'search',
+                    in: 'query',
+                    schema: { type: 'string' },
+                    description: 'Case-insensitive substring match against the worker\'s name.',
+                },
+                {
+                    name: 'type',
+                    in: 'query',
+                    schema: { type: 'string', enum: ['all', 'Employee', 'Freelancer'], default: 'all' },
+                    description: "Filter by worker type. 'all' (default) applies no filter.",
+                },
+                {
+                    name: 'page',
+                    in: 'query',
+                    schema: { type: 'integer', minimum: 1, default: 1 },
+                    description: 'Worker page (1-based). Defaults to 1.',
+                },
+                {
+                    name: 'limit',
+                    in: 'query',
+                    schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+                    description: 'Workers per page. Defaults to 20, capped at 100.',
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Shift roster for the given view/range and filters.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Shift roster retrieved successfully' },
+                                    data: { $ref: '#/components/schemas/ShiftRoster' },
                                 },
                                 required: ['success', 'message', 'data'],
                             },
