@@ -16,6 +16,7 @@ import { Location } from '../location/location.model';
 import { Room } from '../room/room.model';
 import { Task } from '../task/task.model';
 import { AdditionalTask } from '../additional_task/additional_task.model';
+import '../worker/worker.model';
 import { Worker } from '../worker/worker.model';
 
 const createClientIntoDB = async (
@@ -432,7 +433,17 @@ const getClientOverviewFromDB = async (clientId: string) => {
 
     const base_total_hours = trueTodayTasks?.total_hours || 0;
     const additional_total_hours = trueTodayAdditionalTasks?.total_hours || 0;
-    const total_hours = base_total_hours + additional_total_hours;
+    let total_hours = base_total_hours + additional_total_hours;
+
+    // Synchronize total_hours with Daily Schedule Roster
+    try {
+        const rosterData = await getClientScheduleRosterFromDB(clientId);
+        if (rosterData?.stats?.totalHours && rosterData.stats.totalHours > 0) {
+            total_hours = rosterData.stats.totalHours;
+        }
+    } catch (error) {
+        // Fall back to base task hours if roster computation fails
+    }
     
     const hours_completed = todayMetrics?.hours_completed || 0;
     const total_rooms = trueTodayTasks?.unique_rooms?.length || 0;
@@ -447,9 +458,13 @@ const getClientOverviewFromDB = async (clientId: string) => {
     const total_completed_tasks = historicalStats?.total_completed_tasks || 0;
     const total_completed_hours = historicalStats?.total_completed_hours || 0;
     const total_completed_rooms = historicalStats?.total_completed_rooms || 0;
-    const progress_percentage = total_hours > 0 ? Math.round((hours_completed / total_hours) * 100) : 0;
+    const progress_percentage = total_hours > 0 ? Math.min(100, Math.round((hours_completed / total_hours) * 100)) : 0;
     const next_visit = todaysShifts.find(s => s.status === 'upcoming');
     const last_completed = completedShifts[completedShifts.length - 1];
+
+    const remaining_minutes_total = Math.max(0, Math.round((total_hours - hours_completed) * 60));
+    const remaining_h = Math.floor(remaining_minutes_total / 60);
+    const remaining_m = remaining_minutes_total % 60;
 
     return {
         global_metrics: {
@@ -467,7 +482,7 @@ const getClientOverviewFromDB = async (clientId: string) => {
             hours_completed: parseFloat(hours_completed.toFixed(1)),
             total_hours: parseFloat(total_hours.toFixed(1)),
             hours_completed_str: `${Math.floor(hours_completed)}h ${Math.round((hours_completed % 1) * 60)}m Completed`,
-            hours_remaining_str: `${Math.floor(total_hours - hours_completed)}h ${Math.round(((total_hours - hours_completed) % 1) * 60)}m Remaining`,
+            hours_remaining_str: `${remaining_h}h ${remaining_m}m Remaining`,
             rooms_completed,
             total_rooms,
             total_tasks: total_tasks_today,
@@ -508,10 +523,10 @@ const getClientOverviewFromDB = async (clientId: string) => {
     };
 };
 
-const getClientScheduleRosterFromDB = async (
+async function getClientScheduleRosterFromDB(
     clientId: string,
     queryDate?: string
-) => {
+) {
     const client = await Client.findById(clientId);
     if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
 
