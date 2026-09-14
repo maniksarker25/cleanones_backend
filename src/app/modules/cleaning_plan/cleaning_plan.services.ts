@@ -194,34 +194,6 @@ const updateCleaningPlanIntoDB = async (
             result.assigned_workers.map((aw) => aw.worker)
         );
         await resyncTodayShiftWorkersIfDue(result._id, result.assigned_workers);
-
-        const previousWorkerIds = plan.assigned_workers.map((aw) =>
-            aw.worker.toString()
-        );
-        const nextWorkerIds = result.assigned_workers.map((aw) =>
-            aw.worker.toString()
-        );
-        const addedWorkerIds = nextWorkerIds.filter(
-            (workerId) => !previousWorkerIds.includes(workerId)
-        );
-        const removedWorkerIds = previousWorkerIds.filter(
-            (workerId) => !nextWorkerIds.includes(workerId)
-        );
-
-        if (addedWorkerIds.length) {
-            emitAppEvent('cleaning_plan.worker_assigned', {
-                planId: result._id.toString(),
-                title: result.title,
-                addedWorkerIds,
-            });
-        }
-        if (removedWorkerIds.length) {
-            emitAppEvent('cleaning_plan.worker_removed', {
-                planId: result._id.toString(),
-                title: result.title,
-                removedWorkerIds,
-            });
-        }
     }
 
     return result;
@@ -373,14 +345,43 @@ const getAllCleaningPlansFromDB = async (
                     },
                 },
                 {
+                    $lookup: {
+                        from: 'tasks',
+                        let: { planRooms: { $ifNull: ['$rooms', []] } },
+                        pipeline: [
+                            {
+                                $match: {
+                                    $expr: {
+                                        $and: [
+                                            { $in: ['$room', '$$planRooms'] },
+                                            { $eq: ['$is_active', true] },
+                                        ],
+                                    },
+                                },
+                            },
+                            { $project: { _id: 1 } },
+                        ],
+                        as: '_planTasks',
+                    },
+                },
+                {
+                    $lookup: {
+                        from: 'additionaltasks',
+                        localField: '_id',
+                        foreignField: 'cleaning_plan_id',
+                        as: '_additionalTasks',
+                        pipeline: [{ $project: { _id: 1 } }],
+                    },
+                },
+                {
                     $addFields: {
                         total_room: { $size: { $ifNull: ['$rooms', []] } },
                         total_assigned_worker: {
                             $size: { $ifNull: ['$assigned_workers', []] },
                         },
-                        total_additional_task: {
-                            $size: { $ifNull: ['$additional_tasks', []] },
-                        },
+                        total_additional_task: { $size: '$_additionalTasks' },
+                        total_tasks: { $size: '$_planTasks' },
+                        total_task: { $size: '$_planTasks' },
                     },
                 },
                 {
@@ -453,7 +454,8 @@ const getAllCleaningPlansFromDB = async (
                     $project: {
                         rooms: 0,
                         assigned_workers: 0,
-                        additional_tasks: 0,
+                        _planTasks: 0,
+                        _additionalTasks: 0,
                     },
                 },
             ],
@@ -569,9 +571,9 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
         },
         {
             $lookup: {
-                from: 'additional_tasks',
-                localField: 'additional_tasks',
-                foreignField: '_id',
+                from: 'additionaltasks',
+                localField: '_id',
+                foreignField: 'cleaning_plan_id',
                 as: 'additional_tasks',
             },
         },
@@ -681,34 +683,6 @@ const assignWorkersToPlan = async (
             result.assigned_workers.map((aw) => aw.worker)
         );
         await resyncTodayShiftWorkersIfDue(result._id, result.assigned_workers);
-
-        const previousWorkerIds = plan.assigned_workers.map((aw) =>
-            aw.worker.toString()
-        );
-        const nextWorkerIds = result.assigned_workers.map((aw) =>
-            aw.worker.toString()
-        );
-        const addedWorkerIds = nextWorkerIds.filter(
-            (workerId) => !previousWorkerIds.includes(workerId)
-        );
-        const removedWorkerIds = previousWorkerIds.filter(
-            (workerId) => !nextWorkerIds.includes(workerId)
-        );
-
-        if (addedWorkerIds.length) {
-            emitAppEvent('cleaning_plan.worker_assigned', {
-                planId: result._id.toString(),
-                title: result.title,
-                addedWorkerIds,
-            });
-        }
-        if (removedWorkerIds.length) {
-            emitAppEvent('cleaning_plan.worker_removed', {
-                planId: result._id.toString(),
-                title: result.title,
-                removedWorkerIds,
-            });
-        }
     }
 
     return result;

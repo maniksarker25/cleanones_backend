@@ -32,11 +32,6 @@ const createAdditionalTaskIntoDB = async (
         is_approved: requesterRole === USER_ROLE.manager,
     });
 
-    // push the new task id into the cleaning plan's additional_tasks array
-    await CleaningPlan.findByIdAndUpdate(plan._id, {
-        $push: { additional_tasks: task._id },
-    });
-
     // A manager creating one directly is auto-approved (see is_approved
     // above) — there's nothing pending for other managers to review, so only
     // notify when this actually came from a client request.
@@ -116,11 +111,6 @@ const deleteAdditionalTaskFromDB = async (id: string) => {
     const task = await AdditionalTask.findById(id);
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
-
-    // pull the task id from the cleaning plan's additional_tasks array
-    await CleaningPlan.findByIdAndUpdate(task.cleaning_plan_id, {
-        $pull: { additional_tasks: task._id },
-    });
 
     await AdditionalTask.findByIdAndDelete(id);
     return { message: 'Additional task deleted successfully' };

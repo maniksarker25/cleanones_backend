@@ -33,4 +33,10 @@ router.get(
     clientController.getAllClients
 );
 
+router.get(
+    '/overview',
+    auth(USER_ROLE.client),
+    clientController.getClientOverview
+);
+
 export const clientRoutes = router;

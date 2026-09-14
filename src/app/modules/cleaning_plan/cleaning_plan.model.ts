@@ -90,11 +90,6 @@ const cleaningPlanSchema = new Schema<ICleaningPlan>(
             type: Boolean,
             default: true,
         },
-        additional_tasks: {
-            type: [Schema.Types.ObjectId],
-            ref: 'AdditionalTask',
-            default: [],
-        },
     },
     {
         timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
