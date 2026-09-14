@@ -5,7 +5,7 @@ import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
 import { Worker } from '../worker/worker.model';
-import { getOrCreateShift } from '../shift/shift.services';
+import { getOrCreateShift, resyncTodayShiftWorkersIfDue } from '../shift/shift.services';
 import {
     assertWorkersAssignable,
     computeMaxEstimatedDuration,
@@ -182,6 +182,7 @@ const updateCleaningPlanIntoDB = async (
             result._id,
             result.assigned_workers.map((aw) => aw.worker)
         );
+        await resyncTodayShiftWorkersIfDue(result._id, result.assigned_workers);
     }
 
     return result;
@@ -633,6 +634,7 @@ const assignWorkersToPlan = async (
             result._id,
             result.assigned_workers.map((aw) => aw.worker)
         );
+        await resyncTodayShiftWorkersIfDue(result._id, result.assigned_workers);
     }
 
     return result;

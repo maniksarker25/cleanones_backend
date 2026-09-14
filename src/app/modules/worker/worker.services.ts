@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
+import chatServices from '../chat/chat.services';
 import { PROFILE_MODEL_BY_ROLE, USER_ROLE } from '../user/user.constant';
 import { User } from '../user/user.model';
 import { Worker } from './worker.model';
@@ -35,8 +36,9 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
         );
     }
     const session = await mongoose.startSession();
+    let worker;
     try {
-        return await session.withTransaction(async () => {
+        worker = await session.withTransaction(async () => {
             const existing = await User.findOne({
                 $or: [{ email: workerData.email }, { phone: workerData.phone }],
             }).session(session);
@@ -61,7 +63,7 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
                 ],
                 { session }
             );
-            const [worker] = await Worker.create(
+            const [createdWorker] = await Worker.create(
                 [
                     {
                         ...workerData,
@@ -72,14 +74,21 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
             );
             await User.findByIdAndUpdate(
                 user._id,
-                { profileId: worker._id },
+                { profileId: createdWorker._id },
                 { session }
             );
-            return worker;
+            return createdWorker;
         });
     } finally {
         await session.endSession();
     }
+
+    // Best-effort, outside the transaction — same pattern as
+    // createChatGroupForPlan for cleaning plans. Idempotent (unique index on
+    // the chat side), so a retry here can never create a duplicate.
+    await chatServices.createWorkerManagersChat(worker._id);
+
+    return worker;
 };
 
 const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
@@ -172,10 +181,13 @@ const deleteWorkerFromDB = async (id: string) => {
                 { session }
             );
         });
-        return null;
     } finally {
         await session.endSession();
     }
+
+    await chatServices.deactivateWorkerManagersChat(id);
+
+    return null;
 };
 
 const getAllWorkersFromDB = async (query: Record<string, unknown>) => {

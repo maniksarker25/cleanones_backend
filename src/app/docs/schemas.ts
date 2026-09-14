@@ -1781,12 +1781,23 @@ const schemas = {
                                     pattern: '^[a-fA-F0-9]{24}$',
                                     example: '507f1f77bcf86cd799439011',
                                 },
+                                name: { type: 'string' },
+                                room_type: { type: 'string' },
+                                cleaning_type: { type: 'string' },
+                                floor: { type: 'number', nullable: true },
+                                is_active: { type: 'boolean' },
+                                tasks: {
+                                    type: 'array',
+                                    items: { $ref: '#/components/schemas/Task' },
+                                    description:
+                                        "This room's active Task documents, full detail. Only present on the single-plan read.",
+                                },
                             },
                         },
                     ],
                 },
                 description:
-                    'ObjectIds on writes. The single-plan read populates full room documents; the list read omits this field entirely.',
+                    'ObjectIds on writes. The single-plan read populates full room documents (each with its active tasks[] populated); the list read omits this field entirely.',
             },
             assigned_workers: {
                 type: 'array',
@@ -3291,6 +3302,168 @@ const schemas = {
                 format: 'date-time',
             },
         },
+    },
+    ChatAttachment: {
+        type: 'object',
+        properties: {
+            url: { type: 'string' },
+            type: {
+                type: 'string',
+                enum: ['image', 'video', 'pdf', 'file'],
+            },
+        },
+        required: ['url', 'type'],
+    },
+    Chat: {
+        type: 'object',
+        properties: {
+            _id: { $ref: '#/components/schemas/ObjectId' },
+            type: {
+                type: 'string',
+                enum: ['group', 'direct', 'worker', 'client'],
+                description:
+                    "'group' = one chat per cleaning plan, auto-membership of the client + every currently-assigned worker, visible to all managers. 'direct' = a 1:1 client↔worker chat, modeled as a chat with a single-element workers array and no cleaning_plan/name. 'worker' = one chat per worker (created automatically with the worker profile), auto-membership of that one worker + every manager, no client at all. 'client' = one chat per client (created automatically with the client profile), auto-membership of that one client + every manager, no workers at all. Both 'worker' and 'client' — see display_name below for how their names work.",
+            },
+            cleaning_plan: {
+                $ref: '#/components/schemas/ObjectId',
+                nullable: true,
+                description: 'group chats only; null for every other type.',
+            },
+            name: {
+                type: 'string',
+                nullable: true,
+                description:
+                    "group chats only (set to the cleaning plan title); null for every other type. Prefer display_name (below) for showing a name to the user — it's correct for all four chat types.",
+            },
+            display_name: {
+                type: 'string',
+                nullable: true,
+                description:
+                    "Computed per viewer, not stored — present on GET /chat/my-chats and GET /chat/{id}/members results only (not on write responses). For 'group' chats: the plan title (same as name). For 'worker' chats: 'Managers' when the caller is the worker, or the worker's own name when the caller is a manager. For 'client' chats: 'Manager' when the caller is the client, or the client's own name when the caller is a manager. Always null for 'direct' chats currently.",
+            },
+            client: {
+                oneOf: [
+                    { $ref: '#/components/schemas/ObjectId' },
+                    {
+                        type: 'object',
+                        properties: {
+                            _id: { $ref: '#/components/schemas/ObjectId' },
+                            name: { type: 'string' },
+                            email: { type: 'string', format: 'email' },
+                            phone: { type: 'string' },
+                        },
+                    },
+                ],
+                nullable: true,
+                description:
+                    "ObjectId on writes; populated (name/email/phone) on list/detail reads. The one client for 'client' chats; always null for 'worker' chats — they have no client.",
+            },
+            workers: {
+                type: 'array',
+                items: {
+                    oneOf: [
+                        { $ref: '#/components/schemas/ObjectId' },
+                        {
+                            type: 'object',
+                            properties: {
+                                _id: { $ref: '#/components/schemas/ObjectId' },
+                                name: { type: 'string' },
+                                email: { type: 'string', format: 'email' },
+                                phone: { type: 'string' },
+                                worker_type: { type: 'string' },
+                                user: {
+                                    type: 'object',
+                                    properties: {
+                                        full_name: { type: 'string' },
+                                        profile_photo: { type: 'string', nullable: true },
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                },
+                description:
+                    "Group: every currently-assigned worker. Direct: the single other party. Worker: the one worker this chat belongs to (array of length 1). Client: always empty — no workers involved. ObjectIds on writes; populated on list/detail reads.",
+            },
+            participant_key: {
+                type: 'string',
+                nullable: true,
+                description:
+                    "direct chats only — sorted `${clientId}:${workerId}`, used to find-or-create idempotently. Always null for group chats.",
+            },
+            last_message: {
+                oneOf: [
+                    { $ref: '#/components/schemas/ObjectId' },
+                    { $ref: '#/components/schemas/ChatMessage' },
+                ],
+                nullable: true,
+                description: 'ObjectId on writes; populated (with its own sender) on list reads.',
+            },
+            last_message_at: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+            },
+            last_updated_by: {
+                $ref: '#/components/schemas/ObjectId',
+                nullable: true,
+            },
+            is_active: { type: 'boolean' },
+            created_at: { type: 'string', format: 'date-time' },
+            updated_at: { type: 'string', format: 'date-time' },
+        },
+        description:
+            'A chat room — a group chat auto-tied to a CleaningPlan, a 1:1 direct chat between a client and a worker, a worker↔managers chat auto-created with the worker profile, or a client↔managers chat auto-created with the client profile. See docs/CHAT_SOCKET_EVENTS.md for how messages are actually sent (Socket.IO only — there is no REST endpoint to create a message).',
+    },
+    ChatMessage: {
+        type: 'object',
+        properties: {
+            _id: { $ref: '#/components/schemas/ObjectId' },
+            chat: { $ref: '#/components/schemas/ObjectId' },
+            sender: {
+                oneOf: [
+                    { $ref: '#/components/schemas/ObjectId' },
+                    {
+                        type: 'object',
+                        properties: {
+                            _id: { $ref: '#/components/schemas/ObjectId' },
+                            full_name: { type: 'string' },
+                            profile_photo: { type: 'string', nullable: true },
+                            email: { type: 'string', format: 'email' },
+                        },
+                    },
+                ],
+                description:
+                    "The sending User account's id (not the client/worker/manager profile id) — populated (full_name/profile_photo/email) on reads.",
+            },
+            sender_role: {
+                type: 'string',
+                enum: ['client', 'worker', 'manager'],
+            },
+            text: { type: 'string' },
+            attachments: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/ChatAttachment' },
+            },
+            seen: {
+                type: 'boolean',
+                description:
+                    'Only meaningful for direct chats — group chats have more than one recipient, so a single boolean cannot represent "seen" for them.',
+            },
+            is_deleted: {
+                type: 'boolean',
+                description: 'Soft-delete flag — set via DELETE /chat-message/{id} or the group:delete-message socket event; the document is never actually removed.',
+            },
+            deleted_at: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+            },
+            created_at: { type: 'string', format: 'date-time' },
+            updated_at: { type: 'string', format: 'date-time' },
+        },
+        description:
+            'Created only via Socket.IO (group:send-message / send-message events) — there is no REST endpoint to create a message. See docs/CHAT_SOCKET_EVENTS.md.',
     },
 };
 export default {

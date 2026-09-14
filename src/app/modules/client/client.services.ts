@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
+import chatServices from '../chat/chat.services';
 import adminCredentialsEmailBody from '../../mailTemplate/adminCredentialsEmailBody';
 import sendEmail from '../../utilities/sendEmail';
 import { USER_ROLE } from '../user/user.constant';
@@ -78,6 +79,12 @@ const createClientIntoDB = async (
         await session.commitTransaction();
         session.endSession();
 
+        // Best-effort, outside the transaction — same pattern as
+        // createChatGroupForPlan/createWorkerManagersChat. Idempotent (unique
+        // index on the chat side), so a retry here can never create a
+        // duplicate.
+        await chatServices.createClientManagersChat(profile._id);
+
         return profile;
     } catch (error) {
         await session.abortTransaction();
@@ -148,6 +155,8 @@ const deleteClientFromDB = async (managerId: string, id: string) => {
 
         await session.commitTransaction();
         session.endSession();
+
+        await chatServices.deactivateClientManagersChat(id);
 
         return null;
     } catch (error) {
