@@ -11,6 +11,9 @@ import { TClient } from './client.interface';
 import { Client } from './client.model';
 import { Shift } from '../shift/shift.model';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
+import { Location } from '../location/location.model';
+import { Room } from '../room/room.model';
+import { Task } from '../task/task.model';
 
 const createClientIntoDB = async (
     managerId: string,
@@ -228,11 +231,41 @@ const getClientOverviewFromDB = async (clientId: string) => {
         }
     });
 
+    const total_cleaning_plans = await CleaningPlan.countDocuments({ client: clientId, isDeleted: { $ne: true } });
+    const total_locations = await Location.countDocuments({ client: clientId });
+    const clientLocations = await Location.find({ client: clientId }).select('_id');
+    const locationIds = clientLocations.map(l => l._id);
+    const total_global_rooms = await Room.countDocuments({ location: { $in: locationIds } });
+    const total_global_tasks = await Task.countDocuments({ client: clientId });
+
+    const allCompletedShifts = await Shift.find({
+        cleaning_plan: { $in: clientPlanIds },
+        status: 'completed'
+    });
+
+    let total_completed_tasks = 0;
+    let total_completed_hours = 0;
+    let total_completed_rooms = 0;
+
+    allCompletedShifts.forEach(shift => {
+        total_completed_hours += (shift.duration_minutes || 0) / 60;
+        total_completed_rooms += (shift.rooms?.length || 0);
+        total_completed_tasks += (shift.tasks?.filter(t => t.is_completed).length || 0);
+    });
     const progress_percentage = total_hours > 0 ? Math.round((hours_completed / total_hours) * 100) : 0;
     const next_visit = todaysShifts.find(s => s.status === 'upcoming');
     const last_completed = completedShifts[completedShifts.length - 1];
 
     return {
+        global_metrics: {
+            total_cleaning_plans,
+            total_locations,
+            total_rooms: total_global_rooms,
+            total_tasks: total_global_tasks,
+            total_completed_tasks,
+            total_completed_hours: parseFloat(total_completed_hours.toFixed(1)),
+            total_completed_rooms
+        },
         greeting_name: client.name || 'Client',
         current_date_str: new Date().toLocaleDateString('en-US', { weekday: "long", month: "long", day: "numeric", year: "numeric" }),
         todays_progress: {
