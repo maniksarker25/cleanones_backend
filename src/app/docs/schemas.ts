@@ -2980,6 +2980,78 @@ const schemas = {
             'total_work_on_this_month',
         ],
     },
+    AttendanceSummary: {
+        type: 'object',
+        properties: {
+            period: {
+                type: 'string',
+                enum: ['today', 'weekly', 'monthly'],
+            },
+            start_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Inclusive UTC start of the period.',
+            },
+            end_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Exclusive UTC end of the period.',
+            },
+            total_hours: {
+                type: 'number',
+                description:
+                    "Sum of (check_out_at - check_in_at) across every worker's completed check-ins in the period, in hours, rounded to 2 decimals.",
+            },
+            completed_shifts: {
+                type: 'integer',
+                description: "Shifts with status 'completed' whose date falls in the period.",
+            },
+            punctuality_percentage: {
+                type: 'number',
+                description:
+                    'Of all worker check-ins in the period, the share that were on-time (check_in_at <= shift.date_time, no grace period). 0 when there were no check-ins.',
+            },
+            on_time_check_ins: {
+                type: 'integer',
+            },
+            late_check_ins: {
+                type: 'integer',
+            },
+        },
+        required: [
+            'period',
+            'start_date',
+            'end_date',
+            'total_hours',
+            'completed_shifts',
+            'punctuality_percentage',
+            'on_time_check_ins',
+            'late_check_ins',
+        ],
+    },
+    WorkerAttendanceListItem: {
+        type: 'object',
+        properties: {
+            worker_id: { $ref: '#/components/schemas/ObjectId' },
+            name: { type: 'string' },
+            worker_type: { type: 'string', enum: ['Employee', 'Freelancer'] },
+            hours_worked: {
+                type: 'number',
+                description:
+                    "Sum of (check_out_at - check_in_at) across this worker's completed check-ins in the period, in hours, rounded to 2 decimals.",
+            },
+            total_shifts: {
+                type: 'integer',
+                description: 'Shifts this worker was assigned to in the period.',
+            },
+            late_days: {
+                type: 'integer',
+                description:
+                    "Count of this worker's check-ins after the shift's scheduled date_time. No grace period.",
+            },
+        },
+        required: ['worker_id', 'name', 'worker_type', 'hours_worked', 'total_shifts', 'late_days'],
+    },
     TodayLiveShiftMeta: {
         type: 'object',
         properties: {

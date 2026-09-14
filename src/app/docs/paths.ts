@@ -6356,6 +6356,99 @@ const paths = {
             },
         },
     },
+    '/shift/attendance-summary': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Attendance summary across all workers',
+            operationId: 'getShiftAttendanceSummary',
+            description:
+                "Manager-only. Single aggregate object across every worker's shifts in the period (not per-worker) — total_hours, completed_shifts, and punctuality_percentage (share of check-ins that were on-time, no grace period). Each assigned-worker entry across every shift in the period counts separately — a shift with 3 assigned workers contributes up to 3 check-ins.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'period',
+                    in: 'query',
+                    schema: { type: 'string', enum: ['today', 'weekly', 'monthly'], default: 'today' },
+                    description:
+                        "'today' = the current UTC calendar day, 'weekly' = the current Monday-Sunday UTC week, 'monthly' = the current UTC calendar month. Defaults to 'today'.",
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Aggregated attendance summary for the given period.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Workers attendance summary retrieved successfully' },
+                                    data: { $ref: '#/components/schemas/AttendanceSummary' },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/attendance-list': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Per-worker attendance list',
+            operationId: 'getShiftAttendanceList',
+            description:
+                "Manager-only. One row per active worker matching the filters (including workers with zero shifts in the period, shown with hours_worked/total_shifts/late_days all 0) — hours_worked, total_shifts, and late_days for the given period.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'period',
+                    in: 'query',
+                    schema: { type: 'string', enum: ['today', 'weekly', 'monthly'], default: 'today' },
+                    description:
+                        "'today' = the current UTC calendar day, 'weekly' = the current Monday-Sunday UTC week, 'monthly' = the current UTC calendar month. Defaults to 'today'.",
+                },
+                {
+                    name: 'search',
+                    in: 'query',
+                    schema: { type: 'string' },
+                    description: 'Case-insensitive substring match against the worker\'s name.',
+                },
+                {
+                    name: 'type',
+                    in: 'query',
+                    schema: { type: 'string', enum: ['all', 'Employee', 'Freelancer'], default: 'all' },
+                    description: "Filter by worker type. 'all' (default) applies no filter.",
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Per-worker attendance rows for the given period and filters.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Workers attendance list retrieved successfully' },
+                                    data: {
+                                        type: 'array',
+                                        items: { $ref: '#/components/schemas/WorkerAttendanceListItem' },
+                                    },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/shift/today-live-shift-meta': {
         get: {
             tags: ['Shifts'],
@@ -6848,7 +6941,7 @@ const paths = {
                 summary: 'Upload a required photo for one shift task',
                 operationId: 'patchShiftPlanIdDateTasksTaskIdPhoto',
                 description:
-                    'Materializes the shift for this date first if it does not exist yet. title must match one of that task instance\'s photo_requirements titles (frozen at materialization time) or this returns 400. Only a worker assigned to this shift may upload. is_completed on the task entry is recomputed automatically once every required photo is uploaded — there is no manual complete/approve step. Once every task on the shift has is_completed: true, the shift\'s own top-level status auto-advances to \'completed\'. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
+                    'Materializes the shift for this date first if it does not exist yet. title must match one of that task instance\'s photo_requirements titles (frozen at materialization time) or this returns 400. Only a worker assigned to this shift may upload. is_completed on the task entry is recomputed automatically once every required photo is uploaded. This endpoint only applies to tasks with is_photo_required: true — a task with no photo requirement is completed via PATCH /shift/{planId}/{date}/tasks/{taskId}/complete instead. Once every task on the shift has is_completed: true, the shift\'s own top-level status auto-advances to \'completed\'. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['worker'],
                 parameters: [
@@ -6921,6 +7014,60 @@ const paths = {
                                     },
                                     required: ['success', 'message'],
                                 },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/{planId}/{date}/tasks/{taskId}/complete': {
+        patch: {
+            tags: ['Shifts'],
+            summary: 'Mark a no-photo shift task as complete',
+            operationId: 'patchShiftPlanIdDateTasksTaskIdComplete',
+            description:
+                "Materializes the shift for this date first if it does not exist yet. For tasks with is_photo_required: false only — those are no longer auto-completed on shift creation, so the assigned worker must explicitly mark them done here. Returns 400 if the task actually requires a photo (use PATCH /shift/{planId}/{date}/tasks/{taskId}/photo instead) or is already completed. Only a worker assigned to this shift may call this. Once every task on the shift has is_completed: true, the shift's own top-level status auto-advances to 'completed'. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['worker'],
+            parameters: [
+                {
+                    name: 'planId',
+                    in: 'path',
+                    required: true,
+                    description: 'Cleaning plan identifier.',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                },
+                {
+                    name: 'date',
+                    in: 'path',
+                    required: true,
+                    description: 'ISO date (YYYY-MM-DD).',
+                    schema: { type: 'string', format: 'date' },
+                },
+                {
+                    name: 'taskId',
+                    in: 'path',
+                    required: true,
+                    description:
+                        "The source Task's identifier (matches tasks[].task on the shift).",
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'The task was marked complete.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Task marked as completed' },
+                                    data: { $ref: '#/components/schemas/Shift' },
+                                },
+                                required: ['success', 'message', 'data'],
                             },
                         },
                     },
