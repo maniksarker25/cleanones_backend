@@ -34,7 +34,7 @@ export function renderChatSocketEventsMarkdown(): string {
 
 const chatSocketEvents = {
     description:
-        'Chat messages are created only over Socket.IO (default path /socket.io, default namespace). Auth: pass the access token as socket.handshake.auth.token or ?token= query param; the server verifies it like REST and disconnects the socket immediately on failure. See docs/CHAT_SOCKET_EVENTS.md for the full reference (rooms, worked examples, edge cases).',
+        "Chat messages are created only over Socket.IO (default path /socket.io, default namespace); this same connection also delivers realtime app notifications (see the 'notification' event below). Auth: pass the access token as socket.handshake.auth.token or ?token= query param; the server verifies it like REST and disconnects the socket immediately on failure. See docs/CHAT_SOCKET_EVENTS.md for the full reference (rooms, worked examples, edge cases).",
     events: [
         {
             name: 'group:join',
@@ -197,6 +197,14 @@ const chatSocketEvents = {
             payload: { _id: 'string', client: 'string' },
             description:
                 "Fired when a client's chat with managers is created (right after the client profile is created via POST /client/create-client). Mirrors worker-chat:created.",
+        },
+        {
+            name: 'notification',
+            direction: 'server-to-client',
+            broadcast: 'the receiver\'s own room only (io.to(profileId)) — not chat-specific',
+            payload: '$ref Notification schema',
+            description:
+                "General app notification (cleaning plan created/worker assigned/removed/deleted, additional task created/approved/rejected, shift checked in/out/completed, new chat message while you weren't in the chat room). Only sent if the receiver is currently online; otherwise NotificationService.sendNotification() falls back to a OneSignal push instead and this event never fires for that notification. See GET /notification/get-notifications for the same data over REST.",
         },
     ],
 };

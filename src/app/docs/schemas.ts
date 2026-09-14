@@ -1,4 +1,5 @@
 // Shared OpenAPI 3.0 schemas. Keep in sync with validation, models and services.
+import chatSchemas from './chat.schemas';
 const schemas = {
     "IssueReportCreate": {
         "type": "object",
@@ -3468,6 +3469,7 @@ const schemas = {
 };
 export default {
     ...schemas,
+    ...chatSchemas,
     MyShift: {
         ...schemas.Shift,
         properties: {

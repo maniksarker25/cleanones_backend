@@ -1,6 +1,7 @@
 import chatSocketEvents, { renderChatSocketEventsMarkdown } from './chat.socket-events';
 import paths from './paths';
 import schemas from './schemas';
+import chatSocketDocs from './chat.socket-docs';
 
 export function createOpenApiDocument(serverUrl = '/api/v1') {
     return {
@@ -31,6 +32,8 @@ export function createOpenApiDocument(serverUrl = '/api/v1') {
             },
         ],
         tags: [
+            ['Chat', 'Group and direct chat HTTP APIs. See Chat sockets for realtime messaging.'],
+            ['Chat sockets', chatSocketDocs],
             ['Question suggestions', 'Public questions and answers managed by managers.'],
             ['Issue reports', 'Worker-reported issues managed by managers.'],
             [
