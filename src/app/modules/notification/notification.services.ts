@@ -180,10 +180,64 @@ const sendNotification = async ({
     return notification;
 };
 
+export interface SendChatPushNotificationParams {
+    /** Client/Worker/Manager profile id. */
+    receiver: string;
+    title: string;
+    message: string;
+    /** Groups repeated pushes for the same chat into one tray entry instead of stacking. */
+    chatId: string;
+    data?: Record<string, unknown>;
+}
+
+/**
+ * Chat messages are deliberately NOT routed through sendNotification/the
+ * Notification collection: a busy group chat would otherwise flood the
+ * generic notification list with one row per message, drowning out actual
+ * business events (plan created, task approved, etc.), and an offline
+ * recipient would get one separate OS push per message instead of one
+ * collapsed "new messages" alert. Chat already has its own history/unread
+ * tracking (ChatMessage + the seen mechanism) and its own realtime delivery
+ * (group:new-message/message:new via chat_message.services.ts) — this only
+ * covers the one gap those don't: an OS-level push for someone who's
+ * currently offline, collapsed per-chat via OneSignal's collapse key so it
+ * can never stack into a wall of alerts.
+ */
+const sendChatPushNotification = async ({
+    receiver,
+    title,
+    message,
+    chatId,
+    data = {},
+}: SendChatPushNotificationParams) => {
+    const userId = receiver.toString();
+
+    // Online: the chat's own socket event (group:new-message/message:new)
+    // already delivered this in realtime — nothing further to do here.
+    if (isUserOnline(userId)) return;
+
+    const devices = await Device.find({
+        userId: new mongoose.Types.ObjectId(userId),
+        isActive: true,
+    }).select('playerId');
+
+    const playerIds = devices.map((d: any) => d.playerId).filter(Boolean);
+    if (playerIds.length === 0) return;
+
+    await sendPushNotification({
+        playerIds,
+        message,
+        heading: title,
+        data: { chatId, ...data },
+        collapseId: chatId,
+    });
+};
+
 const NotificationService = {
     getAllNotificationFromDB,
     seeNotification,
     sendNotification,
+    sendChatPushNotification,
     seeSingleNotification,
     deleteNotification,
 };

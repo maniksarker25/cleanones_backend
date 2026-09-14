@@ -6,6 +6,11 @@ import controller from './issue_report.controller';
 import validations from './issue_report.validation';
 
 const router = Router();
+router.get(
+    '/get-my-issue-report',
+    auth(USER_ROLE.worker),
+    controller.getMyIssueReports
+);
 
 router.post(
     '/create-issue-report',
