@@ -2967,6 +2967,242 @@ const schemas = {
             'total_work_on_this_month',
         ],
     },
+    TodayLiveShiftMeta: {
+        type: 'object',
+        properties: {
+            total_shift: {
+                type: 'integer',
+                description: 'Materialized shifts today, system-wide — not scoped to the calling manager.',
+            },
+            completed_shift: {
+                type: 'integer',
+            },
+            in_progress: {
+                type: 'integer',
+            },
+            pending: {
+                type: 'integer',
+                description:
+                    "Count of today's shifts with status 'upcoming' (not yet checked into). A cancelled shift counts toward total_shift but isn't reflected in completed_shift/in_progress/pending.",
+            },
+        },
+        required: ['total_shift', 'completed_shift', 'in_progress', 'pending'],
+    },
+    ShiftListItem: {
+        allOf: [
+            { $ref: '#/components/schemas/ShiftSummary' },
+            {
+                type: 'object',
+                properties: {
+                    total_room: { type: 'integer' },
+                    completed_room: {
+                        type: 'integer',
+                        description: 'Count of rooms at progress_percent 100.',
+                    },
+                    total_task: { type: 'integer' },
+                    overall_progress_percent: {
+                        type: 'integer',
+                        minimum: 0,
+                        maximum: 100,
+                    },
+                    cleaning_plan: {
+                        type: 'object',
+                        properties: {
+                            _id: { $ref: '#/components/schemas/ObjectId' },
+                            title: { type: 'string', nullable: true },
+                        },
+                    },
+                    client: {
+                        type: 'object',
+                        nullable: true,
+                        properties: {
+                            _id: { $ref: '#/components/schemas/ObjectId' },
+                            name: { type: 'string' },
+                        },
+                    },
+                },
+            },
+        ],
+        description:
+            'Lean list-view shape: ShiftSummary plus progress totals and resolved cleaning_plan/client context — no rooms[]/tasks[]/assigned_workers[] detail. Used by today-live-shifts; use GET /shift/single-live-shift/{id} for full detail on one shift.',
+    },
+    ShiftDetail: {
+        type: 'object',
+        properties: {
+            _id: {
+                type: 'string',
+                pattern: '^[a-fA-F0-9]{24}$',
+                example: '507f1f77bcf86cd799439011',
+            },
+            cleaning_plan: {
+                type: 'object',
+                properties: {
+                    _id: { $ref: '#/components/schemas/ObjectId' },
+                    title: { type: 'string', nullable: true },
+                },
+            },
+            client: {
+                type: 'object',
+                nullable: true,
+                properties: {
+                    _id: { $ref: '#/components/schemas/ObjectId' },
+                    name: { type: 'string' },
+                },
+            },
+            date: {
+                type: 'string',
+                format: 'date-time',
+            },
+            date_time: {
+                type: 'string',
+                format: 'date-time',
+            },
+            status: {
+                type: 'string',
+                enum: ['upcoming', 'in_progress', 'completed', 'cancelled'],
+            },
+            location: {
+                type: 'object',
+                properties: {
+                    location: { $ref: '#/components/schemas/ObjectId' },
+                    name: { type: 'string' },
+                    coordinates: {
+                        type: 'object',
+                        nullable: true,
+                        properties: {
+                            type: { type: 'string', enum: ['Point'] },
+                            coordinates: {
+                                type: 'array',
+                                items: { type: 'number' },
+                                minItems: 2,
+                                maxItems: 2,
+                                description: '[longitude, latitude]',
+                            },
+                        },
+                    },
+                },
+            },
+            duration_minutes: {
+                type: 'number',
+            },
+            rooms: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        room: { $ref: '#/components/schemas/ObjectId' },
+                        name: { type: 'string' },
+                        room_type: { type: 'string' },
+                        total_task: { type: 'integer' },
+                        completed_task: { type: 'integer' },
+                        progress_percent: {
+                            type: 'integer',
+                            minimum: 0,
+                            maximum: 100,
+                        },
+                    },
+                },
+                description: "Snapshot of the plan's rooms, with per-room progress fields appended.",
+            },
+            tasks: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        task: { $ref: '#/components/schemas/ObjectId' },
+                        room: { $ref: '#/components/schemas/ObjectId' },
+                        name: { type: 'string' },
+                        duration_minutes: { type: 'number' },
+                        is_photo_required: { type: 'boolean' },
+                        photo_requirements: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    title: { type: 'string' },
+                                    photo_url: { type: 'string', nullable: true },
+                                    is_uploaded: { type: 'boolean' },
+                                },
+                            },
+                        },
+                        is_completed: { type: 'boolean' },
+                        completed_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                        },
+                    },
+                },
+            },
+            assigned_workers: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        worker: { $ref: '#/components/schemas/ObjectId' },
+                        name: { type: 'string' },
+                        role: {
+                            type: 'string',
+                            enum: ['Team leader', 'Co-leader', 'Normal worker'],
+                        },
+                        assigned_with_conflict: { type: 'boolean' },
+                        check_in_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                        },
+                        check_in_coordinates: {
+                            type: 'array',
+                            items: { type: 'number' },
+                            minItems: 2,
+                            maxItems: 2,
+                            nullable: true,
+                        },
+                        check_out_at: {
+                            type: 'string',
+                            format: 'date-time',
+                            nullable: true,
+                        },
+                        check_out_coordinates: {
+                            type: 'array',
+                            items: { type: 'number' },
+                            minItems: 2,
+                            maxItems: 2,
+                            nullable: true,
+                        },
+                    },
+                },
+            },
+            is_worker_overridden: {
+                type: 'boolean',
+            },
+            last_updated_by: {
+                $ref: '#/components/schemas/ObjectId',
+                nullable: true,
+            },
+            createdAt: {
+                type: 'string',
+                format: 'date-time',
+            },
+            updatedAt: {
+                type: 'string',
+                format: 'date-time',
+            },
+            total_room: { type: 'integer' },
+            completed_room: {
+                type: 'integer',
+                description: 'Count of rooms at progress_percent 100.',
+            },
+            total_task: { type: 'integer' },
+            overall_progress_percent: {
+                type: 'integer',
+                minimum: 0,
+                maximum: 100,
+            },
+        },
+        description:
+            'Full single-shift detail: everything Shift has (rooms[] with per-room progress fields appended, tasks[], assigned_workers[]) plus resolved cleaning_plan/client context and overall progress totals. Returned by GET /shift/single-live-shift/{id}.',
+    },
     InvoiceCreate: {
         type: 'object',
         properties: {

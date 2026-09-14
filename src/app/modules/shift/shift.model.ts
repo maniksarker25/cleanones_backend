@@ -132,5 +132,10 @@ const shiftSchema = new Schema<IShift>(
 // other side's insert fails with a duplicate-key error it can recover from.
 shiftSchema.index({ cleaning_plan: 1, date: 1 }, { unique: true });
 shiftSchema.index({ 'assigned_workers.worker': 1, date: 1 });
+// Supports the manager-facing "today's shifts" queries (today-live-shift-meta,
+// today-live-shifts), which filter by date alone or date + location — this
+// compound index covers both via the standard prefix rule, since none of the
+// existing indexes above start with a bare `date`.
+shiftSchema.index({ date: 1, 'location.location': 1 });
 
 export const Shift = model<IShift>('Shift', shiftSchema, 'shifts');

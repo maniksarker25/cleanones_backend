@@ -6350,6 +6350,161 @@ const paths = {
             },
         },
     },
+    '/shift/today-live-shift-meta': {
+        get: {
+            tags: ['Shifts'],
+            summary: "Today's live shift metadata (system-wide)",
+            operationId: 'getShiftTodayLiveShiftMeta',
+            description:
+                "Manager-only, but NOT scoped to the calling manager — every manager sees the same system-wide numbers. Counters for today's shifts across all cleaning plans: total_shift, completed_shift, in_progress, pending (status 'upcoming'). Only counts already-materialized Shift documents — the nightly cron plus this system's same-day auto-materialization on plan create/update/assign means today's occurrences are expected to already exist by the time anyone looks at this.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [],
+            responses: {
+                ...errors,
+                '200': {
+                    description: "Today's system-wide shift counters.",
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: "Today's live shift metadata retrieved successfully" },
+                                    data: { $ref: '#/components/schemas/TodayLiveShiftMeta' },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/today-live-shifts': {
+        get: {
+            tags: ['Shifts'],
+            summary: "Today's live shifts (list, system-wide)",
+            operationId: 'getShiftTodayLiveShifts',
+            description:
+                "Manager-only, not scoped to the calling manager — every manager sees the same system-wide list. Every shift materialized for today, filterable by location, client and status, with resolved cleaning_plan/client context and progress totals — a lean list view (no rooms[]/tasks[]/assigned_workers[] detail; use GET /shift/single-live-shift/{id} for that). Backed by a { date, 'location.location' } index. Pagination is nested under data.meta; records are under data.result.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'location',
+                    in: 'query',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                    description: "Filter to shifts whose location matches this location's id. Returns 400 if not a valid ObjectId.",
+                },
+                {
+                    name: 'client',
+                    in: 'query',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                    description: "Filter to shifts belonging to this client's cleaning plans. Returns 400 if not a valid ObjectId.",
+                },
+                {
+                    name: 'status',
+                    in: 'query',
+                    schema: {
+                        type: 'string',
+                        enum: ['upcoming', 'in_progress', 'completed', 'cancelled'],
+                    },
+                    description: 'Filter to shifts with this status. Returns 400 for any other value.',
+                },
+                {
+                    name: 'page',
+                    in: 'query',
+                    schema: { type: 'integer', default: 1, minimum: 1 },
+                    description: 'Use a positive page number.',
+                },
+                {
+                    name: 'limit',
+                    in: 'query',
+                    schema: { type: 'integer', default: 10, minimum: 1, maximum: 100 },
+                    description: 'Use a positive page size. Clamped server-side to 100 max.',
+                },
+                {
+                    name: 'sort',
+                    in: 'query',
+                    schema: {
+                        type: 'string',
+                        default: 'date_time',
+                        enum: ['date_time', '-date_time', 'status', '-status', 'createdAt', '-createdAt', 'updatedAt', '-updatedAt'],
+                    },
+                    description: 'Single field; prefix with - for descending order. Any other field returns 400.',
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: "Today's shifts, or an empty array when there are none.",
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: "Today's live shifts retrieved successfully" },
+                                    data: {
+                                        type: 'object',
+                                        properties: {
+                                            meta: { $ref: '#/components/schemas/Pagination' },
+                                            result: {
+                                                type: 'array',
+                                                items: { $ref: '#/components/schemas/ShiftListItem' },
+                                            },
+                                        },
+                                        required: ['meta', 'result'],
+                                    },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/single-live-shift/{id}': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Get one shift (full detail)',
+            operationId: 'getShiftSingleLiveShiftId',
+            description:
+                "Manager-only. Full detail for one Shift by its own _id (not planId/date) — tasks[], rooms[] (with per-room progress), assigned_workers[], plus resolved cleaning_plan/client context and overall progress totals. Not restricted to today; any materialized shift can be fetched this way. Returns 400 for a malformed id, 404 if no shift has that id.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'id',
+                    in: 'path',
+                    required: true,
+                    description: 'MongoDB document identifier (the Shift\'s own _id).',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'The shift.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Shift retrieved successfully' },
+                                    data: { $ref: '#/components/schemas/ShiftDetail' },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/shift/my-live-status': {
         get: {
             tags: ['Shifts'],

@@ -70,6 +70,36 @@ const getMyNextShift = catchAsync(async (req, res) => {
     });
 });
 
+const getTodayLiveShiftMeta = catchAsync(async (_req, res) => {
+    const result = await shiftServices.getTodayLiveShiftMetaFromDB();
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: "Today's live shift metadata retrieved successfully",
+        data: result,
+    });
+});
+
+const getTodayLiveShifts = catchAsync(async (req, res) => {
+    const result = await shiftServices.getTodayLiveShiftsFromDB(req.query);
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: "Today's live shifts retrieved successfully",
+        data: result,
+    });
+});
+
+const getSingleLiveShift = catchAsync(async (req, res) => {
+    const result = await shiftServices.getSingleLiveShiftFromDB(req.params.id);
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Shift retrieved successfully',
+        data: result,
+    });
+});
+
 const getWorkerPerformance = catchAsync(async (req, res) => {
     const month = req.query.month !== undefined ? Number(req.query.month) : undefined;
     const year = req.query.year !== undefined ? Number(req.query.year) : undefined;
@@ -253,6 +283,9 @@ const shiftController = {
     getMyActiveShift,
     getMyTodayMeta,
     getMyNextShift,
+    getTodayLiveShiftMeta,
+    getTodayLiveShifts,
+    getSingleLiveShift,
     getMyLiveStatus,
     getWorkerPerformance,
     listShifts,

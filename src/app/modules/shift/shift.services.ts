@@ -8,6 +8,7 @@ import {
 } from '../cleaning_plan/availability.util';
 import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
+import { Client } from '../client/client.model';
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
 import { Worker } from '../worker/worker.model';
 import { haversineDistanceMeters } from './geo.util';
@@ -435,6 +436,209 @@ export const getNextShiftForWorker = async (workerId: string) => {
     }
 
     return {};
+};
+
+/**
+ * System-wide "today's shifts at a glance" — every manager sees the same
+ * numbers, not scoped to who's calling. Only counts already-materialized
+ * Shift documents for today — the nightly cron (plus this system's same-day
+ * auto-materialization on plan create/update/assign) means today's
+ * occurrences are expected to already exist by the time anyone looks at
+ * this. pending maps to status 'upcoming' (not yet checked into); a
+ * cancelled shift still counts toward total_shift but isn't reflected in
+ * completed_shift/in_progress/pending.
+ */
+export const getTodayLiveShiftMetaFromDB = async () => {
+    const today = normalizeToUTCDateOnly(new Date());
+
+    const shifts = await Shift.find({ date: today }).select('status').lean();
+
+    return {
+        total_shift: shifts.length,
+        completed_shift: shifts.filter((s) => s.status === 'completed').length,
+        in_progress: shifts.filter((s) => s.status === 'in_progress').length,
+        pending: shifts.filter((s) => s.status === 'upcoming').length,
+    };
+};
+
+const MAX_PAGE_SIZE = 100;
+
+const parseObjectIdQueryParam = (
+    value: unknown,
+    fieldName: string
+): Types.ObjectId | undefined => {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value !== 'string' || !mongoose.isValidObjectId(value)) {
+        throw new AppError(httpStatus.BAD_REQUEST, `Invalid ${fieldName}`);
+    }
+    return new Types.ObjectId(value);
+};
+
+/**
+ * Batch-resolves { cleaning_plan: {_id, title}, client: {_id, name} } for a
+ * set of shifts in at most two queries total (not one per shift), keyed by
+ * shift cleaning_plan id. Short-circuits on an empty input to avoid two
+ * pointless round trips on an empty page/result.
+ */
+const attachPlanAndClient = async <T extends { cleaning_plan: Types.ObjectId }>(
+    shifts: T[]
+) => {
+    if (!shifts.length) return [];
+
+    const planIds = [...new Set(shifts.map((s) => s.cleaning_plan.toString()))];
+    const plans = await CleaningPlan.find({ _id: { $in: planIds } })
+        .select('title client')
+        .lean();
+
+    const clientIds = [...new Set(plans.map((p) => p.client.toString()))];
+    const clients = clientIds.length
+        ? await Client.find({ _id: { $in: clientIds } })
+              .select('name')
+              .lean()
+        : [];
+    const clientById = new Map(clients.map((c) => [c._id.toString(), c]));
+
+    const planById = new Map(
+        plans.map((p) => [
+            p._id.toString(),
+            {
+                _id: p._id,
+                title: p.title,
+                client: clientById.get(p.client.toString()) ?? null,
+            },
+        ])
+    );
+
+    return shifts.map((shift) => {
+        const plan = planById.get(shift.cleaning_plan.toString());
+        const { cleaning_plan, ...rest } = shift;
+        return {
+            ...rest,
+            cleaning_plan: plan
+                ? { _id: plan._id, title: plan.title }
+                : { _id: cleaning_plan, title: null },
+            client: plan?.client
+                ? { _id: plan.client._id, name: plan.client.name }
+                : null,
+        };
+    });
+};
+
+// Allowlisted so a caller can't force a sort on an arbitrary/unindexed path
+// (e.g. a large nested array field) and degrade this into a full in-memory
+// sort under load.
+const TODAY_LIVE_SHIFTS_SORTABLE_FIELDS = new Set([
+    'date_time',
+    'status',
+    'createdAt',
+    'updatedAt',
+]);
+
+const SHIFT_STATUSES = new Set<IShift['status']>([
+    'upcoming',
+    'in_progress',
+    'completed',
+    'cancelled',
+]);
+
+/**
+ * Manager-facing list of today's shifts, system-wide (not scoped to the
+ * calling manager, same as today-live-shift-meta), filterable by location
+ * and client. A lean list view: room-level detail lives on the
+ * single-live-shift endpoint instead — this only carries the summary totals.
+ */
+export const getTodayLiveShiftsFromDB = async (
+    query: Record<string, unknown>
+) => {
+    const today = normalizeToUTCDateOnly(new Date());
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(query.limit) || 10));
+    const skip = (page - 1) * limit;
+
+    const sort = query.sort as string | undefined;
+    const sortOrder = sort?.startsWith('-') ? -1 : 1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'date_time';
+    if (!TODAY_LIVE_SHIFTS_SORTABLE_FIELDS.has(sortField)) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            `Invalid sort field. Allowed: ${[...TODAY_LIVE_SHIFTS_SORTABLE_FIELDS].join(', ')}`
+        );
+    }
+
+    const match: Record<string, unknown> = { date: today };
+
+    const locationId = parseObjectIdQueryParam(query.location, 'location');
+    if (locationId) {
+        match['location.location'] = locationId;
+    }
+
+    const clientId = parseObjectIdQueryParam(query.client, 'client');
+    if (clientId) {
+        const planIds = await CleaningPlan.find({ client: clientId }).distinct('_id');
+        // An empty $in never matches — correctly yields zero results instead
+        // of accidentally falling through to "no client filter at all".
+        match.cleaning_plan = { $in: planIds };
+    }
+
+    if (query.status !== undefined && query.status !== '') {
+        if (!SHIFT_STATUSES.has(query.status as IShift['status'])) {
+            throw new AppError(
+                httpStatus.BAD_REQUEST,
+                `Invalid status. Allowed: ${[...SHIFT_STATUSES].join(', ')}`
+            );
+        }
+        match.status = query.status;
+    }
+
+    const [shifts, total] = await Promise.all([
+        Shift.find(match)
+            // _id as a tiebreaker guarantees deterministic ordering across
+            // pages even when many shifts share the same sortField value —
+            // without it, concurrent writes can shift rows between pages or
+            // repeat/skip a row under pagination.
+            .sort({ [sortField]: sortOrder, _id: 1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        Shift.countDocuments(match),
+    ]);
+
+    const withProgress = shifts.map((shift) => {
+        const { tasks, rooms, assigned_workers, ...rest } = attachProgress(shift);
+        return rest;
+    });
+    const result = await attachPlanAndClient(withProgress);
+
+    return {
+        meta: {
+            page,
+            limit,
+            total,
+            totalPage: Math.ceil(total / limit),
+        },
+        result,
+    };
+};
+
+/**
+ * One shift's full detail: tasks[], rooms[] (with per-room progress),
+ * assigned_workers[], plus cleaning_plan/client context — the counterpart to
+ * getTodayLiveShiftsFromDB's lean list view. Not date/today-restricted; any
+ * materialized shift can be fetched by its own _id.
+ */
+export const getSingleLiveShiftFromDB = async (id: string) => {
+    if (!mongoose.isValidObjectId(id)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid shift ID');
+    }
+
+    const shift = await Shift.findById(id).lean();
+    if (!shift) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Shift not found');
+    }
+
+    const [result] = await attachPlanAndClient([attachProgress(shift)]);
+    return result;
 };
 
 /**
@@ -955,6 +1159,9 @@ const shiftServices = {
     getActiveShiftForWorker,
     getWorkerTodayMetaFromDB,
     getNextShiftForWorker,
+    getTodayLiveShiftMetaFromDB,
+    getTodayLiveShiftsFromDB,
+    getSingleLiveShiftFromDB,
     getWorkerPerformanceFromDB,
     assignWorkersToShift,
     updateShiftStatus,

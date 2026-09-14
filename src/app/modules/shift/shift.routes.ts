@@ -39,6 +39,24 @@ router.get(
     shiftController.getWorkerPerformance
 );
 
+router.get(
+    '/today-live-shift-meta',
+    auth(USER_ROLE.manager),
+    shiftController.getTodayLiveShiftMeta
+);
+
+router.get(
+    '/today-live-shifts',
+    auth(USER_ROLE.manager),
+    shiftController.getTodayLiveShifts
+);
+
+router.get(
+    '/single-live-shift/:id',
+    auth(USER_ROLE.manager),
+    shiftController.getSingleLiveShift
+);
+
 router.get('/:planId', auth(USER_ROLE.manager), shiftController.listShifts);
 
 router.get(
