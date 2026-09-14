@@ -3150,23 +3150,40 @@ const schemas = {
     TodayLiveShiftMeta: {
         type: 'object',
         properties: {
-            total_shift: {
+            today_total_shift: {
                 type: 'integer',
                 description: 'Materialized shifts today, system-wide — not scoped to the calling manager.',
             },
-            completed_shift: {
+            today_total_completed_shift: {
                 type: 'integer',
             },
-            in_progress: {
+            today_total_in_progress_shift: {
                 type: 'integer',
             },
-            pending: {
+            today_total_pending_shift: {
                 type: 'integer',
                 description:
-                    "Count of today's shifts with status 'upcoming' (not yet checked into). A cancelled shift counts toward total_shift but isn't reflected in completed_shift/in_progress/pending.",
+                    "Count of today's shifts with status 'upcoming' (not yet checked into). A cancelled shift counts toward today_total_shift but isn't reflected in today_total_completed_shift/today_total_in_progress_shift/today_total_pending_shift.",
+            },
+            today_total_worker_late: {
+                type: 'integer',
+                description:
+                    "Distinct workers (not shift-assignment rows) whose shift's scheduled date_time has already passed but who still haven't checked in, excluding cancelled shifts. No grace period beyond the exact scheduled start time.",
+            },
+            total_issue_report: {
+                type: 'integer',
+                description:
+                    "NOT date-scoped like the other fields — the current, system-wide count of issue reports still open (status PENDING or IN_PROGRESS), i.e. everything not yet RESOLVED, regardless of when it was filed.",
             },
         },
-        required: ['total_shift', 'completed_shift', 'in_progress', 'pending'],
+        required: [
+            'today_total_shift',
+            'today_total_completed_shift',
+            'today_total_in_progress_shift',
+            'today_total_pending_shift',
+            'today_total_worker_late',
+            'total_issue_report',
+        ],
     },
     ShiftListItem: {
         allOf: [

@@ -22,7 +22,7 @@ onAppEvent('cleaning_plan.created', async (payload) => {
                 entity: NOTIFICATION_ENTITY.CLEANING_PLAN,
                 action: NOTIFICATION_ACTION.VIEW,
                 entityId: payload.planId,
-                meta: { planId: payload.planId },
+                meta: { planId: payload.planId, start_date: payload.start_date },
             }).catch((err) =>
                 errorLogger.error('cleaning_plan.created notification failed', err)
             )
@@ -43,7 +43,7 @@ onAppEvent('cleaning_plan.worker_assigned', async (payload) => {
                 entity: NOTIFICATION_ENTITY.CLEANING_PLAN,
                 action: NOTIFICATION_ACTION.VIEW,
                 entityId: payload.planId,
-                meta: { planId: payload.planId },
+                meta: { planId: payload.planId, start_date: payload.start_date },
             }).catch((err) =>
                 errorLogger.error(
                     'cleaning_plan.worker_assigned notification failed',
