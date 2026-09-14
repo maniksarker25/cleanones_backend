@@ -3,9 +3,11 @@ import mongoose from 'mongoose';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
 import chatServices from '../chat/chat.services';
+import { Shift } from '../shift/shift.model';
 import { PROFILE_MODEL_BY_ROLE, USER_ROLE } from '../user/user.constant';
 import { User } from '../user/user.model';
 import { Worker } from './worker.model';
+import { TWorker } from './worker.interface';
 import { WorkerType } from './worker.constant';
 import workerValidations, {
     CreateWorkerInput,
@@ -190,6 +192,46 @@ const deleteWorkerFromDB = async (id: string) => {
     return null;
 };
 
+const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
+
+// All-time sum of (check_out_at - check_in_at) across every completed
+// check-in, per worker, in hours — mirrors the same calculation used by
+// shift.services.ts's attendance/performance endpoints, just without a date
+// range since this is a lifetime total for the worker list.
+const getTotalCompletedWorkHoursByWorker = async (
+    workerIds: mongoose.Types.ObjectId[]
+) => {
+    const hoursByWorker = new Map<string, number>();
+    if (!workerIds.length) return hoursByWorker;
+
+    const shifts = await Shift.find({
+        'assigned_workers.worker': { $in: workerIds },
+    })
+        .select('assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at')
+        .lean();
+
+    const idSet = new Set(workerIds.map((id) => id.toString()));
+    const msByWorker = new Map<string, number>();
+    for (const shift of shifts) {
+        for (const entry of shift.assigned_workers) {
+            const workerId = entry.worker.toString();
+            if (!idSet.has(workerId)) continue;
+            if (entry.check_in_at && entry.check_out_at) {
+                msByWorker.set(
+                    workerId,
+                    (msByWorker.get(workerId) ?? 0) +
+                        (entry.check_out_at.getTime() - entry.check_in_at.getTime())
+                );
+            }
+        }
+    }
+
+    for (const [workerId, ms] of msByWorker) {
+        hoursByWorker.set(workerId, roundToTwoDecimals(ms / 3_600_000));
+    }
+    return hoursByWorker;
+};
+
 const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
     const parsed = workerValidations.workerListQuery.parse(query);
     const safeQuery = {
@@ -207,7 +249,21 @@ const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
         .paginate()
         .sort();
     const meta = await workerQuery.countTotal();
-    const result = await workerQuery.modelQuery;
+    const workers = (await workerQuery.modelQuery) as unknown as Array<
+        TWorker & {
+            _id: mongoose.Types.ObjectId;
+            toObject: () => Record<string, unknown>;
+        }
+    >;
+
+    const hoursByWorker = await getTotalCompletedWorkHoursByWorker(
+        workers.map((worker) => worker._id)
+    );
+    const result = workers.map((worker) => ({
+        ...worker.toObject(),
+        total_completed_work_hours: hoursByWorker.get(worker._id.toString()) ?? 0,
+    }));
+
     return { meta, result };
 };
 

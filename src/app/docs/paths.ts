@@ -1816,7 +1816,7 @@ const paths = {
                 summary: 'List workers',
                 operationId: 'getWorkerAllWorkers',
                 description:
-                    'Pagination is nested under data.meta; records are under data.result. Excludes soft-deleted workers (including legacy records missing isDeleted).\n\nRequired role: manager.',
+                    'Pagination is nested under data.meta; records are under data.result. Excludes soft-deleted workers (including legacy records missing isDeleted). Each record includes total_completed_work_hours: the all-time sum of (check_out_at - check_in_at) across this worker\'s completed shift check-ins, in hours, rounded to 2 decimals.\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [

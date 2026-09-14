@@ -1661,6 +1661,12 @@ const schemas = {
                 type: 'string',
                 format: 'date-time',
             },
+            total_completed_work_hours: {
+                type: 'number',
+                readOnly: true,
+                description:
+                    "Included by the all-workers list endpoint only. All-time sum of (check_out_at - check_in_at) across this worker's completed shift check-ins, in hours, rounded to 2 decimals.",
+            },
         },
     },
     CleaningPlan: {
