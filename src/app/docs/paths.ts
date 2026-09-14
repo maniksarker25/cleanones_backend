@@ -6562,6 +6562,45 @@ const paths = {
             },
         },
     },
+    '/shift/report': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Manager dashboard report (week/month/quarter/year)',
+            operationId: 'getShiftReport',
+            description:
+                'Manager-only, system-wide (not scoped to the calling manager). "This week/month/quarter/year" as an inclusive UTC-calendar-day range — week starts Monday. Returns a summary (total_shift, total_issue_report — both period-scoped, unlike the point-in-time fields on GET /shift/today-live-shift-meta), a shift-count trend chart whose bucket granularity scales with the period (week/month -> per day, quarter -> per week, year -> per month; bucket totals always sum to summary.total_shift), and an issue-report breakdown by current status (PENDING/IN_PROGRESS/RESOLVED) for reports filed within the period.\n\nRequired role: manager.',
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'period',
+                    in: 'query',
+                    required: true,
+                    schema: { type: 'string', enum: ['week', 'month', 'quarter', 'year'] },
+                    description: '"This" week/month/quarter/year, relative to the server clock (UTC).',
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'The requested period\'s report.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Manager report retrieved successfully' },
+                                    data: { $ref: '#/components/schemas/ManagerReport' },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/shift/today-live-shifts': {
         get: {
             tags: ['Shifts'],
