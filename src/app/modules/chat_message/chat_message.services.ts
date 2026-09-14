@@ -10,8 +10,8 @@ import { ChatMessage } from './chat_message.model';
 const broadcastToChat = (
     chat: {
         _id: unknown;
-        type: 'group' | 'direct';
-        client: unknown;
+        type: 'group' | 'direct' | 'worker' | 'client';
+        client?: unknown | null;
         workers: unknown[];
     },
     event: string,
@@ -20,16 +20,23 @@ const broadcastToChat = (
     try {
         const io = getIO();
         io.to(`group:${chat._id}`).emit(event, payload);
-        // Only group chats broadcast to every manager — a direct 1:1 chat
-        // between one client and one worker is private and must not leak to
-        // the system-wide manager room.
-        if (chat.type === 'group') {
+        // Group, worker<->managers and client<->managers chats broadcast to
+        // every manager — a direct 1:1 chat between one client and one
+        // worker is private and must not leak to the system-wide manager room.
+        if (
+            chat.type === 'group' ||
+            chat.type === 'worker' ||
+            chat.type === 'client'
+        ) {
             io.to('role:manager').emit(event, payload);
         }
-        io.to((chat.client as { toString(): string }).toString()).emit(
-            event,
-            payload
-        );
+        // 'worker' chats have no client at all.
+        if (chat.client) {
+            io.to((chat.client as { toString(): string }).toString()).emit(
+                event,
+                payload
+            );
+        }
         chat.workers.forEach((workerId) => {
             io.to((workerId as { toString(): string }).toString()).emit(
                 event,
@@ -91,7 +98,9 @@ const createChatMessage = async (params: {
         'full_name profile_photo email'
     );
 
-    const event = chat.type === 'group' ? 'group:new-message' : 'message:new';
+    // 'direct' chats get the private message:new event; both 'group' and
+    // 'worker' chats (manager-visible) get group:new-message.
+    const event = chat.type === 'direct' ? 'message:new' : 'group:new-message';
     broadcastToChat(chat, event, populated);
 
     return populated;
@@ -117,9 +126,14 @@ const deleteChatMessage = async (
     // message.sender stores the User id (not the Client/Worker/Manager
     // profile id), since sender identity is resolved via User for a name +
     // photo that works uniformly across all three roles — see the interface.
-    // Manager moderation (delete-any) only applies to group chats; a direct
-    // 1:1 chat has no manager involved at all.
-    const isModerator = role === USER_ROLE.manager && chat.type === 'group';
+    // Manager moderation (delete-any) applies to group, worker<->managers and
+    // client<->managers chats (managers are implicit members of all three); a
+    // direct 1:1 chat has no manager involved at all.
+    const isModerator =
+        role === USER_ROLE.manager &&
+        (chat.type === 'group' ||
+            chat.type === 'worker' ||
+            chat.type === 'client');
     const isSender = message.sender.toString() === userId;
 
     if (!isModerator && !isSender) {
@@ -134,7 +148,7 @@ const deleteChatMessage = async (
     await message.save();
 
     const event =
-        chat.type === 'group' ? 'group:message-deleted' : 'message:deleted';
+        chat.type === 'direct' ? 'message:deleted' : 'group:message-deleted';
     broadcastToChat(chat, event, { _id: message._id, chat: message.chat });
 
     return message;
@@ -185,7 +199,7 @@ const markDirectChatSeen = async (chatId: string, viewerUserId: string) => {
     if (result.modifiedCount === 0) return null;
 
     const chat = await Chat.findById(chatId).select('client workers type');
-    if (!chat || chat.type !== 'direct') return null;
+    if (!chat || chat.type !== 'direct' || !chat.client) return null;
 
     try {
         const io = getIO();

@@ -123,6 +123,65 @@ export const getOrCreateShift = async (
 };
 
 /**
+ * If today's shift is already materialized, keeps its assigned_workers in
+ * sync with the plan's current roster. getOrCreateShift alone can't do this:
+ * it only ever creates a shift on first materialization and is a no-op
+ * afterward, so a plan-level assignment change made after today's shift
+ * already exists would otherwise leave that shift permanently pointing at
+ * whoever was assigned at materialization time — invisible to the worker's
+ * own shift list/check-in, since both key off the shift's own snapshot, not
+ * the live plan.
+ *
+ * Skipped when a manager has manually overridden this specific day via
+ * PATCH /shift/:planId/:date/assign-workers (`is_worker_overridden`) — that
+ * per-day override is deliberately more specific than the plan's default
+ * roster and must not be clobbered by a plan-level edit.
+ *
+ * Preserves each remaining worker's check-in/check-out timestamps so this
+ * can never erase in-progress attendance — it only adds/removes roster
+ * entries and refreshes name/role snapshots.
+ */
+export const resyncTodayShiftWorkersIfDue = async (
+    planId: Types.ObjectId | string,
+    assignedWorkers: IAssignedWorker[]
+) => {
+    const today = normalizeToUTCDateOnly(new Date());
+    const shift = await Shift.findOne({ cleaning_plan: planId, date: today });
+    if (!shift || shift.is_worker_overridden) return null;
+
+    const previousByWorker = new Map(
+        shift.assigned_workers.map((aw) => [aw.worker.toString(), aw])
+    );
+
+    const workerDocs = await Worker.find({
+        _id: { $in: assignedWorkers.map((aw) => aw.worker) },
+    })
+        .select('name')
+        .lean();
+    const nameById = new Map(workerDocs.map((w) => [w._id.toString(), w.name]));
+
+    const nextAssignedWorkers = assignedWorkers.map((aw) => {
+        const previous = previousByWorker.get(aw.worker.toString());
+        return {
+            worker: aw.worker,
+            name: nameById.get(aw.worker.toString()) ?? '',
+            role: aw.role,
+            assigned_with_conflict: aw.assigned_with_conflict ?? false,
+            check_in_at: previous?.check_in_at ?? null,
+            check_in_coordinates: previous?.check_in_coordinates ?? null,
+            check_out_at: previous?.check_out_at ?? null,
+            check_out_coordinates: previous?.check_out_coordinates ?? null,
+        };
+    });
+
+    return Shift.findByIdAndUpdate(
+        shift._id,
+        { assigned_workers: nextAssignedWorkers },
+        { new: true, runValidators: true }
+    );
+};
+
+/**
  * Read-only preview for a single date: returns the materialized Shift if one
  * exists, otherwise builds an equivalent, unsaved shape from the plan's
  * current live state (`is_virtual: true`) — no DB write happens here.
@@ -951,11 +1010,14 @@ const maybeAutoCompleteShift = async (shiftId: Types.ObjectId) => {
 const GEOFENCE_RADIUS_METERS = 50;
 
 /**
- * Shared lookup + eligibility check for check-in/check-out. Deliberately
- * does NOT call getOrCreateShift — check-in only ever applies to a shift that
- * already exists (materialized by the daily cron or an earlier manager edit).
- * There's no reason to check into a shift that hasn't happened yet, and if
- * the cron hasn't run for some reason, there's nothing to check into.
+ * Shared lookup + eligibility check for check-in/check-out. Uses
+ * getOrCreateShift rather than a strict findOne: materialization otherwise
+ * depends entirely on the nightly cron having already run (or a manager
+ * having touched the plan today), and a worker's check-in should not 404
+ * just because neither happened to occur yet on this particular day (e.g.
+ * the server was down at cron time). getOrCreateShift only ever creates a
+ * shift when the plan's own recurrence pattern actually occurs on this date,
+ * so this can't materialize a shift that shouldn't exist.
  */
 const findAssignedShiftOrThrow = async (
     workerId: string,
@@ -963,10 +1025,10 @@ const findAssignedShiftOrThrow = async (
     date: Date
 ) => {
     const day = normalizeToUTCDateOnly(date);
-    const shift = await Shift.findOne({ cleaning_plan: planId, date: day });
-    if (!shift) {
-        throw new AppError(httpStatus.NOT_FOUND, 'Shift not found');
-    }
+    // Errors here (plan not found/inactive, or no occurrence on this date)
+    // already carry accurate AppErrors of their own — let them propagate
+    // rather than flattening everything into a generic "Shift not found".
+    const shift = await getOrCreateShift(planId, day);
     const workerIndex = shift.assigned_workers.findIndex(
         (aw) => aw.worker.toString() === workerId
     );
@@ -1153,6 +1215,7 @@ export const checkOutFromShift = async (
 const shiftServices = {
     listWorkerShiftsForDate,
     getOrCreateShift,
+    resyncTodayShiftWorkersIfDue,
     getShiftForDate,
     listShiftsInRange,
     getClientLiveShiftsFromDB,
