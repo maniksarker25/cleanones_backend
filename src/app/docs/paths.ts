@@ -6537,7 +6537,7 @@ const paths = {
             summary: "Today's live shift metadata (system-wide)",
             operationId: 'getShiftTodayLiveShiftMeta',
             description:
-                "Manager-only, but NOT scoped to the calling manager — every manager sees the same system-wide numbers. Counters for today's shifts across all cleaning plans: total_shift, completed_shift, in_progress, pending (status 'upcoming'). Only counts already-materialized Shift documents — the nightly cron plus this system's same-day auto-materialization on plan create/update/assign means today's occurrences are expected to already exist by the time anyone looks at this.\n\nRequired role: manager.",
+                "Manager-only, but NOT scoped to the calling manager — every manager sees the same system-wide numbers. Counters for today's shifts across all cleaning plans: today_total_shift, today_total_completed_shift, today_total_in_progress_shift, today_total_pending_shift (status 'upcoming'), and today_total_worker_late (distinct workers past their shift's scheduled start time who still haven't checked in). Also includes total_issue_report — NOT date-scoped, the current system-wide count of issue reports still open (status PENDING or IN_PROGRESS). Only counts already-materialized Shift documents — the nightly cron plus this system's same-day auto-materialization on plan create/update/assign means today's occurrences are expected to already exist by the time anyone looks at this.\n\nRequired role: manager.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [],

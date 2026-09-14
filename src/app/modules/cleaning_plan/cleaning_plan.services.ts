@@ -40,6 +40,38 @@ const materializeTodayShiftIfDue = async (planId: Types.ObjectId | string) => {
     }
 };
 
+/**
+ * Diffs the previous and new worker rosters and emits worker_assigned /
+ * worker_removed so each affected worker gets notified — used by every
+ * write path that can change assigned_workers on an existing plan.
+ */
+const emitWorkerRosterChangeEvents = (plan: {
+    _id: Types.ObjectId;
+    title: string;
+    date_time: Date;
+}, previousWorkerIds: string[], newWorkerIds: string[]) => {
+    const previousSet = new Set(previousWorkerIds);
+    const newSet = new Set(newWorkerIds);
+    const addedWorkerIds = newWorkerIds.filter((id) => !previousSet.has(id));
+    const removedWorkerIds = previousWorkerIds.filter((id) => !newSet.has(id));
+
+    if (addedWorkerIds.length) {
+        emitAppEvent('cleaning_plan.worker_assigned', {
+            planId: plan._id.toString(),
+            title: plan.title,
+            addedWorkerIds,
+            start_date: plan.date_time,
+        });
+    }
+    if (removedWorkerIds.length) {
+        emitAppEvent('cleaning_plan.worker_removed', {
+            planId: plan._id.toString(),
+            title: plan.title,
+            removedWorkerIds,
+        });
+    }
+};
+
 const ensureClientExists = async (clientId: string) => {
     const client = await Client.findOne({ _id: clientId, isDeleted: false });
     if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
@@ -119,6 +151,7 @@ const createCleaningPlanIntoDB = async (
         assignedWorkerIds: result.assigned_workers.map((aw) =>
             aw.worker.toString()
         ),
+        start_date: result.date_time,
     });
 
     return result;
@@ -207,6 +240,11 @@ const updateCleaningPlanIntoDB = async (
             result.assigned_workers.map((aw) => aw.worker)
         );
         await resyncTodayShiftWorkersIfDue(result._id, result.assigned_workers);
+        emitWorkerRosterChangeEvents(
+            result,
+            plan.assigned_workers.map((aw) => aw.worker.toString()),
+            result.assigned_workers.map((aw) => aw.worker.toString())
+        );
     }
 
     return result;
@@ -696,6 +734,11 @@ const assignWorkersToPlan = async (
             result.assigned_workers.map((aw) => aw.worker)
         );
         await resyncTodayShiftWorkersIfDue(result._id, result.assigned_workers);
+        emitWorkerRosterChangeEvents(
+            result,
+            plan.assigned_workers.map((aw) => aw.worker.toString()),
+            result.assigned_workers.map((aw) => aw.worker.toString())
+        );
     }
 
     return result;

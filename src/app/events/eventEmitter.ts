@@ -17,6 +17,8 @@ export interface CleaningPlanCreatedPayload {
     clientId: string;
     managerId: string;
     assignedWorkerIds: string[];
+    /** The plan's date_time — when the assigned worker's shift actually starts. */
+    start_date: Date;
 }
 
 export interface CleaningPlanWorkerAssignedPayload {
@@ -24,6 +26,8 @@ export interface CleaningPlanWorkerAssignedPayload {
     title: string;
     /** Only the newly-added workers, not the plan's full roster. */
     addedWorkerIds: string[];
+    /** The plan's date_time — when the assigned worker's shift actually starts. */
+    start_date: Date;
 }
 
 export interface CleaningPlanWorkerRemovedPayload {

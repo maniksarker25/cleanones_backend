@@ -17,6 +17,7 @@ import { Task } from '../task/task.model';
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
 import { WorkerType } from '../worker/worker.constant';
 import { Worker } from '../worker/worker.model';
+import { IssueReport } from '../issue_report/issue_report.model';
 import { haversineDistanceMeters } from './geo.util';
 import { findWorkerConflictOnDate } from './shift.availability.services';
 import { IShift } from './shift.interface';
@@ -707,25 +708,60 @@ export const getNextShiftForWorker = async (workerId: string) => {
 };
 
 /**
- * System-wide "today's shifts at a glance" — every manager sees the same
- * numbers, not scoped to who's calling. Only counts already-materialized
- * Shift documents for today — the nightly cron (plus this system's same-day
- * auto-materialization on plan create/update/assign) means today's
- * occurrences are expected to already exist by the time anyone looks at
- * this. pending maps to status 'upcoming' (not yet checked into); a
- * cancelled shift still counts toward total_shift but isn't reflected in
- * completed_shift/in_progress/pending.
+ * System-wide "today's shifts at a glance" for the manager dashboard — every
+ * manager sees the same numbers, not scoped to who's calling. Only counts
+ * already-materialized Shift documents for today — the nightly cron (plus
+ * this system's same-day auto-materialization on plan create/update/assign)
+ * means today's occurrences are expected to already exist by the time
+ * anyone looks at this.
+ *
+ * today_total_pending_shift maps to status 'upcoming' (not yet checked
+ * into); a cancelled shift still counts toward today_total_shift but isn't
+ * reflected in today_total_completed_shift/today_total_in_progress_shift/
+ * today_total_pending_shift.
+ *
+ * today_total_worker_late counts DISTINCT workers (not shift-assignment
+ * rows) whose shift's scheduled date_time has already passed but who still
+ * haven't checked in (check_in_at is null), excluding cancelled shifts — no
+ * grace period beyond the exact scheduled start time.
+ *
+ * total_issue_report is NOT date-scoped like the others — it's the current,
+ * system-wide count of issue reports still open (status PENDING or
+ * IN_PROGRESS), i.e. everything not yet RESOLVED, regardless of when it was
+ * filed.
  */
 export const getTodayLiveShiftMetaFromDB = async () => {
     const today = normalizeToUTCDateOnly(new Date());
+    const now = new Date();
 
-    const shifts = await Shift.find({ date: today }).select('status').lean();
+    const [shifts, totalIssueReport] = await Promise.all([
+        Shift.find({ date: today })
+            .select('status date_time assigned_workers')
+            .lean(),
+        IssueReport.countDocuments({ status: { $ne: 'RESOLVED' } }),
+    ]);
+
+    const lateWorkerIds = new Set<string>();
+    shifts.forEach((shift) => {
+        if (shift.status === 'cancelled' || shift.date_time > now) return;
+        shift.assigned_workers.forEach((aw) => {
+            if (!aw.check_in_at) lateWorkerIds.add(aw.worker.toString());
+        });
+    });
 
     return {
-        total_shift: shifts.length,
-        completed_shift: shifts.filter((s) => s.status === 'completed').length,
-        in_progress: shifts.filter((s) => s.status === 'in_progress').length,
-        pending: shifts.filter((s) => s.status === 'upcoming').length,
+        today_total_shift: shifts.length,
+        today_total_completed_shift: shifts.filter(
+            (s) => s.status === 'completed'
+        ).length,
+        today_total_in_progress_shift: shifts.filter(
+            (s) => s.status === 'in_progress'
+        ).length,
+        today_total_pending_shift: shifts.filter(
+            (s) => s.status === 'upcoming'
+        ).length,
+        today_total_worker_late: lateWorkerIds.size,
+        total_issue_report: totalIssueReport,
     };
 };
 
