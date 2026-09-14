@@ -464,6 +464,21 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
                 as: 'rooms',
                 pipeline: [
                     { $project: { location: 0, last_updated_by: 0 } },
+                    {
+                        $lookup: {
+                            from: 'tasks',
+                            localField: '_id',
+                            foreignField: 'room',
+                            as: 'tasks',
+                            pipeline: [{ $match: { is_active: true } }],
+                        },
+                    },
+                    {
+                        $addFields: {
+                            total_task: { $size: { $ifNull: ['$tasks', []] } },
+                            total_duration: { $sum: '$tasks.duration_minutes' },
+                        },
+                    },
                 ],
             },
         },
@@ -516,6 +531,8 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
         {
             $addFields: {
                 total_rooms: { $size: { $ifNull: ['$rooms', []] } },
+                total_tasks: { $sum: '$rooms.total_task' },
+                total_duration: { $sum: '$rooms.total_duration' },
                 total_assigned_workers: {
                     $size: { $ifNull: ['$assigned_workers', []] },
                 },
