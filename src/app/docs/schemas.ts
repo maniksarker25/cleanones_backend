@@ -3057,4 +3057,29 @@ const schemas = {
         },
     },
 };
-export default schemas;
+export default {
+    ...schemas,
+    MyShift: {
+        ...schemas.Shift,
+        properties: {
+            ...schemas.Shift.properties,
+            cleaning_plan: {
+                type: 'object',
+                properties: {
+                    _id: { $ref: '#/components/schemas/ObjectId' },
+                    title: { type: 'string', nullable: true, example: 'Daily Office Cleaning' },
+                },
+                required: ['_id', 'title'],
+            },
+        },
+    },
+    AdditionalTaskDetail: {
+        ...schemas.AdditionalTask,
+        properties: {
+            ...schemas.AdditionalTask.properties,
+            cleaning_plan_id: {
+                $ref: '#/components/schemas/CleaningPlan',
+            },
+        },
+    },
+};
