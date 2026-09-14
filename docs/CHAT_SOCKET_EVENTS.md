@@ -128,6 +128,8 @@ A message was created in a **group, worker, or client** chat.
 ### `message:new`
 Same as `group:new-message`, but for a **direct** chat. **Delivered to**: `group:<chatId>` room, the client's personal room, and the worker's personal room — **not** `role:manager` (direct chats are private between the two parties).
 
+**Offline recipients**: these two events only reach a connected socket. Whichever of the chat's client/workers is *not* currently online instead gets a OneSignal push (`sendChatPushNotification`, `src/app/modules/notification/notification.services.ts`) — deliberately not the `notification` event and not a `Notification` DB row (see that section below for why). Every push for the same chat shares a `collapse_id`/`android_group` equal to the chat's id, so several messages while someone's offline collapse into one tray entry instead of stacking. Managers are excluded from this push entirely (they already get full realtime coverage via `role:manager`, and pushing every manager's device for every message in every chat would be pure noise).
+
 ### `group:message-deleted`
 A message in a **group, worker, or client** chat was soft-deleted.
 
@@ -195,11 +197,13 @@ Mirrors `worker-chat:created` exactly. Fired when a client's `type: 'client'` ch
 These fire on the same connection but aren't part of the chat feature — grouped here rather than in a separate doc since it's the same socket, the same auth handshake, and the same personal-room delivery mechanism (`<profileId>`) described above.
 
 ### `notification`
-A general app notification — cleaning plan created / worker assigned / worker removed / plan deleted, additional task created / approved / rejected, shift checked in / checked out / completed, or a new chat message that arrived while you weren't in that chat's room. Fired from `NotificationService.sendNotification()` (`src/app/modules/notification/notification.services.ts`), itself triggered by the domain-event listeners in `src/app/events/listeners/*.listener.ts`.
+A general app notification — cleaning plan created / worker assigned / worker removed / plan deleted, additional task created / approved / rejected, shift checked in / checked out / completed. Fired from `NotificationService.sendNotification()` (`src/app/modules/notification/notification.services.ts`), itself triggered by the domain-event listeners in `src/app/events/listeners/*.listener.ts`.
 
 **Payload**: the created `Notification` document (see the `Notification` schema in Swagger — `type`, `title`, `message`, `data.entity`/`data.action`/`data.entityId`/`data.meta`).
 
 **Delivered to**: the receiver's own personal room (`io.to(profileId)`) only — **only if they're currently online**. If they're not, `sendNotification()` sends a OneSignal push to their registered devices instead and this socket event never fires for that particular notification; the `Notification` row is created in the database either way, so `GET /notification/get-notifications` always has it regardless of which delivery path was used.
+
+> **Chat messages are NOT covered by this event.** They deliberately skip both the `Notification` collection and this socket event entirely — a busy chat would otherwise flood the notification list with one row per message. See the "Offline recipients" note under `message:new`/`group:new-message` above for how chat push actually works (`sendChatPushNotification`, collapsed per-chat, no DB row, no `notification` event).
 
 ## Things worth knowing before integrating
 

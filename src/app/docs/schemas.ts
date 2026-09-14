@@ -73,6 +73,7 @@ const schemas = {
     "IssueReport": {
         "type": "object",
         "properties": {
+            worker: { $ref: '#/components/schemas/ObjectId' },
             "_id": {
                 "$ref": "#/components/schemas/ObjectId"
             },

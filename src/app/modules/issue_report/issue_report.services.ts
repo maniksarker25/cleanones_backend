@@ -21,10 +21,10 @@ const ensureLocationExists = async (id: string) => {
     }
 };
 
-const createIssueReportIntoDB = async (payload: unknown) => {
+const createIssueReportIntoDB = async (payload: unknown, workerId: string) => {
     const body = issueReportBody.parse(payload);
     await ensureLocationExists(body.location);
-    return IssueReport.create({ ...body, status: 'PENDING' });
+    return IssueReport.create({ ...body, worker: workerId, status: 'PENDING' });
 };
 
 const updateIssueReportIntoDB = async (id: string, payload: unknown) => {
@@ -56,7 +56,12 @@ const getAllIssueReportsFromDB = async () => {
     return IssueReport.find().sort('-createdAt');
 };
 
+const getMyIssueReportsFromDB = async (workerId: string) => {
+    return IssueReport.find({ worker: workerId }).sort({ createdAt: -1, _id: -1 });
+};
+
 export default {
+    getMyIssueReportsFromDB,
     createIssueReportIntoDB,
     updateIssueReportIntoDB,
     deleteIssueReportFromDB,
