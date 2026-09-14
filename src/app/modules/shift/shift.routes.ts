@@ -52,6 +52,12 @@ router.get(
 );
 
 router.get(
+    '/roster',
+    auth(USER_ROLE.manager),
+    shiftController.getShiftRoster
+);
+
+router.get(
     '/today-live-shift-meta',
     auth(USER_ROLE.manager),
     shiftController.getTodayLiveShiftMeta

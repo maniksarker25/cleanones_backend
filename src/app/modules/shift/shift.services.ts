@@ -6,10 +6,12 @@ import {
     anyPatternOccursOnDate,
     combineDateWithTimeOfDay,
     normalizeToUTCDateOnly,
+    taskToPattern,
 } from '../cleaning_plan/availability.util';
 import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Client } from '../client/client.model';
+import { Location } from '../location/location.model';
 import { Room } from '../room/room.model';
 import { Task } from '../task/task.model';
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
@@ -1197,6 +1199,332 @@ export const getWorkersAttendanceListFromDB = async (
     });
 };
 
+export type TRosterView = 'day' | 'week' | 'month';
+
+interface RosterQueryParams {
+    view: TRosterView;
+    date?: string; // YYYY-MM-DD — anchors 'day'/'week'
+    year?: number; // anchors 'month'
+    month?: number; // 1-12 — anchors 'month'
+    searchTerm?: string;
+    workerType?: WorkerType;
+    page?: number;
+    limit?: number;
+}
+
+interface RosterShiftEntry {
+    shift_id: string | null;
+    is_virtual: boolean;
+    plan_id: string;
+    location_name: string;
+    start_time: Date;
+    duration_minutes: number;
+    end_time: Date;
+    status: IShift['status'];
+}
+
+/** [start, end) UTC bounds for the roster view. Week runs Sunday-Saturday (matches the roster UI). */
+const getRosterDateRange = (
+    view: TRosterView,
+    date: string | undefined,
+    year: number | undefined,
+    month: number | undefined
+): { start: Date; end: Date } => {
+    if (view === 'month') {
+        const now = new Date();
+        const targetYear = year ?? now.getUTCFullYear();
+        const targetMonth = month ?? now.getUTCMonth() + 1;
+        if (targetMonth < 1 || targetMonth > 12) {
+            throw new AppError(httpStatus.BAD_REQUEST, 'month must be between 1 and 12');
+        }
+        return {
+            start: new Date(Date.UTC(targetYear, targetMonth - 1, 1)),
+            end: new Date(Date.UTC(targetYear, targetMonth, 1)),
+        };
+    }
+
+    let anchor: Date;
+    if (date) {
+        anchor = normalizeToUTCDateOnly(new Date(date));
+        if (Number.isNaN(anchor.getTime())) {
+            throw new AppError(httpStatus.BAD_REQUEST, `Invalid date: ${date}`);
+        }
+    } else {
+        anchor = normalizeToUTCDateOnly(new Date());
+    }
+
+    if (view === 'day') {
+        const end = new Date(anchor);
+        end.setUTCDate(end.getUTCDate() + 1);
+        return { start: anchor, end };
+    }
+
+    // week: Sunday-Saturday containing `anchor`
+    const start = new Date(anchor);
+    start.setUTCDate(start.getUTCDate() - anchor.getUTCDay());
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 7);
+    return { start, end };
+};
+
+/**
+ * Manager-facing shift roster for the "Shift Roster" page: for `view`
+ * ('day' | 'week' | 'month'), one PAGE of active workers (optionally
+ * filtered by name/type, same filters as getWorkersAttendanceListFromDB)
+ * with their shifts for each date in the range — merging already-
+ * materialized Shift documents with not-yet-materialized virtual
+ * occurrences of active plans, the same universe every other worker-facing
+ * shift listing uses (e.g. listWorkerShiftsForDate). A materialized shift's
+ * own assigned_workers/status is authoritative (it may have been reassigned
+ * or progressed for that specific day); a virtual occurrence uses the
+ * plan's current default roster and is always 'upcoming'.
+ *
+ * Pagination happens FIRST, on the Worker query itself (via a single
+ * `$facet` aggregation that returns the page and the total count in one
+ * round trip) — everything downstream (plans, tasks, locations,
+ * materialized shifts) is then scoped to only this page's workers, not the
+ * whole roster. This is what makes pagination actually cheap here: a
+ * 500-worker company paginated at 20/page does five bulk queries sized for
+ * 20 workers' plans, never for 500.
+ *
+ * Otherwise optimized the same way regardless of page size: one CleaningPlan
+ * query, one bulk Task query across every candidate plan's rooms combined,
+ * one bulk Location query, one bulk materialized-Shift query across the
+ * whole date range — occurrence checking and duration for virtual days is
+ * then pure in-memory work (no query inside the plan/day loop).
+ */
+export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
+    const { view, date, year, month, searchTerm, workerType } = params;
+    const { start, end } = getRosterDateRange(view, date, year, month);
+
+    const page = Math.max(1, Math.trunc(params.page ?? 1) || 1);
+    const limit = Math.min(100, Math.max(1, Math.trunc(params.limit ?? 20) || 20));
+
+    const workerFilter: Record<string, unknown> = { isDeleted: { $ne: true } };
+    if (workerType) workerFilter.worker_type = workerType;
+    if (searchTerm) {
+        const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        workerFilter.name = { $regex: escaped, $options: 'i' };
+    }
+
+    // Single round trip for both the page and the total count, so pagination
+    // metadata never costs a second query.
+    const [facet] = await Worker.aggregate<{
+        data: { _id: Types.ObjectId; name: string; worker_type: WorkerType }[];
+        totalCount: { total: number }[];
+    }>([
+        { $match: workerFilter },
+        { $sort: { name: 1, _id: 1 } },
+        {
+            $facet: {
+                data: [
+                    { $skip: (page - 1) * limit },
+                    { $limit: limit },
+                    { $project: { name: 1, worker_type: 1 } },
+                ],
+                totalCount: [{ $count: 'total' }],
+            },
+        },
+    ]);
+
+    const workers = facet?.data ?? [];
+    const totalWorkers = facet?.totalCount?.[0]?.total ?? 0;
+    const totalPage = totalWorkers ? Math.ceil(totalWorkers / limit) : 0;
+
+    const dateKeys: string[] = [];
+    for (
+        let cursor = new Date(start);
+        cursor < end;
+        cursor.setUTCDate(cursor.getUTCDate() + 1)
+    ) {
+        dateKeys.push(new Date(cursor).toISOString().slice(0, 10));
+    }
+
+    if (!workers.length) {
+        return {
+            view,
+            start_date: start,
+            end_date: end,
+            meta: { page, limit, total: totalWorkers, totalPage, total_shifts: 0 },
+            workers: [],
+        };
+    }
+
+    const workerIds = workers.map((w) => w._id);
+    const workerIdSet = new Set(workerIds.map((id) => id.toString()));
+
+    const plans = await CleaningPlan.find({
+        'assigned_workers.worker': { $in: workerIds },
+        is_active: true,
+        status: { $ne: 'completed' },
+    })
+        .select('location rooms date_time end_date assigned_workers')
+        .lean();
+
+    const allRoomIds = [
+        ...new Set(plans.flatMap((p) => (p.rooms ?? []).map((r) => r.toString()))),
+    ];
+    const allLocationIds = [...new Set(plans.map((p) => p.location.toString()))];
+    const planIds = plans.map((p) => p._id);
+
+    const [tasks, locations, materializedShifts] = await Promise.all([
+        Task.find({ room: { $in: allRoomIds }, is_active: true })
+            .select('room frequency_type days_of_week days_of_month duration_minutes')
+            .lean(),
+        Location.find({ _id: { $in: allLocationIds } }).select('name').lean(),
+        Shift.find({
+            cleaning_plan: { $in: planIds },
+            date: { $gte: start, $lt: end },
+        }).lean(),
+    ]);
+
+    const tasksByRoom = new Map<string, typeof tasks>();
+    for (const t of tasks) {
+        const key = t.room.toString();
+        const list = tasksByRoom.get(key);
+        if (list) list.push(t);
+        else tasksByRoom.set(key, [t]);
+    }
+    const locationNameById = new Map(locations.map((l) => [l._id.toString(), l.name]));
+    const materializedByPlanDate = new Map(
+        materializedShifts.map((s) => [
+            `${s.cleaning_plan.toString()}|${s.date.toISOString()}`,
+            s,
+        ])
+    );
+
+    // workerId -> dateKey -> entries
+    const shiftsByWorkerDate = new Map<string, Map<string, RosterShiftEntry[]>>();
+    const addEntry = (workerId: string, dateKey: string, entry: RosterShiftEntry) => {
+        let byDate = shiftsByWorkerDate.get(workerId);
+        if (!byDate) {
+            byDate = new Map();
+            shiftsByWorkerDate.set(workerId, byDate);
+        }
+        const list = byDate.get(dateKey);
+        if (list) list.push(entry);
+        else byDate.set(dateKey, [entry]);
+    };
+
+    let totalShifts = 0;
+
+    for (const plan of plans) {
+        const planRoomIds = (plan.rooms ?? []).map((r) => r.toString());
+        const planTasks = planRoomIds.flatMap((r) => tasksByRoom.get(r) ?? []);
+        const patterns = planTasks.map((t) =>
+            taskToPattern(t, plan.date_time, plan.end_date ?? null)
+        );
+        const virtualDurationMinutes = planTasks.reduce(
+            (sum, t) => sum + (t.duration_minutes || 0),
+            0
+        );
+        const locationName = locationNameById.get(plan.location.toString()) ?? '';
+        const planIdStr = plan._id.toString();
+
+        for (
+            let cursor = new Date(start);
+            cursor < end;
+            cursor.setUTCDate(cursor.getUTCDate() + 1)
+        ) {
+            const day = new Date(cursor);
+            const materialized = materializedByPlanDate.get(
+                `${planIdStr}|${day.toISOString()}`
+            );
+
+            if (materialized) {
+                const matchingWorkerIds = materialized.assigned_workers
+                    .map((aw) => aw.worker.toString())
+                    .filter((id) => workerIdSet.has(id));
+                if (!matchingWorkerIds.length) continue;
+
+                const dateKey = day.toISOString().slice(0, 10);
+                const entry: RosterShiftEntry = {
+                    shift_id: materialized._id.toString(),
+                    is_virtual: false,
+                    plan_id: planIdStr,
+                    location_name: materialized.location?.name ?? locationName,
+                    start_time: materialized.date_time,
+                    duration_minutes: materialized.duration_minutes,
+                    end_time: new Date(
+                        materialized.date_time.getTime() +
+                            materialized.duration_minutes * 60_000
+                    ),
+                    status: materialized.status,
+                };
+                totalShifts += 1;
+                for (const workerId of matchingWorkerIds) {
+                    addEntry(workerId, dateKey, entry);
+                }
+                continue;
+            }
+
+            if (!planTasks.length) continue;
+            if (!anyPatternOccursOnDate(patterns, day)) continue;
+
+            const matchingWorkerIds = plan.assigned_workers
+                .map((aw) => aw.worker.toString())
+                .filter((id) => workerIdSet.has(id));
+            if (!matchingWorkerIds.length) continue;
+
+            const dateKey = day.toISOString().slice(0, 10);
+            const startTime = combineDateWithTimeOfDay(day, plan.date_time);
+            const entry: RosterShiftEntry = {
+                shift_id: null,
+                is_virtual: true,
+                plan_id: planIdStr,
+                location_name: locationName,
+                start_time: startTime,
+                duration_minutes: virtualDurationMinutes,
+                end_time: new Date(startTime.getTime() + virtualDurationMinutes * 60_000),
+                status: 'upcoming',
+            };
+            totalShifts += 1;
+            for (const workerId of matchingWorkerIds) {
+                addEntry(workerId, dateKey, entry);
+            }
+        }
+    }
+
+    const workerRows = workers.map((worker) => {
+        const workerId = worker._id.toString();
+        const byDate = shiftsByWorkerDate.get(workerId);
+        const shiftsByDate: Record<string, RosterShiftEntry[]> = {};
+        let totalShiftsForWorker = 0;
+        let totalMinutesForWorker = 0;
+        for (const dateKey of dateKeys) {
+            const entries = byDate?.get(dateKey) ?? [];
+            shiftsByDate[dateKey] = entries;
+            totalShiftsForWorker += entries.length;
+            totalMinutesForWorker += entries.reduce(
+                (sum, e) => sum + e.duration_minutes,
+                0
+            );
+        }
+        return {
+            worker_id: worker._id,
+            name: worker.name,
+            worker_type: worker.worker_type,
+            total_shifts_in_range: totalShiftsForWorker,
+            total_hours_in_range: roundToTwoDecimals(totalMinutesForWorker / 60),
+            shifts_by_date: shiftsByDate,
+        };
+    });
+
+    return {
+        view,
+        start_date: start,
+        end_date: end,
+        meta: {
+            page,
+            limit,
+            total: totalWorkers,
+            totalPage,
+            total_shifts: totalShifts,
+        },
+        workers: workerRows,
+    };
+};
+
 /**
  * Reassigns workers for one specific occurrence only, materializing the
  * shift first if it doesn't exist yet. Mirrors the plan-level assignment
@@ -1703,6 +2031,7 @@ const shiftServices = {
     getWorkerPerformanceFromDB,
     getWorkersAttendanceSummaryFromDB,
     getWorkersAttendanceListFromDB,
+    getShiftRosterFromDB,
     assignWorkersToShift,
     updateShiftStatus,
     uploadShiftTaskPhoto,

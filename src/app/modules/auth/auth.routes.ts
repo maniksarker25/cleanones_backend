@@ -60,7 +60,7 @@ router.post(
 router.post('/resend-reset-code', authLimiter, authControllers.resendResetCode);
 router.get(
     '/all-user',
-
+    auth(USER_ROLE.superAdmin, USER_ROLE.admin),
     authControllers.getAllUser
 );
 

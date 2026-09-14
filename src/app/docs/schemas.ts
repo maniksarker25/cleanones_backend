@@ -3041,6 +3041,112 @@ const schemas = {
         },
         required: ['worker_id', 'name', 'worker_type', 'hours_worked', 'total_shifts', 'late_days'],
     },
+    RosterShiftEntry: {
+        type: 'object',
+        properties: {
+            shift_id: {
+                type: 'string',
+                nullable: true,
+                description: 'The materialized Shift\'s own _id, or null when this occurrence is still virtual (not yet materialized).',
+            },
+            is_virtual: {
+                type: 'boolean',
+                description: 'true when this occurrence is a live preview computed from the plan\'s current state, not a saved Shift document.',
+            },
+            plan_id: { $ref: '#/components/schemas/ObjectId' },
+            location_name: { type: 'string' },
+            start_time: { type: 'string', format: 'date-time' },
+            duration_minutes: { type: 'integer' },
+            end_time: {
+                type: 'string',
+                format: 'date-time',
+                description: 'start_time + duration_minutes.',
+            },
+            status: {
+                type: 'string',
+                enum: ['upcoming', 'in_progress', 'completed', 'cancelled'],
+                description: 'Always \'upcoming\' for a virtual occurrence.',
+            },
+        },
+        required: [
+            'shift_id',
+            'is_virtual',
+            'plan_id',
+            'location_name',
+            'start_time',
+            'duration_minutes',
+            'end_time',
+            'status',
+        ],
+    },
+    RosterWorkerRow: {
+        type: 'object',
+        properties: {
+            worker_id: { $ref: '#/components/schemas/ObjectId' },
+            name: { type: 'string' },
+            worker_type: { type: 'string', enum: ['Employee', 'Freelancer'] },
+            total_shifts_in_range: { type: 'integer' },
+            total_hours_in_range: {
+                type: 'number',
+                description: 'Sum of duration_minutes across this worker\'s shifts in the range, in hours, rounded to 2 decimals.',
+            },
+            shifts_by_date: {
+                type: 'object',
+                description: 'Keyed by ISO date (YYYY-MM-DD) — one key per date in the requested range, value is an array (possibly empty) of that date\'s shifts for this worker.',
+                additionalProperties: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/RosterShiftEntry' },
+                },
+            },
+        },
+        required: [
+            'worker_id',
+            'name',
+            'worker_type',
+            'total_shifts_in_range',
+            'total_hours_in_range',
+            'shifts_by_date',
+        ],
+    },
+    ShiftRoster: {
+        type: 'object',
+        properties: {
+            view: { type: 'string', enum: ['day', 'week', 'month'] },
+            start_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Inclusive UTC start of the range.',
+            },
+            end_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Exclusive UTC end of the range.',
+            },
+            meta: {
+                type: 'object',
+                properties: {
+                    page: { type: 'integer', description: 'Current page (1-based).' },
+                    limit: { type: 'integer', description: 'Workers per page (max 100).' },
+                    total: {
+                        type: 'integer',
+                        description: 'Total active workers matching the search/type filters, across ALL pages.',
+                    },
+                    totalPage: { type: 'integer' },
+                    total_shifts: {
+                        type: 'integer',
+                        description: 'Distinct shift occurrences (materialized or virtual) in the range that include at least one worker on THIS PAGE — not a roster-wide total.',
+                    },
+                },
+                required: ['page', 'limit', 'total', 'totalPage', 'total_shifts'],
+            },
+            workers: {
+                type: 'array',
+                description: 'This page only (size `meta.limit`, or fewer on the last page).',
+                items: { $ref: '#/components/schemas/RosterWorkerRow' },
+            },
+        },
+        required: ['view', 'start_date', 'end_date', 'meta', 'workers'],
+    },
     TodayLiveShiftMeta: {
         type: 'object',
         properties: {
