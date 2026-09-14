@@ -1,5 +1,6 @@
 // Reviewed HTTP contracts; keep aligned with routes, controllers and services.
 import userPaths from './user.paths';
+
 import questionSuggestionPaths from './question_suggestion.paths';
 import issueReportPaths from './issue_report.paths';
 import clientContactPaths from './client_contact.paths';
@@ -69,6 +70,7 @@ const errors = {
     },
 };
 const paths = {
+
     ...questionSuggestionPaths,
     ...issueReportPaths,
     ...clientContactPaths,
@@ -5019,9 +5021,9 @@ const paths = {
                 summary: 'List notifications',
                 operationId: 'getNotificationGetNotifications',
                 description:
-                    'Lists notifications for the authenticated profile; superAdmin uses receiver admin.\n\nRequired role: superAdmin, client, worker, admin.',
+                    'Lists notifications for the authenticated profile; superAdmin uses receiver admin.\n\nRequired role: superAdmin, admin, manager, client, worker.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin', 'client', 'worker', 'admin'],
+                'x-roles': ['superAdmin', 'admin', 'manager', 'client', 'worker'],
                 parameters: [
                     {
                         name: 'page',
@@ -5117,9 +5119,9 @@ const paths = {
                 summary: 'Mark all notifications read',
                 operationId: 'patchNotificationSeeNotifications',
                 description:
-                    "No request body. Marks the receiver's notifications isRead=true.\n\nRequired role: superAdmin, client, worker, admin.",
+                    "No request body. Marks the receiver's notifications isRead=true.\n\nRequired role: superAdmin, admin, manager, client, worker.",
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin', 'client', 'worker', 'admin'],
+                'x-roles': ['superAdmin', 'admin', 'manager', 'client', 'worker'],
                 parameters: [],
             },
             responses: {
@@ -5158,9 +5160,9 @@ const paths = {
                 summary: 'Delete a notification',
                 operationId: 'deleteNotificationDeleteNotificationId',
                 description:
-                    'Deletes only a notification belonging to the receiver. Returns null if none matches.\n\nRequired role: superAdmin, client, worker, admin.',
+                    'Deletes only a notification belonging to the receiver. Returns null if none matches.\n\nRequired role: superAdmin, admin, manager, client, worker.',
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['superAdmin', 'client', 'worker', 'admin'],
+                'x-roles': ['superAdmin', 'admin', 'manager', 'client', 'worker'],
                 parameters: [
                     {
                         name: 'id',
