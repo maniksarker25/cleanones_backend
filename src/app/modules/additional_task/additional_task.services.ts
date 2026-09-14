@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { emitAppEvent } from '../../events/eventEmitter';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import cleaningPlanServices from '../cleaning_plan/cleaning_plan.services';
 import { IAdditionalTask } from './additional_task.interface';
@@ -35,6 +36,18 @@ const createAdditionalTaskIntoDB = async (
     await CleaningPlan.findByIdAndUpdate(plan._id, {
         $push: { additional_tasks: task._id },
     });
+
+    // A manager creating one directly is auto-approved (see is_approved
+    // above) — there's nothing pending for other managers to review, so only
+    // notify when this actually came from a client request.
+    if (requesterRole !== USER_ROLE.manager) {
+        emitAppEvent('additional_task.created', {
+            taskId: task._id.toString(),
+            planId: plan._id.toString(),
+            clientId: plan.client.toString(),
+            name: task.name,
+        });
+    }
 
     return task;
 };
@@ -74,6 +87,26 @@ const approveAdditionalTaskIntoDB = async (
         { is_approved },
         { new: true, runValidators: true }
     );
+
+    if (result) {
+        const plan = await CleaningPlan.findById(result.cleaning_plan_id)
+            .select('client')
+            .lean();
+        if (plan) {
+            emitAppEvent(
+                is_approved
+                    ? 'additional_task.approved'
+                    : 'additional_task.rejected',
+                {
+                    taskId: result._id.toString(),
+                    planId: result.cleaning_plan_id.toString(),
+                    clientId: plan.client.toString(),
+                    name: result.name,
+                }
+            );
+        }
+    }
+
     return result;
 };
 

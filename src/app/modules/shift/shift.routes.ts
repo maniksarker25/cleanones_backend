@@ -40,6 +40,18 @@ router.get(
 );
 
 router.get(
+    '/attendance-summary',
+    auth(USER_ROLE.manager),
+    shiftController.getWorkersAttendanceSummary
+);
+
+router.get(
+    '/attendance-list',
+    auth(USER_ROLE.manager),
+    shiftController.getWorkersAttendanceList
+);
+
+router.get(
     '/today-live-shift-meta',
     auth(USER_ROLE.manager),
     shiftController.getTodayLiveShiftMeta
@@ -84,6 +96,12 @@ router.patch(
     auth(USER_ROLE.worker),
     validateRequest(shiftValidations.uploadTaskPhotoValidationSchema),
     shiftController.uploadTaskPhoto
+);
+
+router.patch(
+    '/:planId/:date/tasks/:taskId/complete',
+    auth(USER_ROLE.worker),
+    shiftController.markTaskComplete
 );
 
 router.patch(

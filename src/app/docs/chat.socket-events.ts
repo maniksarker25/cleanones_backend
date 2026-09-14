@@ -5,6 +5,33 @@
 // in docs/CHAT_SOCKET_EVENTS.md; this is the structured/machine-readable
 // summary of the same contract.
 
+// Renders the events above as a Markdown table, for embedding into
+// info.description — the one part of an OpenAPI document Swagger UI actually
+// renders as formatted text, unlike root-level `x-` extensions. Built from
+// the same array so the visible docs and the machine-readable `x-socket-events`
+// extension can never drift apart.
+export function renderChatSocketEventsMarkdown(): string {
+    const rows = chatSocketEvents.events
+        .map((e) => {
+            const payload =
+                typeof e.payload === 'string' ? e.payload : JSON.stringify(e.payload);
+            const extra = 'broadcast' in e && e.broadcast ? ` _(→ ${e.broadcast})_` : '';
+            const desc = 'description' in e && e.description ? e.description : '';
+            return `| \`${e.name}\` | ${e.direction} | ${payload.replace(/\|/g, '\\|')} | ${(desc + extra).replace(/\|/g, '\\|')} |`;
+        })
+        .join('\n');
+
+    return [
+        `${chatSocketEvents.description}`,
+        '',
+        '| Event | Direction | Payload | Notes |',
+        '| --- | --- | --- | --- |',
+        rows,
+        '',
+        'Full prose reference (rooms, auth handshake, worked examples): `docs/CHAT_SOCKET_EVENTS.md`.',
+    ].join('\n');
+}
+
 const chatSocketEvents = {
     description:
         "Chat messages are created only over Socket.IO (default path /socket.io, default namespace); this same connection also delivers realtime app notifications (see the 'notification' event below). Auth: pass the access token as socket.handshake.auth.token or ?token= query param; the server verifies it like REST and disconnects the socket immediately on failure. See docs/CHAT_SOCKET_EVENTS.md for the full reference (rooms, worked examples, edge cases).",

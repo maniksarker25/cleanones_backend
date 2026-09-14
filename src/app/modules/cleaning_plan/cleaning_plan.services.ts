@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { emitAppEvent } from '../../events/eventEmitter';
 import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
@@ -106,6 +107,16 @@ const createCleaningPlanIntoDB = async (
     await materializeTodayShiftIfDue(result._id);
     await chatServices.createChatGroupForPlan(result);
 
+    emitAppEvent('cleaning_plan.created', {
+        planId: result._id.toString(),
+        title: result.title,
+        clientId: result.client.toString(),
+        managerId,
+        assignedWorkerIds: result.assigned_workers.map((aw) =>
+            aw.worker.toString()
+        ),
+    });
+
     return result;
 };
 
@@ -202,6 +213,13 @@ const deleteCleaningPlanFromDB = async (managerId: string, id: string) => {
     );
 
     await chatServices.deactivateChatGroupForPlan(id);
+
+    emitAppEvent('cleaning_plan.deleted', {
+        planId: id,
+        title: plan.title,
+        clientId: plan.client.toString(),
+        workerIds: plan.assigned_workers.map((aw) => aw.worker.toString()),
+    });
 
     return result;
 };

@@ -90,7 +90,10 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
             duration_minutes: t.duration_minutes ?? 0,
             is_photo_required: t.is_photo_required,
             photo_requirements: photoRequirements,
-            is_completed: isTaskAutoCompleted(t.is_photo_required, photoRequirements),
+            // Never auto-completed on creation, even for tasks with no photo
+            // requirement — those are completed by the worker explicitly
+            // hitting the mark-complete endpoint (see markShiftTaskComplete).
+            is_completed: false,
             completed_at: null,
         };
     });
