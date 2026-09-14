@@ -190,6 +190,17 @@ Mirrors `worker-chat:created` exactly. Fired when a client's `type: 'client'` ch
 
 ---
 
+## Other server → client events (not chat-specific)
+
+These fire on the same connection but aren't part of the chat feature — grouped here rather than in a separate doc since it's the same socket, the same auth handshake, and the same personal-room delivery mechanism (`<profileId>`) described above.
+
+### `notification`
+A general app notification — cleaning plan created / worker assigned / worker removed / plan deleted, additional task created / approved / rejected, shift checked in / checked out / completed, or a new chat message that arrived while you weren't in that chat's room. Fired from `NotificationService.sendNotification()` (`src/app/modules/notification/notification.services.ts`), itself triggered by the domain-event listeners in `src/app/events/listeners/*.listener.ts`.
+
+**Payload**: the created `Notification` document (see the `Notification` schema in Swagger — `type`, `title`, `message`, `data.entity`/`data.action`/`data.entityId`/`data.meta`).
+
+**Delivered to**: the receiver's own personal room (`io.to(profileId)`) only — **only if they're currently online**. If they're not, `sendNotification()` sends a OneSignal push to their registered devices instead and this socket event never fires for that particular notification; the `Notification` row is created in the database either way, so `GET /notification/get-notifications` always has it regardless of which delivery path was used.
+
 ## Things worth knowing before integrating
 
 - **`sender` on a message is the User account id**, while chat membership (`chat.client` / `chat.workers`) is stored as **profile ids**. These are different id spaces on purpose — don't compare one against the other directly. The JWT payload gives you both (`id` = account id, `profileId` = profile id) so you always have whichever one a given check needs.
