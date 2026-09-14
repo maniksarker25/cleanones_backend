@@ -2964,6 +2964,93 @@ const paths = {
             },
         },
     },
+    '/location/worker-locations/{workerId}': {
+        get: {
+            ...{
+                tags: ['Locations'],
+                summary: "List a worker's locations",
+                operationId: 'getLocationWorkerLocationsWorkerId',
+                description:
+                    "Manager-only. Every location a worker is currently working — derived from the distinct location of the worker's active, non-completed cleaning plans (not a direct relation on Location/Worker). Returns data.meta and data.result, with total_room on each location.\n\nRequired role: manager.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'workerId',
+                        in: 'path',
+                        required: true,
+                        description: 'MongoDB document identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'page',
+                        in: 'query',
+                        schema: { type: 'integer', default: 1 },
+                        description: 'Use a positive page number.',
+                    },
+                    {
+                        name: 'limit',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                        description: 'Use a positive page size.',
+                    },
+                    {
+                        name: 'searchTerm',
+                        in: 'query',
+                        schema: { type: 'string' },
+                        description:
+                            'Case-insensitive regex search across name, address.',
+                    },
+                    {
+                        name: 'sort',
+                        in: 'query',
+                        schema: { type: 'string', default: 'created_at' },
+                        description:
+                            'Single field; prefix with - for descending order.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'object',
+                                            properties: {
+                                                meta: {
+                                                    $ref: '#/components/schemas/Pagination',
+                                                },
+                                                result: {
+                                                    type: 'array',
+                                                    items: {
+                                                        $ref: '#/components/schemas/Location',
+                                                    },
+                                                },
+                                            },
+                                            required: ['meta', 'result'],
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/auth/login': {
         post: {
             ...{
@@ -6201,6 +6288,57 @@ const paths = {
                                             { type: 'object', properties: {}, additionalProperties: false, description: 'Empty object when no next shift.' },
                                         ],
                                     },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/worker-performance/{workerId}': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Worker performance for a month',
+            operationId: 'getShiftWorkerPerformanceWorkerId',
+            description:
+                "Manager-only. Monthly performance counters for one worker, combining materialized Shift documents (the only source for completed/in_progress/late/absent/worked-hours, since those need real check-in/check-out data) with not-yet-materialized future occurrences projected from the worker's currently active plans (so a mostly-future month doesn't look artificially empty). late has no grace period (any check_in_at after the scheduled date_time counts). absent only ever counts materialized shifts whose date has passed with no check-in — an occurrence that was never materialized leaves no record to judge. Defaults to the current UTC month/year when month/year aren't given.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'workerId',
+                    in: 'path',
+                    required: true,
+                    description: 'MongoDB document identifier.',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                },
+                {
+                    name: 'month',
+                    in: 'query',
+                    schema: { type: 'integer', minimum: 1, maximum: 12 },
+                    description: 'Defaults to the current UTC month.',
+                },
+                {
+                    name: 'year',
+                    in: 'query',
+                    schema: { type: 'integer' },
+                    description: 'Defaults to the current UTC year.',
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Worker performance for the given (or current) month.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Worker performance retrieved successfully' },
+                                    data: { $ref: '#/components/schemas/WorkerPerformance' },
                                 },
                                 required: ['success', 'message', 'data'],
                             },

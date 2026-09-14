@@ -2909,6 +2909,64 @@ const schemas = {
         description:
             "ShiftSummary plus computed overall progress totals — no rooms[]/tasks[]/assigned_workers[] detail. Used by the worker-facing active-shift endpoint, which is a dashboard summary card, not a task-execution view.",
     },
+    WorkerPerformance: {
+        type: 'object',
+        properties: {
+            month: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 12,
+            },
+            year: {
+                type: 'integer',
+            },
+            total_shift_on_this_month: {
+                type: 'integer',
+                description:
+                    "Materialized Shift documents this month plus not-yet-materialized future occurrences projected from the worker's currently active plans.",
+            },
+            total_completed_on_this_month: {
+                type: 'integer',
+                description: "Materialized shifts this month with status 'completed'.",
+            },
+            total_in_progress: {
+                type: 'integer',
+                description:
+                    "Materialized shifts this month with status 'in_progress' — realistically 0 or 1 at any given time.",
+            },
+            total_upcoming_on_this_month: {
+                type: 'integer',
+                description:
+                    "Materialized shifts this month with status 'upcoming', plus the projected not-yet-materialized future occurrences.",
+            },
+            total_late_on_this_month: {
+                type: 'integer',
+                description:
+                    "Count of this month's materialized shifts where this worker's own check_in_at is after the shift's scheduled date_time. No grace period.",
+            },
+            total_absent_on_this_month: {
+                type: 'integer',
+                description:
+                    "Count of this month's materialized shifts whose calendar date is in the past, status isn't 'cancelled', and this worker never checked in. Only ever counted for shifts that were actually materialized — an occurrence that was never materialized at all leaves no record to judge absence from.",
+            },
+            total_work_on_this_month: {
+                type: 'number',
+                description:
+                    'Sum of (check_out_at - check_in_at) across this worker\'s completed check-ins this month, in hours, rounded to 2 decimals.',
+            },
+        },
+        required: [
+            'month',
+            'year',
+            'total_shift_on_this_month',
+            'total_completed_on_this_month',
+            'total_in_progress',
+            'total_upcoming_on_this_month',
+            'total_late_on_this_month',
+            'total_absent_on_this_month',
+            'total_work_on_this_month',
+        ],
+    },
     InvoiceCreate: {
         type: 'object',
         properties: {

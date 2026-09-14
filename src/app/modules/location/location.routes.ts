@@ -39,6 +39,12 @@ router.get(
     locationController.getClientLocations
 );
 
+router.get(
+    '/worker-locations/:workerId',
+    auth(USER_ROLE.manager),
+    locationController.getWorkerLocations
+);
+
 // Client: get their own locations
 router.get(
     '/my-locations',

@@ -56,6 +56,29 @@ const getMyNextShift = catchAsync(async (req, res) => {
     });
 });
 
+const getWorkerPerformance = catchAsync(async (req, res) => {
+    const month = req.query.month !== undefined ? Number(req.query.month) : undefined;
+    const year = req.query.year !== undefined ? Number(req.query.year) : undefined;
+    if (month !== undefined && Number.isNaN(month)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid month');
+    }
+    if (year !== undefined && Number.isNaN(year)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid year');
+    }
+
+    const result = await shiftServices.getWorkerPerformanceFromDB(
+        req.params.workerId,
+        month,
+        year
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Worker performance retrieved successfully',
+        data: result,
+    });
+});
+
 const getMyLiveStatus = catchAsync(async (req, res) => {
     const result = await shiftServices.getClientLiveShiftsFromDB(
         req.user.profileId as string
@@ -217,6 +240,7 @@ const shiftController = {
     getMyTodayMeta,
     getMyNextShift,
     getMyLiveStatus,
+    getWorkerPerformance,
     listShifts,
     getShift,
     assignWorkers,

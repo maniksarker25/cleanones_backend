@@ -1,6 +1,6 @@
 # cleanones-backend API reference
 
-79 documented operations from the implemented, mounted API handlers. This snapshot describes the current unfinished backend; documented contracts are not a claim that every endpoint works end to end.
+80 documented operations from the implemented, mounted API handlers. This snapshot describes the current unfinished backend; documented contracts are not a claim that every endpoint works end to end.
 
 ## Connection and authentication
 
@@ -74,6 +74,7 @@ Create a client, then its location, then a room, then tasks. Weekly tasks need a
 | GET    | `/task/single-task/{id}`                 | manager                           | [Get task](#gettasksingletaskid)                                    |
 | GET    | `/task/my-tasks/{roomId}`                | client                            | [My tasks](#gettaskmytasksroomid)                                    |
 | GET    | `/location/client-locations/{clientId}`  | manager                           | [List a client's locations](#getlocationclientlocationsclientid)    |
+| GET    | `/location/worker-locations/{workerId}`  | manager                           | [List a worker's locations](#getlocationworkerlocationsworkerid)    |
 | POST   | `/invoice/create-invoice`                | manager                           | [Create invoice](#postinvoicecreateinvoice)                         |
 | GET    | `/invoice/all-invoices`                  | manager                           | [List all invoices](#getinvoiceallinvoices)                         |
 | GET    | `/invoice/my-invoices`                   | worker                            | [My invoices](#getinvoicemyinvoices)                                |
@@ -686,6 +687,38 @@ Envelope: `success`, `message`, and `data`. **data:** object.
 
 | Field    | Type                                  | Required | Details    |
 | -------- | ------------------------------------- | -------- | ---------- |
+| `meta`   | [Pagination](#schema-pagination)      | Yes      |            |
+| `result` | array of [Location](#schema-location) | Yes      | Each item: |
+
+<a id="getlocationworkerlocationsworkerid"></a>
+
+### GET /location/worker-locations/{workerId}
+
+List a worker's locations
+Every location a worker is currently working — derived from the distinct location of the worker's active, non-completed cleaning plans (not a direct relation on Location/Worker). Returns data.meta and data.result, with total_room on each location.
+
+Required role: manager.
+
+**Access:** manager.
+
+**Parameters**
+
+| Name         | In    | Type                         | Required | Details                                                                  |
+| ------------ | ----- | ---------------------------- | -------- | ------------------------------------------------------------------------ |
+| `workerId`   | path  | [ObjectId](#schema-objectid) | Yes      | MongoDB document identifier.                                             |
+| `page`       | query | integer                      | No       | Use a positive page number. Default: 1.                                  |
+| `limit`      | query | integer                      | No       | Use a positive page size. Default: 10.                                   |
+| `searchTerm` | query | string                       | No       | Case-insensitive regex search across name, address.                      |
+| `sort`       | query | string                       | No       | Single field; prefix with - for descending order. Default: "created_at". |
+
+**Request body:** none.
+
+**Response: HTTP 200**
+
+Envelope: `success`, `message`, and `data`. **data:** object.
+
+| Field    | Type                                  | Required | Details    |
+| -------- | -------------------------------------- | -------- | ---------- |
 | `meta`   | [Pagination](#schema-pagination)      | Yes      |            |
 | `result` | array of [Location](#schema-location) | Yes      | Each item: |
 
