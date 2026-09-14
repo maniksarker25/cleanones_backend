@@ -20,7 +20,7 @@ const generateVerifyCode = (): number => {
 const loginUserIntoDB = async (payload: TLoginUser) => {
     const user = await User.findOne({ email: payload.email });
     if (!user) {
-        throw new AppError(httpStatus.NOT_FOUND, 'This user does not exist');
+        throw new AppError(httpStatus.NOT_FOUND, 'Invalid credentials');
     }
     if (user.isDeleted) {
         throw new AppError(
@@ -51,7 +51,7 @@ const loginUserIntoDB = async (payload: TLoginUser) => {
         );
     }
     if (!(await User.isPasswordMatched(payload?.password, user?.password))) {
-        throw new AppError(httpStatus.FORBIDDEN, 'Password do not match');
+        throw new AppError(httpStatus.FORBIDDEN, 'Invalid credentials');
     }
 
     const platform = payload?.platform ? payload?.platform : 'android';
