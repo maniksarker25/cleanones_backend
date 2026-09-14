@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import mongoose, { Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { emitAppEvent } from '../../events/eventEmitter';
 import {
     anyPatternOccursOnDate,
     combineDateWithTimeOfDay,
@@ -996,15 +997,33 @@ export const uploadShiftTaskPhoto = async (
  * there's nothing to judge completion by.
  */
 const maybeAutoCompleteShift = async (shiftId: Types.ObjectId) => {
-    const shift = await Shift.findById(shiftId).select('tasks status').lean();
+    const shift = await Shift.findById(shiftId)
+        .select('tasks status cleaning_plan')
+        .lean();
     if (!shift || !shift.tasks.length) return;
     const allTasksCompleted = shift.tasks.every((t) => t.is_completed);
     if (!allTasksCompleted) return;
 
-    await Shift.updateOne(
+    const updateResult = await Shift.updateOne(
         { _id: shiftId, status: { $in: ['upcoming', 'in_progress'] } },
         { $set: { status: 'completed' } }
     );
+
+    // Only the caller that actually flips the status fires the event — a
+    // shift already 'completed' (e.g. this ran again after another task
+    // update) must not re-notify everyone.
+    if (updateResult.modifiedCount > 0) {
+        const plan = await CleaningPlan.findById(shift.cleaning_plan)
+            .select('client')
+            .lean();
+        if (plan) {
+            emitAppEvent('shift.completed', {
+                shiftId: shiftId.toString(),
+                planId: shift.cleaning_plan.toString(),
+                clientId: plan.client.toString(),
+            });
+        }
+    }
 };
 
 const GEOFENCE_RADIUS_METERS = 50;
@@ -1087,6 +1106,7 @@ export const checkInToShift = async (
     // makes the "not already checked in" check part of the atomic write
     // itself — not just the read above — so two concurrent check-ins from
     // the same worker can never both succeed.
+    const checkedInAt = new Date();
     const result = await Shift.findOneAndUpdate(
         {
             _id: shift._id,
@@ -1094,7 +1114,7 @@ export const checkInToShift = async (
         },
         {
             $set: {
-                'assigned_workers.$.check_in_at': new Date(),
+                'assigned_workers.$.check_in_at': checkedInAt,
                 'assigned_workers.$.check_in_coordinates': coordinates,
             },
         },
@@ -1103,6 +1123,13 @@ export const checkInToShift = async (
     if (!result) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
     }
+
+    emitAppEvent('shift.checked_in', {
+        shiftId: shift._id.toString(),
+        planId,
+        workerId,
+        at: checkedInAt,
+    });
 
     // The first check-in on the shift moves it out of "upcoming". Gated on
     // the shift's CURRENT status (not just "any check-in happened") so a
@@ -1203,6 +1230,13 @@ export const checkOutFromShift = async (
 
         await session.commitTransaction();
         session.endSession();
+
+        emitAppEvent('shift.checked_out', {
+            shiftId: shift._id.toString(),
+            planId,
+            workerId,
+            at: checkOutAt,
+        });
 
         return result;
     } catch (error) {

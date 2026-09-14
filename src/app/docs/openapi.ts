@@ -1,4 +1,4 @@
-import chatSocketEvents from './chat.socket-events';
+import chatSocketEvents, { renderChatSocketEventsMarkdown } from './chat.socket-events';
 import paths from './paths';
 import schemas from './schemas';
 
@@ -15,8 +15,10 @@ export function createOpenApiDocument(serverUrl = '/api/v1') {
                 '**Responses:** HTTP 200 for successful creates, updates and deletes. Lists use data.meta and data.result. IDs are MongoDB ObjectIds; dates are ISO 8601.',
                 '**Limits:** global API limit 60 requests/minute per IP; sensitive authentication routes share 3 requests/minute per email or IP. A 429 response includes Retry-After.',
                 '**Current limitations:** manager/admin profile lookup in auth.ts is unfinished. Zod validation failures currently return HTTP 500. These docs describe contracts and do not certify backend readiness.',
-                '**Coverage:** authentication, users, clients, locations, rooms, tasks, administration, website content, notifications, files, legal information, chats/messages and implemented dashboard operations. User registration has a validation/service payload mismatch; account upgrade is not implemented. These limitations are documented on their endpoints. The super-admin module and placeholder earnings chart remain excluded; testimonials are empty. Chat messages are created only via Socket.IO, not REST — see the Chats/Chat messages tags and docs/CHAT_SOCKET_EVENTS.md for the realtime event contract (not representable in this OpenAPI document).',
+                '**Coverage:** authentication, users, clients, locations, rooms, tasks, administration, website content, notifications, files, legal information, chats/messages and implemented dashboard operations. User registration has a validation/service payload mismatch; account upgrade is not implemented. These limitations are documented on their endpoints. The super-admin module and placeholder earnings chart remain excluded; testimonials are empty. Chat messages are created only via Socket.IO, not REST — see the Chats/Chat messages tags and docs/CHAT_SOCKET_EVENTS.md for the realtime event contract (not representable as OpenAPI paths, so it is summarized below and also exposed machine-readably as the x-socket-events root extension in /api-docs.json).',
                 '**Standalone preview:** this server hosts documentation only. API requests require a running backend; configure DOCS_API_URL with its full URL ending in /api/v1.',
+                '## Chat — Socket.IO events',
+                renderChatSocketEventsMarkdown(),
             ].join('\n\n'),
         },
         servers: [

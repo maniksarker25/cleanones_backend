@@ -15,8 +15,8 @@ export interface INotification {
     message: string;
 
     data?: {
-        entity: NOTIFICATION_ENTITY_TYPE; // ORDER | SHIFT | PAYMENT
-        action: (typeof NOTIFICATION_ACTION)[keyof typeof NOTIFICATION_ACTION]; // VIEW | LIST | ACCEPT
+        entity: NOTIFICATION_ENTITY_TYPE;
+        action: (typeof NOTIFICATION_ACTION)[keyof typeof NOTIFICATION_ACTION]; // VIEW | LIST
         entityId?: Types.ObjectId;
 
         meta?: Record<string, any>;
@@ -24,6 +24,9 @@ export interface INotification {
 
     isRead: boolean;
     readAt?: Date;
+
+    isSeen: boolean;
+    seenAt?: Date;
 
     createdAt?: Date;
     updatedAt?: Date;
