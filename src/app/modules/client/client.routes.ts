@@ -39,4 +39,10 @@ router.get(
     clientController.getClientOverview
 );
 
+router.get(
+    '/schedule-roster',
+    auth(USER_ROLE.client),
+    clientController.getClientScheduleRoster
+);
+
 export const clientRoutes = router;

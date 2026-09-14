@@ -2,7 +2,6 @@ import chatSocketEvents, { renderChatSocketEventsMarkdown } from './chat.socket-
 import paths from './paths';
 import schemas from './schemas';
 import chatSocketDocs from './chat.socket-docs';
-import chatSocketDocs from './chat.socket-docs';
 
 export function createOpenApiDocument(serverUrl = '/api/v1') {
     return {
@@ -35,18 +34,8 @@ export function createOpenApiDocument(serverUrl = '/api/v1') {
         tags: [
             ['Chat', 'Group and direct chat HTTP APIs. See Chat sockets for realtime messaging.'],
             ['Chat sockets', chatSocketDocs],
-            ['Chat', 'Group and direct chat HTTP APIs. See Chat sockets for realtime messaging.'],
-            ['Chat sockets', chatSocketDocs],
             ['Question suggestions', 'Public questions and answers managed by managers.'],
             ['Issue reports', 'Worker-reported issues managed by managers.'],
-            [
-                'Chats',
-                'Group chats (one per cleaning plan), 1:1 direct chats between a client and a worker, worker↔managers chats (one per worker, auto-created with the worker profile), and client↔managers chats (one per client, auto-created with the client profile). Membership and metadata only — messages are created via Socket.IO, not REST. See docs/CHAT_SOCKET_EVENTS.md.',
-            ],
-            [
-                'Chat messages',
-                'Reading and soft-deleting chat messages. Creation happens only via Socket.IO. See docs/CHAT_SOCKET_EVENTS.md.',
-            ],
             [
                 'Chats',
                 'Group chats (one per cleaning plan), 1:1 direct chats between a client and a worker, worker↔managers chats (one per worker, auto-created with the worker profile), and client↔managers chats (one per client, auto-created with the client profile). Membership and metadata only — messages are created via Socket.IO, not REST. See docs/CHAT_SOCKET_EVENTS.md.',
@@ -104,7 +93,6 @@ export function createOpenApiDocument(serverUrl = '/api/v1') {
             schemas,
         },
         paths,
-        'x-socket-events': chatSocketEvents,
         'x-socket-events': chatSocketEvents,
     };
 }
