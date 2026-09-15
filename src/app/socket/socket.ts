@@ -22,7 +22,8 @@ const initializeSocket = (server: HTTPServer) => {
                     'http://10.10.20.48:3000',
                     'http://localhost:9090',
                     'http://10.10.20.43:9090',
-                    "http://10.10.28.195:3001"
+                    "http://10.10.28.195:3001",
+                    "http://10.10.28.119:3001"
                 ],
             },
         });

@@ -6,6 +6,7 @@ import issueReportPaths from './issue_report.paths';
 import clientContactPaths from './client_contact.paths';
 import chatPaths from './chat.paths';
 import chatMessagePaths from './chat_message.paths';
+import clientOverviewPaths from './client_overview.paths';
 const errors = {
     '400': {
         description: 'Invalid ID, model validation, or business rule failure.',
@@ -77,6 +78,7 @@ const paths = {
     ...userPaths,
     ...chatPaths,
     ...chatMessagePaths,
+    ...clientOverviewPaths,
     '/client/create-client': {
         post: {
             ...{
