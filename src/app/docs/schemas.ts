@@ -1054,7 +1054,7 @@ const schemas = {
             'date_time',
         ],
         description:
-            'Clients and managers can create tasks; the cleaning plan must exist and be active. is_completed is false. is_approved is true for managers and false for clients, determined by the authenticated role rather than the request body.',
+            "Clients and managers can create tasks; the cleaning plan must exist and be active. is_completed is false. status is 'Approved' for managers and 'Pending' for clients, determined by the authenticated role rather than the request body.",
     },
     AdditionalTaskUpdate: {
         type: 'object',
@@ -1105,7 +1105,7 @@ const schemas = {
             },
         },
         description:
-            'Partial update. is_approved is stripped by the service even if supplied; use the approve endpoint instead.',
+            'Partial update. status is stripped by the service even if supplied; use the approve endpoint instead.',
     },
     Client: {
         type: 'object',
@@ -2003,8 +2003,14 @@ const schemas = {
                 type: 'string',
                 format: 'date-time',
             },
-            is_approved: {
-                type: 'boolean',
+            status: {
+                type: 'string',
+                enum: ['Pending', 'Approved', 'Rejected'],
+            },
+            reject_reason: {
+                type: 'string',
+                nullable: true,
+                description: "Manager-supplied reason, set when status is 'Rejected'. null otherwise, and cleared back to null if the task is later approved.",
             },
             createdAt: {
                 type: 'string',

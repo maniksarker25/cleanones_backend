@@ -29,7 +29,7 @@ router.patch(
 
 router.delete(
     '/delete-additional-task/:id',
-    auth(USER_ROLE.client),
+    auth(USER_ROLE.client,USER_ROLE.manager),
     additionalTaskController.deleteAdditionalTask
 );
 

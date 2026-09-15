@@ -65,6 +65,7 @@ export interface AdditionalTaskRejectedPayload {
     planId: string;
     clientId: string;
     name: string;
+    rejectReason?: string;
 }
 
 // ─── Shift (attendance) ─────────────────────────────────────────────────────
