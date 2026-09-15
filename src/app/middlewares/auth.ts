@@ -6,6 +6,7 @@ import jwt, { JwtPayload } from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import config from '../config';
 import AppError from '../error/appError';
+import Admin from '../modules/admin/admin.model';
 import { Client } from '../modules/client/client.model';
 import { Manager } from '../modules/manager/manager.model';
 import { Worker } from '../modules/worker/worker.model';
@@ -55,7 +56,12 @@ const auth = (...requiredRoles: TUserRole[]) => {
             // const user = await User.findById(id);
             let profileData: any;
             if (role == USER_ROLE.admin) {
-                console.log('nice');
+                profileData = await Admin.findOne({ user: id })
+                    .select('_id user')
+                    .populate({
+                        path: 'user',
+                        select: '_id isDeleted isBlocked isVerified passwordChangedAt isActive',
+                    });
             } else if (role == USER_ROLE.client) {
                 profileData = await Client.findOne({ user: id })
                     .select('_id user')

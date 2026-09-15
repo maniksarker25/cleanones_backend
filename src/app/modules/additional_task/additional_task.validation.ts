@@ -67,6 +67,12 @@ const approveAdditionalTaskValidationSchema = z.object({
                 invalid_type_error: "status must be 'Approved' or 'Rejected'",
             }),
             reject_reason: z.string().trim().min(1).optional(),
+            // Manager can adjust these while approving — e.g. the client's
+            // proposed duration needs correcting, or the manager wants to
+            // set/change which photos are required — without a separate
+            // update-additional-task call first. Ignored when rejecting.
+            duration_minutes: z.number().min(0).optional(),
+            photo_requirements: z.array(photoRequirementSchema).optional(),
         })
         .refine(
             (data) => data.status !== 'Rejected' || !!data.reject_reason,
