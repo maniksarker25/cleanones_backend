@@ -64,12 +64,14 @@ onAppEvent('additional_task.rejected', async (payload) => {
     await NotificationService.sendNotification({
         receiver: payload.clientId,
         title: 'Additional task rejected',
-        message: `Your request "${payload.name}" was rejected.`,
+        message: payload.rejectReason
+            ? `Your request "${payload.name}" was rejected: ${payload.rejectReason}`
+            : `Your request "${payload.name}" was rejected.`,
         type: ENUM_NOTIFICATION_TYPE.ADDITIONAL_TASK_REJECTED,
         entity: NOTIFICATION_ENTITY.ADDITIONAL_TASK,
         action: NOTIFICATION_ACTION.VIEW,
         entityId: payload.taskId,
-        meta: { planId: payload.planId },
+        meta: { planId: payload.planId, rejectReason: payload.rejectReason ?? null },
     }).catch((err) =>
         errorLogger.error('additional_task.rejected notification failed', err)
     );

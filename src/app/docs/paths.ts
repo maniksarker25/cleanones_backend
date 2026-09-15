@@ -2478,7 +2478,7 @@ const paths = {
                 summary: 'Create additional task',
                 operationId: 'postAdditionalTaskCreateAdditionalTask',
                 description:
-                    'The referenced cleaning plan must exist and be active. The task is linked to the plan via its cleaning_plan_id field only (no array is maintained on the plan document). is_completed is forced to false.\n\nRequired role: client or manager. Manager-created tasks are automatically approved (is_approved: true); client-created tasks require approval (is_approved: false). Approval is determined by the authenticated role and cannot be overridden by the request body.',
+                    "The referenced cleaning plan must exist and be active. The task is linked to the plan via its cleaning_plan_id field only (no array is maintained on the plan document). is_completed is forced to false.\n\nRequired role: client or manager. Manager-created tasks are automatically approved (status: 'Approved'); client-created tasks require approval (status: 'Pending'). Approval is determined by the authenticated role and cannot be overridden by the request body.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['client', 'manager'],
                 parameters: [],
@@ -2513,7 +2513,7 @@ const paths = {
                                                 duration_minutes: 20,
                                                 date_time: '2026-09-13T09:00:00.000Z',
                                                 is_completed: false,
-                                                is_approved: true,
+                                                status: 'Approved',
                                             },
                                         },
                                     },
@@ -2529,7 +2529,7 @@ const paths = {
                                                 duration_minutes: 20,
                                                 date_time: '2026-09-13T09:00:00.000Z',
                                                 is_completed: false,
-                                                is_approved: false,
+                                                status: 'Pending',
                                             },
                                         },
                                     },
@@ -2562,7 +2562,7 @@ const paths = {
                 summary: 'Update additional task',
                 operationId: 'patchAdditionalTaskUpdateAdditionalTaskId',
                 description:
-                    'Partial update. is_approved is stripped from the payload even if supplied; use the approve endpoint instead.\n\nRequired role: client.',
+                    'Partial update. status is stripped from the payload even if supplied; use the approve endpoint instead.\n\nRequired role: client.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['client'],
                 parameters: [
@@ -2672,7 +2672,8 @@ const paths = {
                 tags: ['Additional tasks'],
                 summary: 'Approve or reject additional task',
                 operationId: 'patchAdditionalTaskApproveAdditionalTaskId',
-                description: 'Required role: manager.',
+                description:
+                    "reject_reason is required when status is 'Rejected' (ignored/cleared to null when approving). Approving a task already reflects any prior reject_reason back to null.\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -2691,9 +2692,22 @@ const paths = {
                             schema: {
                                 type: 'object',
                                 properties: {
-                                    is_approved: { type: 'boolean' },
+                                    status: { type: 'string', enum: ['Approved', 'Rejected'] },
+                                    reject_reason: {
+                                        type: 'string',
+                                        description: "Required when status is 'Rejected'.",
+                                    },
                                 },
-                                required: ['is_approved'],
+                                required: ['status'],
+                            },
+                            examples: {
+                                approve: { value: { status: 'Approved' } },
+                                reject: {
+                                    value: {
+                                        status: 'Rejected',
+                                        reject_reason: 'Not within the scope of the current contract.',
+                                    },
+                                },
                             },
                         },
                     },
@@ -2735,19 +2749,20 @@ const paths = {
                 summary: 'List additional tasks',
                 operationId: 'getAdditionalTaskAllAdditionalTasks',
                 description:
-                    'Without planId, managers can list all additional tasks; clients can list tasks only from their own active plans. With planId, clients must own the selected plan. Pagination is nested under data.meta; records are under data.result. Boolean filters is_approved, is_completed and is_photo_required accept true or false. Unknown query keys are ignored. Invalid query values return 400.\n\nRequired role: manager, client.',
+                    'Without planId, managers can list all additional tasks; clients can list tasks only from their own active plans. With planId, clients must own the selected plan. Pagination is nested under data.meta; records are under data.result. status filters on the exact enum value; is_completed and is_photo_required are boolean filters accepting true or false. Unknown query keys are ignored. Invalid query values return 400.\n\nRequired role: manager, client.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager', 'client'],
                 parameters: [
                     {
-                        name: 'is_approved',
+                        name: 'status',
                         in: 'query',
                         required: false,
-                        description: 'Send true for approved tasks or false for tasks not approved. Omit to include both. Strings are converted to booleans; invalid values return 400.',
-                        schema: { type: 'string', enum: ['true', 'false'] },
+                        description: 'Filter by approval status. Omit to include all statuses.',
+                        schema: { type: 'string', enum: ['Pending', 'Approved', 'Rejected'] },
                         examples: {
-                            approved: { value: 'true' },
-                            notApproved: { value: 'false' },
+                            approved: { value: 'Approved' },
+                            pending: { value: 'Pending' },
+                            rejected: { value: 'Rejected' },
                         },
                     },
                     {

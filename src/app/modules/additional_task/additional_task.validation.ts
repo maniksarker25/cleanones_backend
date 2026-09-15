@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ADDITIONAL_TASK_STATUS } from './additional_task.interface';
 
 const queryBoolean = z
     .enum(['true', 'false'], {
@@ -11,8 +12,8 @@ export const additionalTaskListQuerySchema = z.object({
     page: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),
     limit: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),
     searchTerm: z.string().optional(),
-    sort: z.string().regex(/^-?(name|description|duration_minutes|date_time|createdAt|updatedAt|is_approved|is_completed)$/).optional(),
-    is_approved: queryBoolean,
+    sort: z.string().regex(/^-?(name|description|duration_minutes|date_time|createdAt|updatedAt|status|is_completed)$/).optional(),
+    status: z.enum(ADDITIONAL_TASK_STATUS).optional(),
     is_completed: queryBoolean,
     is_photo_required: queryBoolean,
 });
@@ -59,11 +60,21 @@ const updateAdditionalTaskValidationSchema = z.object({
 });
 
 const approveAdditionalTaskValidationSchema = z.object({
-    body: z.object({
-        is_approved: z.boolean({
-            required_error: 'is_approved is required',
-        }),
-    }),
+    body: z
+        .object({
+            status: z.enum(['Approved', 'Rejected'], {
+                required_error: 'status is required',
+                invalid_type_error: "status must be 'Approved' or 'Rejected'",
+            }),
+            reject_reason: z.string().trim().min(1).optional(),
+        })
+        .refine(
+            (data) => data.status !== 'Rejected' || !!data.reject_reason,
+            {
+                message: 'reject_reason is required when status is Rejected',
+                path: ['reject_reason'],
+            }
+        ),
 });
 
 const additionalTaskValidations = {

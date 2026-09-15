@@ -468,7 +468,7 @@ export const resyncTodayShiftRoomsIfDue = async (
  * approval that happens AFTER that day's shift already exists would
  * otherwise never show up on it — same gap resyncTodayShiftRoomsIfDue closes
  * for room/task edits. Called from approveAdditionalTaskIntoDB whenever
- * is_approved flips to true.
+ * status flips to 'Approved'.
  *
  * Idempotent: a no-op if this additional task is already present on the
  * shift (dedupes by its own _id) — safe to call more than once for the same

@@ -209,7 +209,7 @@ export const buildAdditionalTaskEntriesForDay = async (
 
     const additionalTasks = await AdditionalTask.find({
         cleaning_plan_id: planId,
-        is_approved: true,
+        status: 'Approved',
         date_time: { $gte: day, $lt: dayEnd },
     }).lean();
 
@@ -237,7 +237,7 @@ export const buildAdditionalTaskEntriesByDay = async (
 
     const additionalTasks = await AdditionalTask.find({
         cleaning_plan_id: planId,
-        is_approved: true,
+        status: 'Approved',
         date_time: { $gte: fromDay, $lt: rangeEnd },
     }).lean();
 

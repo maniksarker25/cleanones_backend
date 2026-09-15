@@ -50,12 +50,13 @@ const deleteAdditionalTask = catchAsync(async (req, res) => {
 const approveAdditionalTask = catchAsync(async (req, res) => {
     const result = await additionalTaskServices.approveAdditionalTaskIntoDB(
         req.params.id,
-        req.body.is_approved
+        req.body.status,
+        req.body.reject_reason
     );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
-        message: `Additional task ${req.body.is_approved ? 'approved' : 'rejected'} successfully`,
+        message: `Additional task ${req.body.status === 'Approved' ? 'approved' : 'rejected'} successfully`,
         data: result,
     });
 });

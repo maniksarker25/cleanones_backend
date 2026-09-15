@@ -5,7 +5,7 @@ import { emitAppEvent } from '../../events/eventEmitter';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import cleaningPlanServices from '../cleaning_plan/cleaning_plan.services';
 import { resyncTodayShiftAdditionalTaskIfDue } from '../shift/shift.services';
-import { IAdditionalTask } from './additional_task.interface';
+import { IAdditionalTask, TAdditionalTaskStatus } from './additional_task.interface';
 import { AdditionalTask } from './additional_task.model';
 import { additionalTaskListQuerySchema } from './additional_task.validation';
 import { USER_ROLE } from '../user/user.constant';
@@ -20,7 +20,7 @@ const ensureCleaningPlanExists = async (planId: string) => {
 // ─── Create (Client) ──────────────────────────────────────────────────────────
 
 const createAdditionalTaskIntoDB = async (
-    payload: Omit<IAdditionalTask, 'is_completed' | 'is_approved'>,
+    payload: Omit<IAdditionalTask, 'is_completed' | 'status'>,
     requesterRole: string
 ) => {
     const plan = await ensureCleaningPlanExists(
@@ -30,10 +30,10 @@ const createAdditionalTaskIntoDB = async (
     const task = await AdditionalTask.create({
         ...payload,
         is_completed: false,
-        is_approved: requesterRole === USER_ROLE.manager,
+        status: requesterRole === USER_ROLE.manager ? 'Approved' : 'Pending',
     });
 
-    // A manager creating one directly is auto-approved (see is_approved
+    // A manager creating one directly is auto-approved (see status
     // above) — there's nothing pending for other managers to review, so only
     // notify when this actually came from a client request.
     if (requesterRole !== USER_ROLE.manager) {
@@ -63,7 +63,8 @@ const updateAdditionalTaskIntoDB = async (
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
 
     // prevent client from touching approval fields
-    delete (payload as any).is_approved;
+    delete (payload as any).status;
+    delete (payload as any).reject_reason;
 
     const result = await AdditionalTask.findByIdAndUpdate(id, payload, {
         new: true,
@@ -76,7 +77,8 @@ const updateAdditionalTaskIntoDB = async (
 
 const approveAdditionalTaskIntoDB = async (
     id: string,
-    is_approved: boolean
+    status: Extract<TAdditionalTaskStatus, 'Approved' | 'Rejected'>,
+    rejectReason?: string
 ) => {
     const task = await AdditionalTask.findById(id);
     if (!task)
@@ -84,7 +86,12 @@ const approveAdditionalTaskIntoDB = async (
 
     const result = await AdditionalTask.findByIdAndUpdate(
         id,
-        { is_approved },
+        {
+            status,
+            // Approving always clears out any reason left over from a
+            // previous rejection.
+            reject_reason: status === 'Rejected' ? rejectReason : null,
+        },
         { new: true, runValidators: true }
     );
 
@@ -94,7 +101,7 @@ const approveAdditionalTaskIntoDB = async (
             .lean();
         if (plan) {
             emitAppEvent(
-                is_approved
+                status === 'Approved'
                     ? 'additional_task.approved'
                     : 'additional_task.rejected',
                 {
@@ -102,6 +109,9 @@ const approveAdditionalTaskIntoDB = async (
                     planId: result.cleaning_plan_id.toString(),
                     clientId: plan.client.toString(),
                     name: result.name,
+                    ...(status === 'Rejected' && {
+                        rejectReason: result.reject_reason ?? undefined,
+                    }),
                 }
             );
         }
@@ -109,7 +119,7 @@ const approveAdditionalTaskIntoDB = async (
         // Newly approved (wasn't already) — fold it into that day's shift
         // right away if the shift is already materialized, instead of
         // waiting for the next materialization to pick it up.
-        if (is_approved && !task.is_approved) {
+        if (status === 'Approved' && task.status !== 'Approved') {
             await resyncTodayShiftAdditionalTaskIfDue(result);
         }
     }
@@ -155,7 +165,7 @@ const getAllAdditionalTasksByPlanFromDB = async (
     const page = parsed.data.page ?? 1;
     const limit = parsed.data.limit ?? 10;
     const skip = (page - 1) * limit;
-    for (const key of ['is_approved', 'is_completed', 'is_photo_required'] as const) {
+    for (const key of ['status', 'is_completed', 'is_photo_required'] as const) {
         if (parsed.data[key] !== undefined) {
             filters[key] = parsed.data[key];
         }

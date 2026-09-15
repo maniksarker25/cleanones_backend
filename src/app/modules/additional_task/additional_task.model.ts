@@ -1,5 +1,9 @@
 import { Schema, model } from 'mongoose';
-import { IAdditionalTask, IPhotoRequirement } from './additional_task.interface';
+import {
+    ADDITIONAL_TASK_STATUS,
+    IAdditionalTask,
+    IPhotoRequirement,
+} from './additional_task.interface';
 
 const photoRequirementSchema = new Schema<IPhotoRequirement>(
     {
@@ -59,9 +63,14 @@ const additionalTaskSchema = new Schema<IAdditionalTask>(
             type: Date,
             required: true,
         },
-        is_approved: {
-            type: Boolean,
-            default: false,
+        status: {
+            type: String,
+            enum: ADDITIONAL_TASK_STATUS,
+            default: 'Pending',
+        },
+        reject_reason: {
+            type: String,
+            default: null,
         },
     },
     {

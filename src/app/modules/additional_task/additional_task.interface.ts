@@ -6,6 +6,10 @@ export interface IPhotoRequirement {
     is_uploaded: boolean;
 }
 
+export const ADDITIONAL_TASK_STATUS = ['Pending', 'Approved', 'Rejected'] as const;
+
+export type TAdditionalTaskStatus = (typeof ADDITIONAL_TASK_STATUS)[number];
+
 export interface IAdditionalTask {
     cleaning_plan_id: Types.ObjectId;
     name: string;
@@ -15,5 +19,8 @@ export interface IAdditionalTask {
     photo_requirements: IPhotoRequirement[]; // required photos with titles
     is_completed: boolean;
     date_time: Date;
-    is_approved: boolean;
+    status: TAdditionalTaskStatus;
+    // Manager-supplied reason when status is 'Rejected'. Cleared back to null
+    // if the task is later approved instead.
+    reject_reason?: string | null;
 }
