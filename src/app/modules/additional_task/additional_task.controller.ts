@@ -6,8 +6,10 @@ import additionalTaskServices from './additional_task.services';
 // ─── Client: Create ───────────────────────────────────────────────────────────
 
 const createAdditionalTask = catchAsync(async (req, res) => {
-    const result =
-        await additionalTaskServices.createAdditionalTaskIntoDB(req.body, req.user.role as string);
+    const result = await additionalTaskServices.createAdditionalTaskIntoDB(
+        req.body,
+        { role: req.user.role as string, profileId: req.user.profileId as string }
+    );
     sendResponse(res, {
         statusCode: httpStatus.CREATED,
         success: true,
@@ -21,7 +23,8 @@ const createAdditionalTask = catchAsync(async (req, res) => {
 const updateAdditionalTask = catchAsync(async (req, res) => {
     const result = await additionalTaskServices.updateAdditionalTaskIntoDB(
         req.params.id,
-        req.body
+        req.body,
+        { role: req.user.role as string, profileId: req.user.profileId as string }
     );
     sendResponse(res, {
         statusCode: httpStatus.OK,
@@ -35,7 +38,8 @@ const updateAdditionalTask = catchAsync(async (req, res) => {
 
 const deleteAdditionalTask = catchAsync(async (req, res) => {
     const result = await additionalTaskServices.deleteAdditionalTaskFromDB(
-        req.params.id
+        req.params.id,
+        { role: req.user.role as string, profileId: req.user.profileId as string }
     );
     sendResponse(res, {
         statusCode: httpStatus.OK,
@@ -51,7 +55,11 @@ const approveAdditionalTask = catchAsync(async (req, res) => {
     const result = await additionalTaskServices.approveAdditionalTaskIntoDB(
         req.params.id,
         req.body.status,
-        req.body.reject_reason
+        req.body.reject_reason,
+        {
+            duration_minutes: req.body.duration_minutes,
+            photo_requirements: req.body.photo_requirements,
+        }
     );
     sendResponse(res, {
         statusCode: httpStatus.OK,
@@ -82,7 +90,8 @@ const getAllAdditionalTasksByPlan = catchAsync(async (req, res) => {
 const getSingleAdditionalTask = catchAsync(async (req, res) => {
     const result =
         await additionalTaskServices.getSingleAdditionalTaskFromDB(
-            req.params.id
+            req.params.id,
+            { role: req.user.role as string, profileId: req.user.profileId as string }
         );
     sendResponse(res, {
         statusCode: httpStatus.OK,

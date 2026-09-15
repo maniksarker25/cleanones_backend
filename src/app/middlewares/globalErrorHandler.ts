@@ -148,6 +148,7 @@ import { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
 import AppError from '../error/appError';
 import mongoose from 'mongoose';
+import config from '../config';
 const globalErrorHandler: ErrorRequestHandler = (
   err,
   req,
@@ -196,14 +197,19 @@ const globalErrorHandler: ErrorRequestHandler = (
     statusCode = 400;
     // message = 'Invalid ID';
     errorMessage = `${err.value} is not a valid ID!`;
-    errorDetails = err;
+    // Only the fields a client actually needs to see which field/value was
+    // invalid — never the raw CastError (its `.reason`/stack chain can
+    // include internal values and file paths).
+    errorDetails = { path: err.path, value: err.value, kind: err.kind };
   }
   return res.status(statusCode).json({
     success: false,
     message: errorMessage,
     // errorMessage: errorMessage,
     errorDetails,
-    stack: err?.stack || null,
+    // Stack traces reveal internal file paths/module structure — never send
+    // them outside local development.
+    stack: config.NODE_ENV === 'development' ? err?.stack || null : undefined,
     // err,
   });
 };

@@ -17,15 +17,39 @@ const ensureCleaningPlanExists = async (planId: string) => {
     return plan;
 };
 
+// Managers have blanket access to everything manager-scoped (no persisted
+// membership list anywhere in this app — same convention as chat.services.ts
+// and getAllAdditionalTasksByPlanFromDB below), so ownership is only ever
+// checked for the client role. Throws 404 rather than 403 so an unauthorized
+// client can't distinguish "not yours" from "doesn't exist".
+const ensureClientOwnsAdditionalTask = async (
+    cleaningPlanId: Types.ObjectId | string,
+    requester: { role: string; profileId: string },
+    notFoundMessage = 'Additional task not found'
+) => {
+    if (requester.role !== USER_ROLE.client) return;
+    const plan = await CleaningPlan.findById(cleaningPlanId).select('client').lean();
+    if (!plan || plan.client.toString() !== requester.profileId) {
+        throw new AppError(httpStatus.NOT_FOUND, notFoundMessage);
+    }
+};
+
 // ─── Create (Client) ──────────────────────────────────────────────────────────
 
 const createAdditionalTaskIntoDB = async (
     payload: Omit<IAdditionalTask, 'is_completed' | 'status'>,
-    requesterRole: string
+    requester: { role: string; profileId: string }
 ) => {
+    const requesterRole = requester.role;
     const plan = await ensureCleaningPlanExists(
         payload.cleaning_plan_id.toString()
     );
+    if (
+        requesterRole === USER_ROLE.client &&
+        plan.client.toString() !== requester.profileId
+    ) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
+    }
 
     const task = await AdditionalTask.create({
         ...payload,
@@ -56,11 +80,13 @@ const createAdditionalTaskIntoDB = async (
 
 const updateAdditionalTaskIntoDB = async (
     id: string,
-    payload: Partial<IAdditionalTask>
+    payload: Partial<IAdditionalTask>,
+    requester: { role: string; profileId: string }
 ) => {
     const task = await AdditionalTask.findById(id);
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
+    await ensureClientOwnsAdditionalTask(task.cleaning_plan_id, requester);
 
     // prevent client from touching approval fields
     delete (payload as any).status;
@@ -78,7 +104,15 @@ const updateAdditionalTaskIntoDB = async (
 const approveAdditionalTaskIntoDB = async (
     id: string,
     status: Extract<TAdditionalTaskStatus, 'Approved' | 'Rejected'>,
-    rejectReason?: string
+    rejectReason?: string,
+    // Manager-adjusted duration/photo requirements, applied only when
+    // approving (see additional_task.validation.ts's approve schema) — lets
+    // the manager correct the client's proposed values as part of the same
+    // approval call instead of a separate update-additional-task request.
+    overrides?: {
+        duration_minutes?: number;
+        photo_requirements?: IAdditionalTask['photo_requirements'];
+    }
 ) => {
     const task = await AdditionalTask.findById(id);
     if (!task)
@@ -91,6 +125,13 @@ const approveAdditionalTaskIntoDB = async (
             // Approving always clears out any reason left over from a
             // previous rejection.
             reject_reason: status === 'Rejected' ? rejectReason : null,
+            ...(status === 'Approved' && overrides?.duration_minutes !== undefined && {
+                duration_minutes: overrides.duration_minutes,
+            }),
+            ...(status === 'Approved' && overrides?.photo_requirements !== undefined && {
+                photo_requirements: overrides.photo_requirements,
+                is_photo_required: overrides.photo_requirements.length > 0,
+            }),
         },
         { new: true, runValidators: true }
     );
@@ -129,10 +170,14 @@ const approveAdditionalTaskIntoDB = async (
 
 // ─── Delete (Client) ──────────────────────────────────────────────────────────
 
-const deleteAdditionalTaskFromDB = async (id: string) => {
+const deleteAdditionalTaskFromDB = async (
+    id: string,
+    requester: { role: string; profileId: string }
+) => {
     const task = await AdditionalTask.findById(id);
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
+    await ensureClientOwnsAdditionalTask(task.cleaning_plan_id, requester);
 
     await AdditionalTask.findByIdAndDelete(id);
     return { message: 'Additional task deleted successfully' };
@@ -216,10 +261,15 @@ const getAllAdditionalTasksByPlanFromDB = async (
 
 // ─── Get Single ───────────────────────────────────────────────────────────────
 
-const getSingleAdditionalTaskFromDB = async (id: string) => {
+const getSingleAdditionalTaskFromDB = async (
+    id: string,
+    requester: { role: string; profileId: string }
+) => {
     const task = await AdditionalTask.findById(id).lean();
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
+    await ensureClientOwnsAdditionalTask(task.cleaning_plan_id, requester);
+
     const cleaningPlan = await cleaningPlanServices.getSingleCleaningPlanFromDB(
         task.cleaning_plan_id.toString()
     );

@@ -2562,9 +2562,9 @@ const paths = {
                 summary: 'Update additional task',
                 operationId: 'patchAdditionalTaskUpdateAdditionalTaskId',
                 description:
-                    'Partial update. status is stripped from the payload even if supplied; use the approve endpoint instead.\n\nRequired role: client.',
+                    "Partial update. status and reject_reason are stripped from the payload even if supplied; use the approve endpoint instead. A client may only update a task on one of their own cleaning plans (404 otherwise); a manager can update any task.\n\nRequired role: client, manager.",
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['client'],
+                'x-roles': ['client', 'manager'],
                 parameters: [
                     {
                         name: 'id',
@@ -2621,9 +2621,9 @@ const paths = {
                 summary: 'Delete additional task',
                 operationId: 'deleteAdditionalTaskDeleteAdditionalTaskId',
                 description:
-                    'Permanently deletes the task. Unlike most delete endpoints in this API, the response data is a status message object, not the deleted document or null.\n\nRequired role: client.',
+                    "Permanently deletes the task. Unlike most delete endpoints in this API, the response data is a status message object, not the deleted document or null. A client may only delete a task on one of their own cleaning plans (404 otherwise); a manager can delete any task.\n\nRequired role: client, manager.",
                 security: [{ bearerAuth: [] }],
-                'x-roles': ['client'],
+                'x-roles': ['client', 'manager'],
                 parameters: [
                     {
                         name: 'id',
@@ -2673,7 +2673,7 @@ const paths = {
                 summary: 'Approve or reject additional task',
                 operationId: 'patchAdditionalTaskApproveAdditionalTaskId',
                 description:
-                    "reject_reason is required when status is 'Rejected' (ignored/cleared to null when approving). Approving a task already reflects any prior reject_reason back to null.\n\nRequired role: manager.",
+                    "reject_reason is required when status is 'Rejected' (ignored/cleared to null when approving). Approving a task already reflects any prior reject_reason back to null. duration_minutes/photo_requirements let the manager correct the client's proposed values as part of the same approval call instead of a separate update-additional-task request; both are ignored when rejecting, and supplying photo_requirements also sets is_photo_required (true for a non-empty array, false for an empty one).\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -2697,11 +2697,37 @@ const paths = {
                                         type: 'string',
                                         description: "Required when status is 'Rejected'.",
                                     },
+                                    duration_minutes: {
+                                        type: 'number',
+                                        minimum: 0,
+                                        description: "Only applied when status is 'Approved'.",
+                                    },
+                                    photo_requirements: {
+                                        type: 'array',
+                                        items: {
+                                            type: 'object',
+                                            properties: {
+                                                title: { type: 'string', minLength: 1 },
+                                                photo_url: { type: 'string', nullable: true },
+                                                is_uploaded: { type: 'boolean' },
+                                            },
+                                            required: ['title'],
+                                        },
+                                        description: "Only applied when status is 'Approved'.",
+                                    },
                                 },
                                 required: ['status'],
                             },
                             examples: {
                                 approve: { value: { status: 'Approved' } },
+                                approveWithAdjustments: {
+                                    summary: 'Manager corrects duration/photo requirements while approving',
+                                    value: {
+                                        status: 'Approved',
+                                        duration_minutes: 30,
+                                        photo_requirements: [{ title: 'Before cleaning' }, { title: 'After cleaning' }],
+                                    },
+                                },
                                 reject: {
                                     value: {
                                         status: 'Rejected',
