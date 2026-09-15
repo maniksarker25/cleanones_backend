@@ -22,7 +22,14 @@ import { haversineDistanceMeters } from './geo.util';
 import { findWorkerConflictOnDate } from './shift.availability.services';
 import { IShift } from './shift.interface';
 import { Shift } from './shift.model';
-import { buildShiftSnapshot, pickRandom, recomputeTaskCompletion } from './shift.snapshot.util';
+import {
+    buildAdditionalTaskEntriesByDay,
+    buildAdditionalTaskEntriesForDay,
+    buildShiftSnapshot,
+    pickRandom,
+    recomputeTaskCompletion,
+    toShiftTaskFromAdditionalTask,
+} from './shift.snapshot.util';
 
 const MONGO_DUPLICATE_KEY_ERROR = 11000;
 
@@ -54,14 +61,16 @@ const buildVirtualShift = async (
     const snapshot = await buildShiftSnapshot(plan);
     if (!anyPatternOccursOnDate(snapshot.patterns, day)) return null;
 
+    const additional = await buildAdditionalTaskEntriesForDay(plan._id, day);
+
     return {
         cleaning_plan: plan._id,
         date: day,
         date_time: combineDateWithTimeOfDay(day, plan.date_time),
         location: snapshot.location,
         rooms: snapshot.rooms,
-        tasks: snapshot.tasks,
-        duration_minutes: snapshot.durationMinutes,
+        tasks: [...snapshot.tasks, ...additional.tasks],
+        duration_minutes: snapshot.durationMinutes + additional.durationMinutes,
         assigned_workers: snapshot.assignedWorkers,
         is_worker_overridden: false,
         status: 'upcoming' as const,
@@ -105,6 +114,8 @@ export const getOrCreateShift = async (
         );
     }
 
+    const additional = await buildAdditionalTaskEntriesForDay(plan._id, day);
+
     try {
         return await Shift.create({
             cleaning_plan: plan._id,
@@ -112,8 +123,8 @@ export const getOrCreateShift = async (
             date_time: combineDateWithTimeOfDay(day, plan.date_time),
             location: snapshot.location,
             rooms: snapshot.rooms,
-            tasks: snapshot.tasks,
-            duration_minutes: snapshot.durationMinutes,
+            tasks: [...snapshot.tasks, ...additional.tasks],
+            duration_minutes: snapshot.durationMinutes + additional.durationMinutes,
             assigned_workers: snapshot.assignedWorkers,
             is_worker_overridden: false,
             status: 'upcoming',
@@ -224,11 +235,17 @@ const computeSyncedShiftTasks = async (
         )
         .lean();
 
+    // Additional tasks folded into this shift (see buildAdditionalTaskEntriesForDay)
+    // aren't sourced from the Task collection at all, so this room/task sync
+    // must never touch them — they're carried forward unchanged below.
+    const planTaskEntries = shift.tasks.filter((t) => t.source !== 'additional_task');
+    const additionalTaskEntries = shift.tasks.filter((t) => t.source === 'additional_task');
+
     const existingByTaskId = new Map(
-        shift.tasks.map((t) => [t.task.toString(), t])
+        planTaskEntries.map((t) => [t.task.toString(), t])
     );
 
-    let changed = activeTasks.length !== shift.tasks.length;
+    let changed = activeTasks.length !== planTaskEntries.length;
 
     const nextTasks = activeTasks.map((t) => {
         const existing = existingByTaskId.get(t._id.toString());
@@ -299,6 +316,7 @@ const computeSyncedShiftTasks = async (
                 photo_requirements: photoRequirements,
                 is_completed: false,
                 completed_at: null,
+                source: 'plan_task' as const,
             };
         }
 
@@ -321,6 +339,7 @@ const computeSyncedShiftTasks = async (
             photo_requirements: photoRequirements,
             is_completed: isCompleted,
             completed_at: completedAt,
+            source: 'plan_task' as const,
         };
 
         if (
@@ -337,12 +356,13 @@ const computeSyncedShiftTasks = async (
         return updated;
     });
 
-    const durationMinutes = nextTasks.reduce(
+    const allTasks = [...nextTasks, ...additionalTaskEntries];
+    const durationMinutes = allTasks.reduce(
         (sum, t) => sum + (t.duration_minutes || 0),
         0
     );
 
-    return { tasks: nextTasks, durationMinutes, changed };
+    return { tasks: allTasks, durationMinutes, changed };
 };
 
 /**
@@ -441,6 +461,64 @@ export const resyncTodayShiftRoomsIfDue = async (
 };
 
 /**
+ * If the shift for this additional task's own date is already materialized
+ * AND still 'upcoming', folds a newly-approved AdditionalTask into its
+ * tasks[] and bumps duration_minutes. getOrCreateShift alone can't do this:
+ * it only folds approved additional tasks in at first materialization, so an
+ * approval that happens AFTER that day's shift already exists would
+ * otherwise never show up on it — same gap resyncTodayShiftRoomsIfDue closes
+ * for room/task edits. Called from approveAdditionalTaskIntoDB whenever
+ * is_approved flips to true.
+ *
+ * Idempotent: a no-op if this additional task is already present on the
+ * shift (dedupes by its own _id) — safe to call more than once for the same
+ * approval.
+ *
+ * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts, same
+ * reasoning as the other resync entry points — and for a shift that was
+ * never materialized at all (nothing to update; it'll pick this up at
+ * materialization time via buildAdditionalTaskEntriesForDay instead).
+ */
+export const resyncTodayShiftAdditionalTaskIfDue = async (additionalTask: {
+    _id: Types.ObjectId;
+    cleaning_plan_id: Types.ObjectId;
+    date_time: Date;
+    name: string;
+    duration_minutes: number;
+    is_photo_required: boolean;
+    photo_requirements: { title: string }[];
+}) => {
+    const day = normalizeToUTCDateOnly(additionalTask.date_time);
+    const shift = await Shift.findOne({
+        cleaning_plan: additionalTask.cleaning_plan_id,
+        date: day,
+        status: 'upcoming',
+    });
+    if (!shift) return null;
+
+    const alreadyIncluded = shift.tasks.some(
+        (t) =>
+            t.source === 'additional_task' &&
+            t.task.toString() === additionalTask._id.toString()
+    );
+    if (alreadyIncluded) return null;
+
+    const shiftTask = toShiftTaskFromAdditionalTask(additionalTask);
+
+    await Shift.updateOne(
+        { _id: shift._id, status: 'upcoming' },
+        {
+            $push: { tasks: shiftTask },
+            $inc: { duration_minutes: shiftTask.duration_minutes },
+        }
+    );
+
+    await maybeAutoCompleteShift(shift._id);
+
+    return null;
+};
+
+/**
  * Read-only preview for a single date: returns the materialized Shift if one
  * exists, otherwise builds an equivalent, unsaved shape from the plan's
  * current live state (`is_virtual: true`) — no DB write happens here.
@@ -492,6 +570,7 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
     }
 
     const snapshot = await buildShiftSnapshot(plan);
+    const additionalByDay = await buildAdditionalTaskEntriesByDay(plan._id, fromDay, toDay);
 
     const existingShifts = await Shift.find({
         cleaning_plan: planId,
@@ -512,14 +591,15 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
             continue;
         }
         if (!anyPatternOccursOnDate(snapshot.patterns, day)) continue;
+        const additional = additionalByDay.get(day.toISOString());
         results.push({
             cleaning_plan: plan._id,
             date: day,
             date_time: combineDateWithTimeOfDay(day, plan.date_time),
             location: snapshot.location,
             rooms: snapshot.rooms,
-            tasks: snapshot.tasks,
-            duration_minutes: snapshot.durationMinutes,
+            tasks: additional ? [...snapshot.tasks, ...additional.tasks] : snapshot.tasks,
+            duration_minutes: snapshot.durationMinutes + (additional?.durationMinutes ?? 0),
             assigned_workers: snapshot.assignedWorkers,
             is_worker_overridden: false,
             status: 'upcoming',
@@ -580,7 +660,7 @@ export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
 const attachProgress = (shift: IShift & { _id: Types.ObjectId }) => {
     const rooms = shift.rooms.map((room) => {
         const roomTasks = shift.tasks.filter(
-            (t) => t.room.toString() === room.room.toString()
+            (t) => t.room && t.room.toString() === room.room.toString()
         );
         const completedTask = roomTasks.filter((t) => t.is_completed).length;
         const totalTask = roomTasks.length;
@@ -2419,7 +2499,7 @@ export const getPhotoReviewListFromDB = async (
 
             rows.push({
                 cleaning_name: cleaningName,
-                room_name: roomNameByRoomId.get(task.room.toString()) ?? '',
+                room_name: task.room ? roomNameByRoomId.get(task.room.toString()) ?? '' : '',
                 task_name: task.name,
                 duration_minutes: task.duration_minutes,
                 shift_date: shift.date,
@@ -2439,6 +2519,7 @@ const shiftServices = {
     resyncTodayShiftWorkersIfDue,
     resyncTodayShiftTasksForRoomsIfDue,
     resyncTodayShiftRoomsIfDue,
+    resyncTodayShiftAdditionalTaskIfDue,
     getShiftForDate,
     listShiftsInRange,
     getClientLiveShiftsFromDB,

@@ -4,6 +4,7 @@ import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import cleaningPlanServices from '../cleaning_plan/cleaning_plan.services';
+import { resyncTodayShiftAdditionalTaskIfDue } from '../shift/shift.services';
 import { IAdditionalTask } from './additional_task.interface';
 import { AdditionalTask } from './additional_task.model';
 import { additionalTaskListQuerySchema } from './additional_task.validation';
@@ -42,6 +43,10 @@ const createAdditionalTaskIntoDB = async (
             clientId: plan.client.toString(),
             name: task.name,
         });
+    } else {
+        // Auto-approved — fold it into today's shift right away if that
+        // shift is already materialized, same as an explicit manager approval.
+        await resyncTodayShiftAdditionalTaskIfDue(task);
     }
 
     return task;
@@ -99,6 +104,13 @@ const approveAdditionalTaskIntoDB = async (
                     name: result.name,
                 }
             );
+        }
+
+        // Newly approved (wasn't already) — fold it into that day's shift
+        // right away if the shift is already materialized, instead of
+        // waiting for the next materialization to pick it up.
+        if (is_approved && !task.is_approved) {
+            await resyncTodayShiftAdditionalTaskIfDue(result);
         }
     }
 

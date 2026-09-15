@@ -38,14 +38,23 @@ const shiftRoomSchema = new Schema(
 
 const shiftTaskSchema = new Schema(
     {
-        task: { type: Schema.Types.ObjectId, ref: 'Task', required: true },
-        room: { type: Schema.Types.ObjectId, ref: 'Room', required: true },
+        // Refs Task for source 'plan_task', AdditionalTask for source
+        // 'additional_task' — no single `ref` fits both, so it's left
+        // unset; nothing here is ever populated (see IShiftTask).
+        task: { type: Schema.Types.ObjectId, required: true },
+        // Not set for 'additional_task' entries — those aren't scoped to a room.
+        room: { type: Schema.Types.ObjectId, ref: 'Room', required: false, default: null },
         name: { type: String, required: true },
         duration_minutes: { type: Number, default: 0, min: 0 },
         is_photo_required: { type: Boolean, default: false },
         photo_requirements: { type: [photoRequirementSchema], default: [] },
         is_completed: { type: Boolean, default: false },
         completed_at: { type: Date, default: null },
+        source: {
+            type: String,
+            enum: ['plan_task', 'additional_task'],
+            default: 'plan_task',
+        },
     },
     { _id: false }
 );
