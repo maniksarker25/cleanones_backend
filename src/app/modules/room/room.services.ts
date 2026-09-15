@@ -86,8 +86,8 @@ const getAllRoomsByLocationFromDB = async (
         }
     });
 
-    const sortOrder = sort?.startsWith('-') ? -1 : 1;
-    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+    const sortOrder = sort ? (sort.startsWith('-') ? -1 : 1) : -1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
         {
@@ -248,8 +248,8 @@ const getAllRoomsFromDB = async (query: Record<string, unknown>) => {
         matchConditions.push({ location: { $in: clientLocationIds } });
     }
 
-    const sortOrder = sort?.startsWith('-') ? -1 : 1;
-    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+    const sortOrder = sort ? (sort.startsWith('-') ? -1 : 1) : -1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [{ $match: { $and: matchConditions } }];
 

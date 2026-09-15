@@ -162,6 +162,8 @@ const getAllSupport = async (query: Record<string, unknown>) => {
         },
     });
 
+    pipeline.push({ $sort: { createdAt: -1 } });
+
     pipeline.push({
         $facet: {
             result: [{ $skip: skip }, { $limit: limit }],

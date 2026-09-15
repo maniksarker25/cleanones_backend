@@ -92,7 +92,7 @@ const cleaningPlanSchema = new Schema<ICleaningPlan>(
         },
     },
     {
-        timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
+        timestamps: true,
         versionKey: false,
     }
 );

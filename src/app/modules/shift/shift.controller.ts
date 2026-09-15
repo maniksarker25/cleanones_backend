@@ -1,4 +1,5 @@
 import httpStatus from 'http-status';
+import mongoose from 'mongoose';
 import AppError from '../../error/appError';
 import catchAsync from '../../utilities/catchasync';
 import sendResponse from '../../utilities/sendResponse';
@@ -255,6 +256,33 @@ const getShiftRoster = catchAsync(async (req, res) => {
     });
 });
 
+const getPhotoReviewList = catchAsync(async (req, res) => {
+    const { from, to, planId, locationId } = req.query;
+
+    const fromDate = from ? parseDateParam(String(from), 'from') : undefined;
+    const toDate = to ? parseDateParam(String(to), 'to') : undefined;
+
+    if (planId !== undefined && !mongoose.isValidObjectId(String(planId))) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid planId');
+    }
+    if (locationId !== undefined && !mongoose.isValidObjectId(String(locationId))) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid locationId');
+    }
+
+    const result = await shiftServices.getPhotoReviewListFromDB({
+        from: fromDate,
+        to: toDate,
+        planId: planId !== undefined ? String(planId) : undefined,
+        locationId: locationId !== undefined ? String(locationId) : undefined,
+    });
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Photo review list retrieved successfully',
+        data: result,
+    });
+});
+
 const getMyLiveStatus = catchAsync(async (req, res) => {
     const result = await shiftServices.getClientLiveShiftsFromDB(
         req.user.profileId as string
@@ -440,6 +468,7 @@ const shiftController = {
     getWorkersAttendanceSummary,
     getWorkersAttendanceList,
     getShiftRoster,
+    getPhotoReviewList,
     listShifts,
     getShift,
     assignWorkers,

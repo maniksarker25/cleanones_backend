@@ -19,13 +19,14 @@ const taskSchema = new Schema<TTask>(
         frequency_type: { type: String, enum: ['daily', 'weekly', 'monthly'], required: true },
         is_photo_required: { type: Boolean, default: false },
         photo_requirements: { type: [photoRequirementSchema], default: [] },
+        required_photo_count: { type: Number, default: null },
         duration_minutes: { type: Number, required:true },
         days_of_week: { type: [String], default: undefined },
         days_of_month: { type: [Number], default: undefined },
         is_active: { type: Boolean, default: true },
     },
     {
-        timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+        timestamps: true,
         versionKey: false,
     }
 );

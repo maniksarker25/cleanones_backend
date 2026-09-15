@@ -35,6 +35,17 @@ const isTaskAutoCompleted = (
 ): boolean =>
     !isPhotoRequired || photoRequirements.every((p) => p.is_uploaded);
 
+/** Fisher-Yates pick of `n` random, distinct items from `pool` (n is clamped to pool.length). */
+export const pickRandom = <T>(pool: T[], n: number): T[] => {
+    const count = Math.max(0, Math.min(n, pool.length));
+    const shuffled = [...pool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.slice(0, count);
+};
+
 /**
  * Builds everything a Shift needs from a plan's CURRENT state in one pass —
  * a single fetch each for Rooms, active Tasks, and Workers, reused for the
@@ -54,7 +65,7 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
             .lean(),
         Task.find({ room: { $in: plan.rooms }, is_active: true })
             .select(
-                'room name frequency_type days_of_week days_of_month duration_minutes is_photo_required photo_requirements'
+                'room name frequency_type days_of_week days_of_month duration_minutes is_photo_required photo_requirements required_photo_count'
             )
             .lean(),
         Worker.find({ _id: { $in: plan.assigned_workers.map((aw) => aw.worker) } })
@@ -78,7 +89,12 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
     }));
 
     const taskSnapshots: IShiftTask[] = tasks.map((t) => {
-        const photoRequirements = (t.photo_requirements ?? []).map((pr) => ({
+        // Randomly require `required_photo_count` titles out of the full
+        // photo_requirements pool for this occurrence.
+        const selected = t.is_photo_required
+            ? pickRandom(t.photo_requirements ?? [], t.required_photo_count ?? 0)
+            : [];
+        const photoRequirements = selected.map((pr) => ({
             title: pr.title,
             photo_url: null,
             is_uploaded: false,

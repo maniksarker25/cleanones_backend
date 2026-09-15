@@ -22,7 +22,7 @@ import { haversineDistanceMeters } from './geo.util';
 import { findWorkerConflictOnDate } from './shift.availability.services';
 import { IShift } from './shift.interface';
 import { Shift } from './shift.model';
-import { buildShiftSnapshot, recomputeTaskCompletion } from './shift.snapshot.util';
+import { buildShiftSnapshot, pickRandom, recomputeTaskCompletion } from './shift.snapshot.util';
 
 const MONGO_DUPLICATE_KEY_ERROR = 11000;
 
@@ -196,15 +196,20 @@ export const resyncTodayShiftWorkersIfDue = async (
  * the other by a plan's room-list edit), so the merge rules can't drift
  * between them.
  *
- * For a task that still exists, `photo_requirements` is re-merged by
- * `title`: a requirement the worker already uploaded keeps its
- * `photo_url`/`is_uploaded` (edits never erase upload progress), a
- * brand-new requirement title starts unset, and a removed title simply
- * drops out. `is_completed` is then recomputed the normal way for a
- * photo-required task (true once every merged requirement is uploaded); for
- * a no-photo task it's left exactly as-is, since that one is only ever
- * changed by the worker's explicit mark-complete action, never by a plan
- * edit.
+ * For a task that still exists, `photo_requirements` (the randomly-selected
+ * subset actually attached to this shift) is reconciled against the
+ * template's current pool/`required_photo_count` rather than blindly
+ * re-copied: a previously-selected title still present in the pool keeps its
+ * `photo_url`/`is_uploaded` (edits never erase upload progress); if the
+ * selected count now falls short of `required_photo_count` (pool grew, count
+ * increased, or a selected title was removed from the pool), more titles are
+ * randomly drawn from the remaining pool to top back up to the target count;
+ * if the selected count now exceeds the target (count decreased), the excess
+ * is trimmed, preferring to drop not-yet-uploaded titles first. `is_completed`
+ * is then recomputed the normal way for a photo-required task (true once
+ * every selected requirement is uploaded); for a no-photo task it's left
+ * exactly as-is, since that one is only ever changed by the worker's explicit
+ * mark-complete action, never by a plan edit.
  */
 const computeSyncedShiftTasks = async (
     shift: Pick<IShift, 'tasks'>,
@@ -214,7 +219,9 @@ const computeSyncedShiftTasks = async (
         room: { $in: roomIds },
         is_active: true,
     })
-        .select('room name duration_minutes is_photo_required photo_requirements')
+        .select(
+            'room name duration_minutes is_photo_required photo_requirements required_photo_count'
+        )
         .lean();
 
     const existingByTaskId = new Map(
@@ -226,18 +233,60 @@ const computeSyncedShiftTasks = async (
     const nextTasks = activeTasks.map((t) => {
         const existing = existingByTaskId.get(t._id.toString());
 
-        const photoRequirements = (t.photo_requirements ?? []).map((pr) => {
-            const previous = existing?.photo_requirements.find(
-                (p) => p.title === pr.title
+        const pool = t.photo_requirements ?? [];
+        const targetCount = t.is_photo_required
+            ? Math.min(t.required_photo_count ?? 0, pool.length)
+            : 0;
+
+        let photoRequirements: {
+            title: string;
+            photo_url: string | null;
+            is_uploaded: boolean;
+        }[];
+
+        if (!t.is_photo_required) {
+            photoRequirements = [];
+        } else if (!existing || !existing.is_photo_required) {
+            // Brand-new task, or a task just switched to photo-required: fresh random pick.
+            photoRequirements = pickRandom(pool, targetCount).map((pr) => ({
+                title: pr.title,
+                photo_url: null,
+                is_uploaded: false,
+            }));
+        } else {
+            const poolTitles = new Set(pool.map((pr) => pr.title));
+            let kept = existing.photo_requirements.filter((p) =>
+                poolTitles.has(p.title)
             );
-            return previous
-                ? {
-                      title: pr.title,
-                      photo_url: previous.photo_url,
-                      is_uploaded: previous.is_uploaded,
-                  }
-                : { title: pr.title, photo_url: null, is_uploaded: false };
-        });
+
+            if (kept.length > targetCount) {
+                const uploaded = kept.filter((p) => p.is_uploaded);
+                const notUploaded = kept.filter((p) => !p.is_uploaded);
+                kept =
+                    uploaded.length >= targetCount
+                        ? uploaded.slice(0, targetCount)
+                        : [
+                              ...uploaded,
+                              ...notUploaded.slice(0, targetCount - uploaded.length),
+                          ];
+            } else if (kept.length < targetCount) {
+                const keptTitles = new Set(kept.map((p) => p.title));
+                const remainingPool = pool.filter(
+                    (pr) => !keptTitles.has(pr.title)
+                );
+                const additional = pickRandom(
+                    remainingPool,
+                    targetCount - kept.length
+                ).map((pr) => ({
+                    title: pr.title,
+                    photo_url: null,
+                    is_uploaded: false,
+                }));
+                kept = [...kept, ...additional];
+            }
+
+            photoRequirements = kept;
+        }
 
         if (!existing) {
             changed = true;
@@ -2207,6 +2256,102 @@ export const checkOutFromShift = async (
     }
 };
 
+export interface PhotoReviewQueryParams {
+    from?: Date;
+    to?: Date;
+    planId?: string;
+    locationId?: string;
+}
+
+export interface PhotoReviewRow {
+    cleaning_name: string;
+    room_name: string;
+    task_name: string;
+    duration_minutes: number;
+    shift_date: Date;
+    location_name: string;
+    address: string | null;
+    uploaded_photos: { title: string; photo_url: string }[];
+}
+
+/**
+ * Manager-facing photo review list: one row per shift task instance that has
+ * at least one uploaded photo, across shifts in the given date range
+ * (default: the last 30 days through today), optionally narrowed to one
+ * cleaning plan or location.
+ */
+export const getPhotoReviewListFromDB = async (
+    params: PhotoReviewQueryParams
+): Promise<PhotoReviewRow[]> => {
+    const to = params.to ?? new Date();
+    const from =
+        params.from ??
+        (() => {
+            const d = new Date(to);
+            d.setUTCDate(d.getUTCDate() - 30);
+            return d;
+        })();
+
+    const filter: Record<string, unknown> = { date: { $gte: from, $lte: to } };
+    if (params.planId) filter.cleaning_plan = new Types.ObjectId(params.planId);
+    if (params.locationId)
+        filter['location.location'] = new Types.ObjectId(params.locationId);
+
+    const shifts = await Shift.find(filter)
+        .select('cleaning_plan date location rooms tasks')
+        .sort({ date: -1 })
+        .lean();
+
+    if (!shifts.length) return [];
+
+    const planIds = [...new Set(shifts.map((s) => s.cleaning_plan.toString()))];
+    const locationIds = [
+        ...new Set(shifts.map((s) => s.location.location.toString())),
+    ];
+
+    const [plans, locations] = await Promise.all([
+        CleaningPlan.find({ _id: { $in: planIds } }).select('title').lean(),
+        Location.find({ _id: { $in: locationIds } }).select('address').lean(),
+    ]);
+
+    const planTitleById = new Map(plans.map((p) => [p._id.toString(), p.title]));
+    const addressById = new Map(
+        locations.map((l) => [l._id.toString(), l.address])
+    );
+
+    const rows: PhotoReviewRow[] = [];
+
+    for (const shift of shifts) {
+        const roomNameByRoomId = new Map(
+            shift.rooms.map((r) => [r.room.toString(), r.name])
+        );
+        const cleaningName =
+            planTitleById.get(shift.cleaning_plan.toString()) ?? '';
+        const address = addressById.get(shift.location.location.toString()) ?? null;
+
+        for (const task of shift.tasks) {
+            if (!task.is_photo_required) continue;
+            const uploadedPhotos = task.photo_requirements
+                .filter((p) => p.is_uploaded)
+                .map((p) => ({ title: p.title, photo_url: p.photo_url as string }));
+            if (!uploadedPhotos.length) continue;
+
+            rows.push({
+                cleaning_name: cleaningName,
+                room_name: roomNameByRoomId.get(task.room.toString()) ?? '',
+                task_name: task.name,
+                duration_minutes: task.duration_minutes,
+                shift_date: shift.date,
+                location_name: shift.location.name,
+                address,
+                uploaded_photos: uploadedPhotos,
+            });
+        }
+    }
+
+    return rows;
+};
+
 const shiftServices = {
     listWorkerShiftsForDate,
     getOrCreateShift,
@@ -2227,6 +2372,7 @@ const shiftServices = {
     getWorkersAttendanceSummaryFromDB,
     getWorkersAttendanceListFromDB,
     getShiftRosterFromDB,
+    getPhotoReviewListFromDB,
     assignWorkersToShift,
     updateShiftStatus,
     uploadShiftTaskPhoto,

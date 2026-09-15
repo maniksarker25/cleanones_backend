@@ -91,7 +91,7 @@ const createChatMessage = async (params: {
 
     await Chat.findByIdAndUpdate(chatId, {
         last_message: message._id,
-        last_message_at: message.get('created_at'),
+        last_message_at: message.get('createdAt'),
     });
 
     const populated = await message.populate(
@@ -193,7 +193,7 @@ const getChatMessagesFromDB = async (
 
     const [messages, total] = await Promise.all([
         ChatMessage.find({ chat: chatId })
-            .sort({ created_at: -1 })
+            .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .populate('sender', 'full_name profile_photo email'),

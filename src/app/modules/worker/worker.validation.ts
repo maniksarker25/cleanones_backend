@@ -71,14 +71,14 @@ const workerListQuery = z
         limit: z.coerce.number().int().min(1).max(100).optional(),
         sort: z
             .enum([
-                'created_at',
-                '-created_at',
+                'createdAt',
+                '-createdAt',
                 'email',
                 '-email',
                 'hourly_rate',
                 '-hourly_rate',
             ])
-            .default('-created_at'),
+            .default('-createdAt'),
     })
     .strict();
 

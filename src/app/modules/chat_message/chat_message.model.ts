@@ -53,12 +53,12 @@ const chatMessageSchema = new Schema<TChatMessage>(
         },
     },
     {
-        timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+        timestamps: true,
         versionKey: false,
     }
 );
 
-chatMessageSchema.index({ chat: 1, created_at: -1 });
+chatMessageSchema.index({ chat: 1, createdAt: -1 });
 
 export const ChatMessage = model<TChatMessage>(
     'ChatMessage',

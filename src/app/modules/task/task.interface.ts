@@ -28,7 +28,11 @@ export interface TTask {
     name: string;
     frequency_type: TTaskFrequency;
     is_photo_required: boolean;
+    // Pool of possible photo names the manager can require.
     photo_requirements?: ITaskPhotoRequirement[];
+    // How many of the pool to randomly require per occurrence — required
+    // when is_photo_required is true, must be <= photo_requirements.length.
+    required_photo_count?: number;
     duration_minutes?: number;
     // 'weekly' tasks: which weekdays it's due on ('mon'..'sun')
     days_of_week?: string[];

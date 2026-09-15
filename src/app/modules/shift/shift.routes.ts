@@ -76,6 +76,12 @@ router.get(
 );
 
 router.get(
+    '/photo-review',
+    auth(USER_ROLE.manager),
+    shiftController.getPhotoReviewList
+);
+
+router.get(
     '/single-live-shift/:id',
     auth(USER_ROLE.manager),
     shiftController.getSingleLiveShift

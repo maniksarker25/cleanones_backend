@@ -11,7 +11,7 @@ export const additionalTaskListQuerySchema = z.object({
     page: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),
     limit: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),
     searchTerm: z.string().optional(),
-    sort: z.string().regex(/^-?(name|description|duration_minutes|date_time|created_at|updated_at|is_approved|is_completed)$/).optional(),
+    sort: z.string().regex(/^-?(name|description|duration_minutes|date_time|createdAt|updatedAt|is_approved|is_completed)$/).optional(),
     is_approved: queryBoolean,
     is_completed: queryBoolean,
     is_photo_required: queryBoolean,

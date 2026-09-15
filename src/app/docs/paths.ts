@@ -515,7 +515,7 @@ const paths = {
                     {
                         name: 'sort',
                         in: 'query',
-                        schema: { type: 'string', default: 'created_at' },
+                        schema: { type: 'string', default: 'createdAt' },
                         description:
                             'Single field; prefix with - for descending order.',
                     },
@@ -644,7 +644,7 @@ const paths = {
                     {
                         name: 'sort',
                         in: 'query',
-                        schema: { type: 'string', default: 'created_at' },
+                        schema: { type: 'string', default: 'createdAt' },
                         description:
                             'Single field; prefix with - for descending order.',
                     },
@@ -892,7 +892,7 @@ const paths = {
                     {
                         name: 'sort',
                         in: 'query',
-                        schema: { type: 'string', default: 'created_at' },
+                        schema: { type: 'string', default: 'createdAt' },
                         description:
                             'Single field; prefix with - for descending order.',
                     },
@@ -979,7 +979,7 @@ const paths = {
                     {
                         name: 'sort',
                         in: 'query',
-                        schema: { type: 'string', default: 'created_at' },
+                        schema: { type: 'string', default: 'createdAt' },
                         description:
                             'Single field; prefix with - for descending order.',
                     },
@@ -1115,7 +1115,7 @@ const paths = {
                     {
                         name: 'sort',
                         in: 'query',
-                        schema: { type: 'string', default: 'created_at' },
+                        schema: { type: 'string', default: 'createdAt' },
                         description:
                             'Single field; prefix with - for descending order.',
                     },
@@ -1185,17 +1185,12 @@ const paths = {
                                 days_of_week: ['mon', 'fri'],
                                 is_photo_required: true,
                                 photo_requirements: [
-                                    {
-                                        title: 'Before cleaning',
-                                        photo_url: null,
-                                        is_uploaded: false,
-                                    },
-                                    {
-                                        title: 'After cleaning',
-                                        photo_url: null,
-                                        is_uploaded: false,
-                                    },
+                                    { title: 'Before cleaning' },
+                                    { title: 'After cleaning' },
+                                    { title: 'Sink' },
+                                    { title: 'Floor' },
                                 ],
+                                required_photo_count: 2,
                                 duration_minutes: 15,
                             },
                         },
@@ -1258,17 +1253,12 @@ const paths = {
                             example: {
                                 is_photo_required: true,
                                 photo_requirements: [
-                                    {
-                                        title: 'Before cleaning',
-                                        photo_url: null,
-                                        is_uploaded: false,
-                                    },
-                                    {
-                                        title: 'After cleaning',
-                                        photo_url: null,
-                                        is_uploaded: false,
-                                    },
+                                    { title: 'Before cleaning' },
+                                    { title: 'After cleaning' },
+                                    { title: 'Sink' },
+                                    { title: 'Floor' },
                                 ],
+                                required_photo_count: 2,
                             },
                         },
                     },
@@ -1853,14 +1843,14 @@ const paths = {
                         schema: {
                             type: 'string',
                             enum: [
-                                'created_at',
-                                '-created_at',
+                                'createdAt',
+                                '-createdAt',
                                 'email',
                                 '-email',
                                 'hourly_rate',
                                 '-hourly_rate',
                             ],
-                            default: '-created_at',
+                            default: '-createdAt',
                         },
                     },
                 ],
@@ -2790,7 +2780,7 @@ const paths = {
                     {
                         name: 'sort',
                         in: 'query',
-                        schema: { type: 'string', default: 'created_at' },
+                        schema: { type: 'string', default: 'createdAt' },
                         description:
                             'Single field; prefix with - for descending order.',
                     },
@@ -2925,7 +2915,7 @@ const paths = {
                     {
                         name: 'sort',
                         in: 'query',
-                        schema: { type: 'string', default: 'created_at' },
+                        schema: { type: 'string', default: 'createdAt' },
                         description:
                             'Single field; prefix with - for descending order.',
                     },
@@ -3012,7 +3002,7 @@ const paths = {
                     {
                         name: 'sort',
                         in: 'query',
-                        schema: { type: 'string', default: 'created_at' },
+                        schema: { type: 'string', default: 'createdAt' },
                         description:
                             'Single field; prefix with - for descending order.',
                     },
@@ -5944,7 +5934,7 @@ const paths = {
                 summary: 'Get monthly customer counts',
                 operationId: 'getMetaCustomerChartData',
                 description:
-                    'superAdmin or admin. Returns twelve monthly buckets. Known mismatch: aggregation reads createdAt but Client stores created_at; counts can be zero.',
+                    'superAdmin or admin. Returns twelve monthly buckets.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['superAdmin', 'admin'],
                 parameters: [
@@ -6080,7 +6070,7 @@ const paths = {
                 summary: 'Compare activity counts',
                 operationId: 'getMetaGetActivities',
                 description:
-                    'superAdmin or admin. report is a zero-valued placeholder. Date-filtered Client counts use createdAt despite the model storing created_at. Errors caught by this service can omit data.',
+                    'superAdmin or admin. report is a zero-valued placeholder. Errors caught by this service can omit data.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['superAdmin', 'admin'],
                 parameters: [
@@ -6592,6 +6582,65 @@ const paths = {
                                     success: { type: 'boolean', enum: [true] },
                                     message: { type: 'string', example: 'Manager report retrieved successfully' },
                                     data: { $ref: '#/components/schemas/ManagerReport' },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/photo-review': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Photo review list (uploaded task photos, system-wide)',
+            operationId: 'getShiftPhotoReview',
+            description:
+                'Manager-only, system-wide. One row per shift task instance that has at least one uploaded photo, across shifts in the given date range (default: the last 30 days through today), optionally narrowed to one cleaning plan or location. Tasks with no photo requirement, or with no photo uploaded yet, are excluded.\n\nRequired role: manager.',
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'from',
+                    in: 'query',
+                    schema: { type: 'string', format: 'date' },
+                    description: 'ISO date (YYYY-MM-DD). Inclusive lower bound on shift date. Defaults to 30 days before `to`.',
+                },
+                {
+                    name: 'to',
+                    in: 'query',
+                    schema: { type: 'string', format: 'date' },
+                    description: 'ISO date (YYYY-MM-DD). Inclusive upper bound on shift date. Defaults to today.',
+                },
+                {
+                    name: 'planId',
+                    in: 'query',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                    description: 'Filter to shifts belonging to this cleaning plan. Returns 400 if not a valid ObjectId.',
+                },
+                {
+                    name: 'locationId',
+                    in: 'query',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                    description: 'Filter to shifts at this location. Returns 400 if not a valid ObjectId.',
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Matching task instances, or an empty array when there are none.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Photo review list retrieved successfully' },
+                                    data: {
+                                        type: 'array',
+                                        items: { $ref: '#/components/schemas/PhotoReviewItem' },
+                                    },
                                 },
                                 required: ['success', 'message', 'data'],
                             },

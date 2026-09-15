@@ -149,8 +149,8 @@ const getAllAdditionalTasksByPlanFromDB = async (
         }
     }
 
-    const sortOrder = sort?.startsWith('-') ? -1 : 1;
-    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+    const sortOrder = sort ? (sort.startsWith('-') ? -1 : 1) : -1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
         {

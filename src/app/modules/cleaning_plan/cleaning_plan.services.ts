@@ -327,7 +327,7 @@ const getAllCleaningPlansFromDB = async (
         }
     });
 
-    const sortOrder = sort?.startsWith('-') ? -1 : 1;
+    const sortOrder = sort ? (sort.startsWith('-') ? -1 : 1) : -1;
     const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
