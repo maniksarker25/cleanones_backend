@@ -1,7 +1,7 @@
 import { Schema, model } from 'mongoose';
 import { TWorker } from './worker.interface';
 import { WorkerType } from './worker.constant';
-
+// worker schema 
 const workerSchema = new Schema<TWorker>(
     {
         name: { type: String, required: true, trim: true },
