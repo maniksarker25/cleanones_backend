@@ -1,5 +1,10 @@
 import { Types } from 'mongoose';
-import { RecurrencePattern, taskToPattern } from '../cleaning_plan/availability.util';
+import { AdditionalTask } from '../additional_task/additional_task.model';
+import {
+    normalizeToUTCDateOnly,
+    RecurrencePattern,
+    taskToPattern,
+} from '../cleaning_plan/availability.util';
 import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 import { Location } from '../location/location.model';
 import { Room } from '../room/room.model';
@@ -111,6 +116,7 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
             // hitting the mark-complete endpoint (see markShiftTaskComplete).
             is_completed: false,
             completed_at: null,
+            source: 'plan_task' as const,
         };
     });
 
@@ -155,4 +161,94 @@ export const recomputeTaskCompletion = (task: IShiftTask): IShiftTask => {
         is_completed: completed,
         completed_at: completed ? new Date() : null,
     };
+};
+
+export interface AdditionalTaskShiftEntries {
+    tasks: IShiftTask[];
+    durationMinutes: number;
+}
+
+export const toShiftTaskFromAdditionalTask = (additionalTask: {
+    _id: Types.ObjectId;
+    name: string;
+    duration_minutes: number;
+    is_photo_required: boolean;
+    photo_requirements: { title: string }[];
+}): IShiftTask => ({
+    task: additionalTask._id,
+    // Not scoped to any one room — see IShiftTask.room.
+    room: null,
+    name: additionalTask.name,
+    duration_minutes: additionalTask.duration_minutes ?? 0,
+    is_photo_required: additionalTask.is_photo_required,
+    // Unlike plan tasks (pickRandom over a pool), an AdditionalTask's
+    // photo_requirements are already the exact fixed set the client
+    // configured — every one of them is required, copied as-is.
+    photo_requirements: (additionalTask.photo_requirements ?? []).map((pr) => ({
+        title: pr.title,
+        photo_url: null,
+        is_uploaded: false,
+    })),
+    is_completed: false,
+    completed_at: null,
+    source: 'additional_task',
+});
+
+/**
+ * Approved AdditionalTasks for `planId` whose own date_time falls on `day`
+ * (a UTC calendar date), shaped as IShiftTask entries ready to fold into a
+ * materializing (or previewed) shift's tasks[]. Used by getOrCreateShift,
+ * buildVirtualShift, and the today-shift resync path in shift.services.ts.
+ */
+export const buildAdditionalTaskEntriesForDay = async (
+    planId: Types.ObjectId | string,
+    day: Date
+): Promise<AdditionalTaskShiftEntries> => {
+    const dayEnd = new Date(day);
+    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+
+    const additionalTasks = await AdditionalTask.find({
+        cleaning_plan_id: planId,
+        is_approved: true,
+        date_time: { $gte: day, $lt: dayEnd },
+    }).lean();
+
+    const tasks = additionalTasks.map(toShiftTaskFromAdditionalTask);
+    const durationMinutes = tasks.reduce(
+        (sum, t) => sum + (t.duration_minutes || 0),
+        0
+    );
+    return { tasks, durationMinutes };
+};
+
+/**
+ * Same as buildAdditionalTaskEntriesForDay, but for every day in
+ * [fromDay, toDay] in a single query — grouped by day (UTC-midnight ISO
+ * string key) — for listShiftsInRange's virtual-preview loop, which would
+ * otherwise need one query per previewed day.
+ */
+export const buildAdditionalTaskEntriesByDay = async (
+    planId: Types.ObjectId | string,
+    fromDay: Date,
+    toDay: Date
+): Promise<Map<string, AdditionalTaskShiftEntries>> => {
+    const rangeEnd = new Date(toDay);
+    rangeEnd.setUTCDate(rangeEnd.getUTCDate() + 1);
+
+    const additionalTasks = await AdditionalTask.find({
+        cleaning_plan_id: planId,
+        is_approved: true,
+        date_time: { $gte: fromDay, $lt: rangeEnd },
+    }).lean();
+
+    const byDay = new Map<string, AdditionalTaskShiftEntries>();
+    for (const additionalTask of additionalTasks) {
+        const dayKey = normalizeToUTCDateOnly(additionalTask.date_time).toISOString();
+        const entry = byDay.get(dayKey) ?? { tasks: [], durationMinutes: 0 };
+        const shiftTask = toShiftTaskFromAdditionalTask(additionalTask);
+        entry.tasks.push(shiftTask);
+        entry.durationMinutes += shiftTask.duration_minutes;
+        byDay.set(dayKey, entry);
+    }
+    return byDay;
 };

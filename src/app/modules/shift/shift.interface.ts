@@ -38,8 +38,13 @@ export interface IShiftLocation {
 }
 
 export interface IShiftTask {
+    // Points at the source Task for source: 'plan_task', or at the source
+    // AdditionalTask for source: 'additional_task' — see `source` below.
     task: Types.ObjectId;
-    room: Types.ObjectId;
+    // Only set for source: 'plan_task' — an additional task isn't scoped to
+    // one room, so it never groups into any room's progress (see
+    // attachProgress in shift.services.ts).
+    room?: Types.ObjectId | null;
     name: string;
     duration_minutes: number;
     is_photo_required: boolean;
@@ -52,6 +57,12 @@ export interface IShiftTask {
     // complete/approve step — see docs/SHIFT_MANAGEMENT_DESIGN.md.
     is_completed: boolean;
     completed_at?: Date | null;
+    // 'plan_task' (default): one of the plan's recurring room tasks.
+    // 'additional_task': a one-off AdditionalTask whose date_time fell on
+    // this shift's date, folded in at materialization (or resynced in when
+    // approved after materialization) — see getOrCreateShift/
+    // resyncTodayShiftAdditionalTasksIfDue in shift.services.ts.
+    source: 'plan_task' | 'additional_task';
 }
 
 export interface IShiftAssignedWorker {

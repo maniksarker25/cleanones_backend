@@ -2612,8 +2612,15 @@ const schemas = {
                 items: {
                     type: 'object',
                     properties: {
-                        task: { $ref: '#/components/schemas/ObjectId' },
-                        room: { $ref: '#/components/schemas/ObjectId' },
+                        task: {
+                            $ref: '#/components/schemas/ObjectId',
+                            description: "Points at the source Task for source 'plan_task', or the source AdditionalTask for source 'additional_task'.",
+                        },
+                        room: {
+                            allOf: [{ $ref: '#/components/schemas/ObjectId' }],
+                            nullable: true,
+                            description: "Only set for source 'plan_task' — an additional task isn't scoped to one room.",
+                        },
                         name: { type: 'string' },
                         duration_minutes: { type: 'number' },
                         is_photo_required: { type: 'boolean' },
@@ -2628,7 +2635,7 @@ const schemas = {
                                 },
                             },
                             description:
-                                "Titles are a frozen snapshot of the source Task's template; photo_url/is_uploaded always start unset for this occurrence, independent of any other day's shift.",
+                                "Titles are a frozen snapshot of the source Task's (or AdditionalTask's) template; photo_url/is_uploaded always start unset for this occurrence, independent of any other day's shift.",
                         },
                         is_completed: {
                             type: 'boolean',
@@ -2640,16 +2647,22 @@ const schemas = {
                             format: 'date-time',
                             nullable: true,
                         },
+                        source: {
+                            type: 'string',
+                            enum: ['plan_task', 'additional_task'],
+                            description:
+                                "'plan_task' (default): one of the plan's recurring room tasks. 'additional_task': a one-off AdditionalTask whose date_time fell on this shift's date, folded in at materialization or when approved afterward.",
+                        },
                     },
                     description:
                         'task/room are kept for traceability only — the rest is a frozen snapshot for this specific occurrence.',
                 },
                 description:
-                    "One entry per active Task on the plan's rooms at materialization time — this is where actual photo submissions and completion state live, per occurrence. See docs/SHIFT_MANAGEMENT_DESIGN.md.",
+                    "One entry per active Task on the plan's rooms at materialization time, PLUS one entry per approved AdditionalTask whose date_time falls on this shift's date (source: 'additional_task') — this is where actual photo submissions and completion state live, per occurrence. See docs/SHIFT_MANAGEMENT_DESIGN.md.",
             },
             duration_minutes: {
                 type: 'number',
-                description: "Snapshot of the plan's max_estimated_duration at materialization time.",
+                description: "Snapshot of the plan's max_estimated_duration at materialization time, plus the summed duration_minutes of any included additional tasks.",
             },
             assigned_workers: {
                 type: 'array',
@@ -3497,7 +3510,7 @@ const schemas = {
                     type: 'object',
                     properties: {
                         task: { $ref: '#/components/schemas/ObjectId' },
-                        room: { $ref: '#/components/schemas/ObjectId' },
+                        room: { allOf: [{ $ref: '#/components/schemas/ObjectId' }], nullable: true },
                         name: { type: 'string' },
                         duration_minutes: { type: 'number' },
                         is_photo_required: { type: 'boolean' },
@@ -3517,6 +3530,10 @@ const schemas = {
                             type: 'string',
                             format: 'date-time',
                             nullable: true,
+                        },
+                        source: {
+                            type: 'string',
+                            enum: ['plan_task', 'additional_task'],
                         },
                     },
                 },

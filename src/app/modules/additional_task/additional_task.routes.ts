@@ -20,7 +20,7 @@ router.post(
 
 router.patch(
     '/update-additional-task/:id',
-    auth(USER_ROLE.client),
+    auth(USER_ROLE.client,USER_ROLE.manager),
     validateRequest(
         additionalTaskValidations.updateAdditionalTaskValidationSchema
     ),
