@@ -23,6 +23,6 @@ export interface TChatMessage {
     seen: boolean;
     is_deleted: boolean;
     deleted_at?: Date | null;
-    created_at?: Date;
-    updated_at?: Date;
+    createdAt?: Date;
+    updatedAt?: Date;
 }

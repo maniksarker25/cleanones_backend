@@ -116,7 +116,7 @@ const userSchema = new Schema<TUser>(
         timezone: { type: String, default: null },
     },
     {
-        timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+        timestamps: true,
         versionKey: false,
     }
 );

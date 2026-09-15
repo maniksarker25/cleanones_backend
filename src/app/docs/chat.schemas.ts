@@ -74,11 +74,11 @@ const chatSchemas = {
                 format: 'date-time',
                 nullable: true,
             },
-            created_at: {
+            createdAt: {
                 type: 'string',
                 format: 'date-time',
             },
-            updated_at: {
+            updatedAt: {
                 type: 'string',
                 format: 'date-time',
             },
@@ -201,11 +201,11 @@ const chatSchemas = {
             is_active: {
                 type: 'boolean',
             },
-            created_at: {
+            createdAt: {
                 type: 'string',
                 format: 'date-time',
             },
-            updated_at: {
+            updatedAt: {
                 type: 'string',
                 format: 'date-time',
             },

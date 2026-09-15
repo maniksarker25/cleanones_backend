@@ -190,7 +190,7 @@ const addFAQ = async (payload: any) => {
     return await FAQ.create(payload);
 };
 const getFAQ = async () => {
-    return await FAQ.find({});
+    return await FAQ.find({}).sort('-createdAt');
 };
 const editFAQ = async (
     id: string,
@@ -231,7 +231,7 @@ const addSlider = async (req: Request) => {
     return result;
 };
 const getSlider = async () => {
-    return await Slider.find({});
+    return await Slider.find({}).sort('-createdAt');
 };
 const editSlider = async (req: Request) => {
     const { files, body } = req;

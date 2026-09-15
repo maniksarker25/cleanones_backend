@@ -97,7 +97,7 @@ const workerSchema = new Schema<TWorker>(
         },
     },
     {
-        timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+        timestamps: true,
         versionKey: false,
     }
 );

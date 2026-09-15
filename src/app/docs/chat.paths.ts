@@ -5,7 +5,7 @@ const chatPaths = {
             summary: 'List my group chats',
             operationId: 'getchatmygroups',
             description:
-                'Active groups only. Managers see all groups; clients and workers see their memberships. Ordered by last_message_at then created_at descending. Client and last_message.sender are populated.',
+                'Active groups only. Managers see all groups; clients and workers see their memberships. Ordered by last_message_at then createdAt descending. Client and last_message.sender are populated.',
             security: [
                 {
                     bearerAuth: [],
@@ -140,7 +140,7 @@ const chatPaths = {
             summary: 'List my direct chats',
             operationId: 'getchatmydirectchats',
             description:
-                'Client-worker direct chats only. Managers have no access. Populates client, workers.user and last_message.sender. Ordered by last_message_at then created_at descending.',
+                'Client-worker direct chats only. Managers have no access. Populates client, workers.user and last_message.sender. Ordered by last_message_at then createdAt descending.',
             security: [
                 {
                     bearerAuth: [],

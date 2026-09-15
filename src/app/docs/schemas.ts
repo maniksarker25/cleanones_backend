@@ -538,6 +538,14 @@ const schemas = {
                     },
                     required: ['title'],
                 },
+                description:
+                    'Pool of possible photo titles. required_photo_count of these are picked at random per shift occurrence.',
+            },
+            required_photo_count: {
+                type: 'integer',
+                minimum: 1,
+                description:
+                    'How many titles from photo_requirements to randomly require per occurrence. Required when is_photo_required is true; must not exceed photo_requirements.length.',
             },
             duration_minutes: {
                 type: 'number',
@@ -566,7 +574,7 @@ const schemas = {
         },
         required: ['room', 'name', 'frequency_type'],
         description:
-            'weekly requires a nonempty days_of_week array; monthly requires a nonempty days_of_month array. client and location are resolved from room.',
+            'weekly requires a nonempty days_of_week array; monthly requires a nonempty days_of_month array. client and location are resolved from room. When is_photo_required is true, photo_requirements (nonempty) and required_photo_count (<= photo_requirements.length) are both required.',
     },
     TaskUpdate: {
         type: 'object',
@@ -604,6 +612,14 @@ const schemas = {
                     },
                     required: ['title'],
                 },
+                description:
+                    'Pool of possible photo titles. required_photo_count of these are picked at random per shift occurrence.',
+            },
+            required_photo_count: {
+                type: 'integer',
+                minimum: 1,
+                description:
+                    'How many titles from photo_requirements to randomly require per occurrence. Required when is_photo_required is true; must not exceed photo_requirements.length.',
             },
             duration_minutes: {
                 type: 'number',
@@ -631,7 +647,7 @@ const schemas = {
             },
         },
         description:
-            'If frequency_type is supplied as weekly or monthly, include its nonempty scheduling array in this request. Parent references cannot be changed through the documented update contract.',
+            'If frequency_type is supplied as weekly or monthly, include its nonempty scheduling array in this request. Parent references cannot be changed through the documented update contract. When is_photo_required is true, photo_requirements (nonempty) and required_photo_count (<= photo_requirements.length) are both required.',
     },
     WorkerCreate: {
         type: 'object',
@@ -1148,11 +1164,11 @@ const schemas = {
                 description:
                     'ObjectId on writes; populated document on reads. May be null.',
             },
-            created_at: {
+            createdAt: {
                 type: 'string',
                 format: 'date-time',
             },
-            updated_at: {
+            updatedAt: {
                 type: 'string',
                 format: 'date-time',
             },
@@ -1264,11 +1280,11 @@ const schemas = {
                 description:
                     'ObjectId on writes; populated document on reads. May be null.',
             },
-            created_at: {
+            createdAt: {
                 type: 'string',
                 format: 'date-time',
             },
-            updated_at: {
+            updatedAt: {
                 type: 'string',
                 format: 'date-time',
             },
@@ -1425,6 +1441,14 @@ const schemas = {
                         },
                     },
                 },
+                description:
+                    'Pool of possible photo titles. required_photo_count of these are picked at random per shift occurrence.',
+            },
+            required_photo_count: {
+                type: 'integer',
+                nullable: true,
+                description:
+                    'How many titles from photo_requirements are randomly required per occurrence.',
             },
             duration_minutes: {
                 type: 'number',
@@ -1475,11 +1499,11 @@ const schemas = {
                 description:
                     'ObjectId on writes; populated document on reads. May be null.',
             },
-            created_at: {
+            createdAt: {
                 type: 'string',
                 format: 'date-time',
             },
-            updated_at: {
+            updatedAt: {
                 type: 'string',
                 format: 'date-time',
             },
@@ -1653,11 +1677,11 @@ const schemas = {
             isDeleted: {
                 type: 'boolean',
             },
-            created_at: {
+            createdAt: {
                 type: 'string',
                 format: 'date-time',
             },
-            updated_at: {
+            updatedAt: {
                 type: 'string',
                 format: 'date-time',
             },
@@ -1982,11 +2006,11 @@ const schemas = {
             is_approved: {
                 type: 'boolean',
             },
-            created_at: {
+            createdAt: {
                 type: 'string',
                 format: 'date-time',
             },
-            updated_at: {
+            updatedAt: {
                 type: 'string',
                 format: 'date-time',
             },
@@ -3257,6 +3281,47 @@ const schemas = {
         },
         required: ['period', 'range', 'summary', 'shift_trends', 'issue_report_status'],
     },
+    PhotoReviewItem: {
+        type: 'object',
+        properties: {
+            cleaning_name: {
+                type: 'string',
+                description: "The cleaning plan's title.",
+            },
+            room_name: { type: 'string' },
+            task_name: { type: 'string' },
+            duration_minutes: { type: 'number' },
+            shift_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Calendar day of the shift occurrence (UTC midnight).',
+            },
+            location_name: { type: 'string' },
+            address: { type: 'string', nullable: true },
+            uploaded_photos: {
+                type: 'array',
+                description: 'Only the photo_requirements entries that have been uploaded for this task instance.',
+                items: {
+                    type: 'object',
+                    properties: {
+                        title: { type: 'string' },
+                        photo_url: { type: 'string' },
+                    },
+                    required: ['title', 'photo_url'],
+                },
+            },
+        },
+        required: [
+            'cleaning_name',
+            'room_name',
+            'task_name',
+            'duration_minutes',
+            'shift_date',
+            'location_name',
+            'address',
+            'uploaded_photos',
+        ],
+    },
     ShiftListItem: {
         allOf: [
             { $ref: '#/components/schemas/ShiftSummary' },
@@ -3551,11 +3616,11 @@ const schemas = {
                 nullable: true,
                 example: 'September payout',
             },
-            created_at: {
+            createdAt: {
                 type: 'string',
                 format: 'date-time',
             },
-            updated_at: {
+            updatedAt: {
                 type: 'string',
                 format: 'date-time',
             },
@@ -3667,8 +3732,8 @@ const schemas = {
                 nullable: true,
             },
             is_active: { type: 'boolean' },
-            created_at: { type: 'string', format: 'date-time' },
-            updated_at: { type: 'string', format: 'date-time' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
         },
         description:
             'A chat room — a group chat auto-tied to a CleaningPlan, a 1:1 direct chat between a client and a worker, a worker↔managers chat auto-created with the worker profile, or a client↔managers chat auto-created with the client profile. See docs/CHAT_SOCKET_EVENTS.md for how messages are actually sent (Socket.IO only — there is no REST endpoint to create a message).',
@@ -3717,8 +3782,8 @@ const schemas = {
                 format: 'date-time',
                 nullable: true,
             },
-            created_at: { type: 'string', format: 'date-time' },
-            updated_at: { type: 'string', format: 'date-time' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
         },
         description:
             'Created only via Socket.IO (group:send-message / send-message events) — there is no REST endpoint to create a message. See docs/CHAT_SOCKET_EVENTS.md.',

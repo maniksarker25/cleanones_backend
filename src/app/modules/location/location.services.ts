@@ -99,8 +99,8 @@ const getAllLocationsFromDB = async (query: Record<string, unknown>) => {
         }
     });
 
-    const sortOrder = sort?.startsWith('-') ? -1 : 1;
-    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+    const sortOrder = sort ? (sort.startsWith('-') ? -1 : 1) : -1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
         { $match: { is_active: true, ...filters } },
@@ -249,8 +249,8 @@ const getClientLocationsFromDB = async (
         }
     });
 
-    const sortOrder = sort?.startsWith('-') ? -1 : 1;
-    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+    const sortOrder = sort ? (sort.startsWith('-') ? -1 : 1) : -1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
         {
@@ -419,8 +419,8 @@ const getWorkerLocationsFromDB = async (
         }
     });
 
-    const sortOrder = sort?.startsWith('-') ? -1 : 1;
-    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+    const sortOrder = sort ? (sort.startsWith('-') ? -1 : 1) : -1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
         {
@@ -537,8 +537,8 @@ const getMyLocationsFromDB = async (
     const skip = (page - 1) * limit;
     const sort = query.sort as string | undefined;
 
-    const sortOrder = sort?.startsWith('-') ? -1 : 1;
-    const sortField = sort ? sort.replace(/^-/, '') : 'created_at';
+    const sortOrder = sort ? (sort.startsWith('-') ? -1 : 1) : -1;
+    const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
         {

@@ -320,7 +320,7 @@ const getMyChatsFromDB = async (
 
     const [chats, total] = await Promise.all([
         Chat.find(filter)
-            .sort({ last_message_at: -1, created_at: -1 })
+            .sort({ last_message_at: -1, createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .populate('client', 'name email phone')

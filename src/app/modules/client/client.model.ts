@@ -52,7 +52,7 @@ const clientSchema = new Schema<TClient>(
         },
     },
     {
-        timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+        timestamps: true,
         versionKey: false,
     }
 );
