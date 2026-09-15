@@ -194,7 +194,7 @@ const updateCleaningPlanIntoDB = async (
         );
     }
 
-    if (assigned_workers?.length) {
+    if (assigned_workers !== undefined) {
         const conflicts = await assertWorkersAssignable(
             {
                 _id: plan._id,
@@ -220,7 +220,7 @@ const updateCleaningPlanIntoDB = async (
     // it actually changed (rooms/tasks, workers, or the schedule itself).
     if (
         result &&
-        (rooms !== undefined || assigned_workers?.length || date_time !== undefined)
+        (rooms !== undefined || assigned_workers !== undefined || date_time !== undefined)
     ) {
         await materializeTodayShiftIfDue(result._id);
     }
@@ -234,7 +234,7 @@ const updateCleaningPlanIntoDB = async (
         await resyncTodayShiftRoomsIfDue(result._id, result.rooms);
     }
 
-    if (result && assigned_workers?.length) {
+    if (result && assigned_workers !== undefined) {
         await chatServices.syncChatGroupWorkers(
             result._id,
             result.assigned_workers.map((aw) => aw.worker)

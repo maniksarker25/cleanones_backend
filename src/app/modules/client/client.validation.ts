@@ -9,6 +9,7 @@ const createClientValidationSchema = z.object({
             .email('Invalid email format'),
         phone: z.string({ required_error: 'Phone number is required' }),
         company_name: z.string().optional(),
+        profile_image: z.string().optional(),
         licence_expiration_date: z.coerce.date().optional(),
         contract_status: z
             .enum(CONTRACT_STATUS as unknown as [string, ...string[]])
@@ -29,6 +30,7 @@ const updateClientValidationSchema = z.object({
             email: z.string().email('Invalid email format').optional(),
             phone: z.string().optional(),
             company_name: z.string().optional(),
+            profile_image: z.string().optional(),
             licence_expiration_date: z.coerce.date().optional(),
             contract_status: z
                 .enum(CONTRACT_STATUS as unknown as [string, ...string[]])

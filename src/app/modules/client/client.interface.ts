@@ -13,6 +13,7 @@ export interface TClient {
     email: string;
     phone: string;
     company_name?: string;
+    profile_image?: string;
     licence_expiration_date?: Date;
     contract_status: TContractStatus;
     isDeleted: boolean;

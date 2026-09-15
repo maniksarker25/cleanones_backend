@@ -158,6 +158,27 @@ const getWorkersAttendanceSummary = catchAsync(async (req, res) => {
     });
 });
 
+const getWorkerAttendanceSummary = catchAsync(async (req, res) => {
+    const period = (req.query.period as string | undefined) ?? 'today';
+    if (!ATTENDANCE_SUMMARY_PERIODS.includes(period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number])) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            "period must be one of 'today', 'weekly', 'monthly'"
+        );
+    }
+
+    const result = await shiftServices.getWorkerAttendanceSummaryFromDB(
+        req.params.workerId,
+        period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number]
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Worker attendance summary retrieved successfully',
+        data: result,
+    });
+});
+
 const getWorkersAttendanceList = catchAsync(async (req, res) => {
     const period = (req.query.period as string | undefined) ?? 'today';
     if (!ATTENDANCE_SUMMARY_PERIODS.includes(period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number])) {
@@ -466,6 +487,7 @@ const shiftController = {
     getMyLiveStatus,
     getWorkerPerformance,
     getWorkersAttendanceSummary,
+    getWorkerAttendanceSummary,
     getWorkersAttendanceList,
     getShiftRoster,
     getPhotoReviewList,

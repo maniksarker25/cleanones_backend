@@ -32,6 +32,10 @@ const workerSchema = new Schema<TWorker>(
             enum: [...Object.values(WorkerType), null],
             default: null,
         },
+        profile_image: {
+            type: String,
+            default: null,
+        },
         position: {
             type: String,
             default: null,

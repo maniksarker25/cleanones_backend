@@ -6,5 +6,5 @@ export interface TManager {
     email: string;
     phone: string;
     address?: string;
-    profile_photo?: string;
+    profile_image?: string;
 }

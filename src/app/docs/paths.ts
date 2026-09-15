@@ -2388,7 +2388,7 @@ const paths = {
                 summary: 'Assign workers to a cleaning plan',
                 operationId: 'patchCleaningPlanIdAssignWorkers',
                 description:
-                    'Replaces assigned_workers. Ineligible workers (deleted/blocked/inactive) are always rejected with 400. When one or more submitted workers has a scheduling conflict, the request is rejected with 409 (body.errorDetails.conflicts lists the offending workers) unless force=true, in which case those entries are saved with assigned_with_conflict=true for audit purposes.\n\nRequired role: manager.',
+                    'Replaces assigned_workers. Pass an empty array to unassign all workers (also removes them from the cleaning plan chat group). Ineligible workers (deleted/blocked/inactive) are always rejected with 400. When one or more submitted workers has a scheduling conflict, the request is rejected with 409 (body.errorDetails.conflicts lists the offending workers) unless force=true, in which case those entries are saved with assigned_with_conflict=true for audit purposes.\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -2416,7 +2416,6 @@ const paths = {
                                 properties: {
                                     assigned_workers: {
                                         type: 'array',
-                                        minItems: 1,
                                         items: {
                                             type: 'object',
                                             properties: {
@@ -6386,6 +6385,52 @@ const paths = {
             },
         },
     },
+    '/shift/attendance-summary/{workerId}': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Attendance summary for one worker',
+            operationId: 'getShiftAttendanceSummaryWorkerId',
+            description:
+                "Manager-only. Same shape as the all-workers attendance summary, scoped to a single worker's own assigned-worker entry on each shift in the period — total_hours, completed_shifts, punctuality_percentage (share of this worker's check-ins that were on-time, no grace period), and the on-time/late check-in counts. Powers the worker profile's Attendance tab.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'workerId',
+                    in: 'path',
+                    required: true,
+                    description: 'MongoDB document identifier.',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                },
+                {
+                    name: 'period',
+                    in: 'query',
+                    schema: { type: 'string', enum: ['today', 'weekly', 'monthly'], default: 'today' },
+                    description:
+                        "'today' = the current UTC calendar day, 'weekly' = the current Monday-Sunday UTC week, 'monthly' = the current UTC calendar month. Defaults to 'today'.",
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Attendance summary for this worker in the given period.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Worker attendance summary retrieved successfully' },
+                                    data: { $ref: '#/components/schemas/WorkerAttendanceSummary' },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/shift/attendance-list': {
         get: {
             tags: ['Shifts'],
@@ -6970,7 +7015,6 @@ const paths = {
                                 properties: {
                                     assigned_workers: {
                                         type: 'array',
-                                        minItems: 1,
                                         items: {
                                             type: 'object',
                                             properties: {

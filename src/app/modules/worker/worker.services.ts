@@ -267,11 +267,70 @@ const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
     return { meta, result };
 };
 
+// All-time attendance stats for one worker, across every materialized shift
+// they've ever been assigned to. Mirrors the late/absent definitions used by
+// getWorkerPerformanceFromDB (shift.services.ts), just without the month
+// filter — late: worker's own check_in_at is after the shift's scheduled
+// date_time; absent: the shift's date is in the past, status isn't
+// 'cancelled', and the worker never checked in.
+const getWorkerAttendanceStatsFromDB = async (workerId: mongoose.Types.ObjectId) => {
+    const today = new Date(
+        Date.UTC(
+            new Date().getUTCFullYear(),
+            new Date().getUTCMonth(),
+            new Date().getUTCDate()
+        )
+    );
+
+    const shifts = await Shift.find({ 'assigned_workers.worker': workerId })
+        .select('date date_time status assigned_workers.worker assigned_workers.check_in_at')
+        .lean();
+
+    let completed = 0;
+    let inProgress = 0;
+    let late = 0;
+    let absent = 0;
+
+    for (const shift of shifts) {
+        if (shift.status === 'completed') completed += 1;
+        if (shift.status === 'in_progress') inProgress += 1;
+
+        const entry = shift.assigned_workers.find(
+            (aw) => aw.worker.toString() === workerId.toString()
+        );
+        if (!entry) continue;
+
+        if (entry.check_in_at && entry.check_in_at > shift.date_time) {
+            late += 1;
+        }
+        if (shift.date < today && shift.status !== 'cancelled' && !entry.check_in_at) {
+            absent += 1;
+        }
+    }
+
+    return {
+        total_completed_shift: completed,
+        total_in_progress_shift: inProgress,
+        total_late_count: late,
+        total_absent: absent,
+    };
+};
+
 const getSingleWorkerFromDB = async (id: string) => {
     validateId(id);
     const worker = await Worker.findOne({ _id: id, ...activeWorker });
     if (!worker) throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
-    return worker;
+
+    const [totalHours, attendanceStats] = await Promise.all([
+        getTotalCompletedWorkHoursByWorker([worker._id]),
+        getWorkerAttendanceStatsFromDB(worker._id),
+    ]);
+
+    return {
+        ...worker.toObject(),
+        total_completed_work_hours: totalHours.get(worker._id.toString()) ?? 0,
+        ...attendanceStats,
+    };
 };
 
 const updateMyAvailabilityIntoDB = async (

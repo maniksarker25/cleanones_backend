@@ -46,6 +46,12 @@ router.get(
 );
 
 router.get(
+    '/attendance-summary/:workerId',
+    auth(USER_ROLE.manager),
+    shiftController.getWorkerAttendanceSummary
+);
+
+router.get(
     '/attendance-list',
     auth(USER_ROLE.manager),
     shiftController.getWorkersAttendanceList
