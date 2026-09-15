@@ -37,6 +37,10 @@ const clientSchema = new Schema<TClient>(
             type: String,
             default: null,
         },
+        profile_image: {
+            type: String,
+            default: null,
+        },
         licence_expiration_date: {
             type: Date,
             default: null,

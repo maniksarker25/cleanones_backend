@@ -3042,6 +3042,59 @@ const schemas = {
             'late_check_ins',
         ],
     },
+    WorkerAttendanceSummary: {
+        type: 'object',
+        properties: {
+            period: {
+                type: 'string',
+                enum: ['today', 'weekly', 'monthly'],
+            },
+            start_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Inclusive UTC start of the period.',
+            },
+            end_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Exclusive UTC end of the period.',
+            },
+            total_hours: {
+                type: 'number',
+                description:
+                    "Sum of (check_out_at - check_in_at) across this worker's completed check-ins in the period, in hours, rounded to 2 decimals.",
+            },
+            completed_shifts: {
+                type: 'integer',
+                description: "This worker's shifts with status 'completed' whose date falls in the period.",
+            },
+            punctuality_percentage: {
+                type: 'number',
+                description:
+                    "Of this worker's check-ins in the period, the share that were on-time (check_in_at <= shift.date_time, no grace period). 0 when there were no check-ins.",
+            },
+            total_check_ins: {
+                type: 'integer',
+            },
+            on_time_check_ins: {
+                type: 'integer',
+            },
+            late_check_ins: {
+                type: 'integer',
+            },
+        },
+        required: [
+            'period',
+            'start_date',
+            'end_date',
+            'total_hours',
+            'completed_shifts',
+            'punctuality_percentage',
+            'total_check_ins',
+            'on_time_check_ins',
+            'late_check_ins',
+        ],
+    },
     WorkerAttendanceListItem: {
         type: 'object',
         properties: {

@@ -9,9 +9,7 @@ const assignedWorkerSchema = z.object({
 
 const assignWorkersValidationSchema = z.object({
     body: z.object({
-        assigned_workers: z
-            .array(assignedWorkerSchema)
-            .min(1, 'At least one worker is required'),
+        assigned_workers: z.array(assignedWorkerSchema),
         force: z.coerce.boolean().optional(),
     }),
 });

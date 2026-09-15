@@ -1442,6 +1442,87 @@ export const getWorkersAttendanceListFromDB = async (
     });
 };
 
+/**
+ * Single-worker attendance summary for `period` ('today' | 'weekly' | 'monthly'),
+ * powering the worker profile's Attendance tab.
+ *
+ * Same definitions as getWorkersAttendanceSummaryFromDB, scoped to this
+ * worker's own assigned-worker entry on each shift in the period:
+ * - completed_shifts: this worker's shifts with status 'completed' in the period.
+ * - total_hours: sum of (check_out_at - check_in_at) across this worker's
+ *   completed check-ins in the period, in hours, rounded to 2 decimals.
+ * - punctuality_percentage: of this worker's check-ins in the period, the
+ *   share that were on-time (check_in_at <= shift's scheduled date_time, no
+ *   grace period). 0 when there were no check-ins in the period.
+ */
+export const getWorkerAttendanceSummaryFromDB = async (
+    workerId: string,
+    period: TAttendanceSummaryPeriod
+) => {
+    if (!mongoose.isObjectIdOrHexString(workerId)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid worker ID');
+    }
+    const worker = await Worker.findOne({
+        _id: workerId,
+        isDeleted: { $ne: true },
+    }).select('_id').lean();
+    if (!worker) throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
+
+    const now = new Date();
+    const { start, end } = getAttendanceSummaryPeriodRange(period, now);
+
+    const shifts = await Shift.find({
+        date: { $gte: start, $lt: end },
+        'assigned_workers.worker': workerId,
+    })
+        .select('date_time status assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at')
+        .lean();
+
+    let completedShifts = 0;
+    let workedMs = 0;
+    let onTimeCount = 0;
+    let lateCount = 0;
+
+    for (const shift of shifts) {
+        const entry = shift.assigned_workers.find(
+            (aw) => aw.worker.toString() === workerId
+        );
+        if (!entry) continue;
+
+        if (shift.status === 'completed') completedShifts += 1;
+
+        if (entry.check_in_at && entry.check_out_at) {
+            workedMs += entry.check_out_at.getTime() - entry.check_in_at.getTime();
+        }
+
+        if (entry.check_in_at) {
+            if (entry.check_in_at > shift.date_time) {
+                lateCount += 1;
+            } else {
+                onTimeCount += 1;
+            }
+        }
+    }
+
+    const checkedInCount = onTimeCount + lateCount;
+    const punctualityPercentage =
+        checkedInCount > 0
+            ? roundToTwoDecimals((onTimeCount / checkedInCount) * 100)
+            : 0;
+
+    return {
+        period,
+        start_date: start,
+        end_date: end,
+        total_hours: roundToTwoDecimals(workedMs / 3_600_000),
+        completed_shifts: completedShifts,
+        punctuality_percentage: punctualityPercentage,
+        total_check_ins: checkedInCount,
+        on_time_check_ins: onTimeCount,
+        late_check_ins: lateCount,
+    };
+};
+
 export type TRosterView = 'day' | 'week' | 'month';
 
 interface RosterQueryParams {
@@ -2371,6 +2452,7 @@ const shiftServices = {
     getWorkerPerformanceFromDB,
     getWorkersAttendanceSummaryFromDB,
     getWorkersAttendanceListFromDB,
+    getWorkerAttendanceSummaryFromDB,
     getShiftRosterFromDB,
     getPhotoReviewListFromDB,
     assignWorkersToShift,

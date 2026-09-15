@@ -10,6 +10,7 @@ export interface TWorker {
     dob?: any;
     nationality?: string;
     worker_type: WorkerType;
+    profile_image?: string;
     position?: string;
     address: string;
     base_location?: string;
