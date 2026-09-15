@@ -45,4 +45,28 @@ router.get(
     clientController.getClientScheduleRoster
 );
 
+router.get(
+    '/active-progress',
+    auth(USER_ROLE.client),
+    clientController.getClientActiveProgress
+);
+
+router.get(
+    '/shift-stats',
+    auth(USER_ROLE.client),
+    clientController.getClientShiftStats
+);
+
+router.get(
+    '/totals',
+    auth(USER_ROLE.client),
+    clientController.getClientTotals
+);
+
+router.get(
+    '/roster',
+    auth(USER_ROLE.client),
+    clientController.getClientPlanRoster
+);
+
 export const clientRoutes = router;

@@ -31,10 +31,14 @@ app.use(
             'http://localhost:3008',
             'http://localhost:3000',
             'http://localhost:3001',
+            'http://localhost:3002',
+            'http://localhost:3003',
             'http://10.10.20.48:3000',
             'http://localhost:9090',
             'http://10.10.20.43:9090',
             "http://10.10.28.195:3001",
+            "http://10.10.28.119:3001",
+            "http://10.10.28.194:3003",
         ],
         credentials: true,
     })
@@ -44,7 +48,7 @@ app.use('/uploads', express.static('uploads'));
 
 setupSwagger(app);
 
-app.use(rateLimiters.apiLimiter);
+// app.use(rateLimiters.apiLimiter);
 app.use('/api/v1', router);
 app.post('/contact-us', sendContactUsEmail);
 

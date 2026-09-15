@@ -8,13 +8,13 @@ const router = express.Router();
 
 router.post(
     '/upload-conversation-files',
-    auth(USER_ROLE.worker, USER_ROLE.client),
+    auth(USER_ROLE.worker, USER_ROLE.client,USER_ROLE.manager),
     uploadFile(),
     fileController.uploadConversationFiles
 );
 router.post(
     '/delete-files',
-    auth(USER_ROLE.worker, USER_ROLE.client),
+        auth(USER_ROLE.worker, USER_ROLE.client,USER_ROLE.manager),
     fileController.deleteFiles
 );
 

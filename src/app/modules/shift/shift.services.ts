@@ -1628,7 +1628,7 @@ interface RosterShiftEntry {
 }
 
 /** [start, end) UTC bounds for the roster view. Week runs Sunday-Saturday (matches the roster UI). */
-const getRosterDateRange = (
+export const getRosterDateRange = (
     view: TRosterView,
     date: string | undefined,
     year: number | undefined,

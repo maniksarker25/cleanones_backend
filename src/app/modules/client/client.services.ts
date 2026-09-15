@@ -18,6 +18,12 @@ import { Task } from '../task/task.model';
 import { AdditionalTask } from '../additional_task/additional_task.model';
 import '../worker/worker.model';
 import { Worker } from '../worker/worker.model';
+import {
+    anyPatternOccursOnDate,
+    combineDateWithTimeOfDay,
+    taskToPattern,
+} from '../cleaning_plan/availability.util';
+import { getRosterDateRange, TRosterView } from '../shift/shift.services';
 
 const createClientIntoDB = async (
     managerId: string,
@@ -827,6 +833,426 @@ async function getClientScheduleRosterFromDB(
     };
 };
 
+// Today's live progress: room/task completion + real worked hours derived
+// from worker check-in/check-out timestamps on today's shifts only.
+const getClientActiveProgressFromDB = async (clientId: string) => {
+    const client = await Client.findById(clientId);
+    if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+
+    const clientPlans = await CleaningPlan.find({ client: clientId }).select('_id');
+    const clientPlanIds = clientPlans.map(p => p._id);
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const todaysShifts = await Shift.find({
+        cleaning_plan: { $in: clientPlanIds },
+        date: { $gte: todayStart, $lte: todayEnd },
+    }).lean();
+
+    const now = new Date();
+
+    let total_estimated_hours = 0;
+    let total_worked_hours = 0;
+    let total_rooms = 0;
+    let completed_rooms = 0;
+    let total_tasks = 0;
+    let completed_tasks = 0;
+
+    const shifts = todaysShifts.map(shift => {
+        const estimated_hours = (shift.duration_minutes || 0) / 60;
+        total_estimated_hours += estimated_hours;
+
+        const planTasks = (shift.tasks || []).filter(t => t.source === 'plan_task' && t.room);
+        const roomIds = (shift.rooms || []).map(r => r.room.toString());
+
+        let shiftCompletedRooms = 0;
+        for (const roomId of roomIds) {
+            const tasksInRoom = planTasks.filter(t => t.room?.toString() === roomId);
+            if (tasksInRoom.length > 0 && tasksInRoom.every(t => t.is_completed)) {
+                shiftCompletedRooms += 1;
+            }
+        }
+        const shiftTotalRooms = roomIds.length;
+
+        const shiftTotalTasks = (shift.tasks || []).length;
+        const shiftCompletedTasks = (shift.tasks || []).filter(t => t.is_completed).length;
+
+        total_rooms += shiftTotalRooms;
+        completed_rooms += shiftCompletedRooms;
+        total_tasks += shiftTotalTasks;
+        completed_tasks += shiftCompletedTasks;
+
+        const workers = (shift.assigned_workers || []).map(w => {
+            let worked_hours = 0;
+            if (w.check_in_at) {
+                const end = w.check_out_at
+                    ? new Date(w.check_out_at)
+                    : shift.status === 'in_progress'
+                        ? now
+                        : new Date(w.check_in_at);
+                worked_hours = Math.max(
+                    0,
+                    (end.getTime() - new Date(w.check_in_at).getTime()) / 3600000
+                );
+            }
+            total_worked_hours += worked_hours;
+
+            return {
+                worker_id: w.worker?.toString() || '',
+                name: w.name,
+                role: w.role,
+                is_checked_in: !!w.check_in_at && !w.check_out_at,
+                check_in_at: w.check_in_at || null,
+                check_out_at: w.check_out_at || null,
+                worked_hours: parseFloat(worked_hours.toFixed(2)),
+            };
+        });
+
+        return {
+            shift_id: shift._id.toString(),
+            location_name: shift.location?.name || '',
+            status: shift.status,
+            start_time: shift.date_time,
+            estimated_hours: parseFloat(estimated_hours.toFixed(2)),
+            rooms: { total: shiftTotalRooms, completed: shiftCompletedRooms },
+            tasks: { total: shiftTotalTasks, completed: shiftCompletedTasks },
+            workers,
+        };
+    });
+
+    const hasActive = shifts.some(s => s.status === 'in_progress');
+    const allSettled =
+        shifts.length > 0 &&
+        shifts.every(s => s.status === 'completed' || s.status === 'cancelled');
+
+    const status: 'no_service' | 'scheduled' | 'active' | 'completed' =
+        shifts.length === 0 ? 'no_service' : hasActive ? 'active' : allSettled ? 'completed' : 'scheduled';
+
+    const progress_percentage =
+        total_tasks > 0 ? Math.min(100, Math.round((completed_tasks / total_tasks) * 100)) : 0;
+
+    return {
+        date: todayStart.toISOString().split('T')[0],
+        status,
+        summary: {
+            total_estimated_hours: parseFloat(total_estimated_hours.toFixed(2)),
+            total_worked_hours: parseFloat(total_worked_hours.toFixed(2)),
+            total_rooms,
+            completed_rooms,
+            total_tasks,
+            completed_tasks,
+            progress_percentage,
+        },
+        shifts,
+    };
+};
+
+const SHIFT_STATS_RANGES = ['today', 'this_week', 'this_month'] as const;
+type TShiftStatsRange = (typeof SHIFT_STATS_RANGES)[number];
+
+// Historical shift counts by status over a fixed window — separate from
+// getClientActiveProgressFromDB (today-only, live worker detail) so the
+// frontend can poll each at a different rate.
+const getClientShiftStatsFromDB = async (clientId: string, range: string = 'today') => {
+    const client = await Client.findById(clientId);
+    if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+
+    if (!SHIFT_STATS_RANGES.includes(range as TShiftStatsRange)) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            `Invalid range. Must be one of: ${SHIFT_STATS_RANGES.join(', ')}`
+        );
+    }
+
+    const clientPlans = await CleaningPlan.find({ client: clientId }).select('_id');
+    const clientPlanIds = clientPlans.map(p => p._id);
+
+    const now = new Date();
+    let dateFrom: Date;
+    let dateTo: Date;
+
+    if (range === 'today') {
+        dateFrom = new Date(now);
+        dateFrom.setHours(0, 0, 0, 0);
+        dateTo = new Date(now);
+        dateTo.setHours(23, 59, 59, 999);
+    } else if (range === 'this_week') {
+        dateFrom = new Date(now);
+        dateFrom.setDate(now.getDate() - now.getDay());
+        dateFrom.setHours(0, 0, 0, 0);
+        dateTo = new Date(dateFrom);
+        dateTo.setDate(dateFrom.getDate() + 6);
+        dateTo.setHours(23, 59, 59, 999);
+    } else {
+        dateFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        dateTo = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    }
+
+    const statusCounts = await Shift.aggregate([
+        {
+            $match: {
+                cleaning_plan: { $in: clientPlanIds },
+                date: { $gte: dateFrom, $lte: dateTo },
+            },
+        },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]);
+
+    const counts: Record<string, number> = {
+        upcoming: 0,
+        in_progress: 0,
+        completed: 0,
+        cancelled: 0,
+    };
+    for (const c of statusCounts) {
+        if (c._id in counts) counts[c._id as string] = c.count;
+    }
+
+    const total_shifts = counts.upcoming + counts.in_progress + counts.completed + counts.cancelled;
+    const total_completed_shifts = counts.completed;
+    const total_pending_shifts = counts.upcoming + counts.in_progress;
+    const total_cancelled_shifts = counts.cancelled;
+    const eligibleForRate = total_shifts - total_cancelled_shifts;
+    const completion_rate =
+        eligibleForRate > 0 ? Math.round((total_completed_shifts / eligibleForRate) * 100) : 0;
+
+    return {
+        range,
+        date_from: dateFrom.toISOString(),
+        date_to: dateTo.toISOString(),
+        total_shifts,
+        total_completed_shifts,
+        total_pending_shifts,
+        total_cancelled_shifts,
+        completion_rate,
+    };
+};
+
+// Static inventory counts — cacheable on the frontend since these change
+// far less often than shift/progress data.
+const getClientTotalsFromDB = async (clientId: string) => {
+    const client = await Client.findById(clientId);
+    if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+
+    const clientLocations = await Location.find({ client: clientId }).select('_id');
+    const locationIds = clientLocations.map(l => l._id);
+
+    const [total_cleaning_plans, total_locations, total_rooms, total_tasks] = await Promise.all([
+        CleaningPlan.countDocuments({ client: clientId, isDeleted: { $ne: true } }),
+        Location.countDocuments({ client: clientId }),
+        Room.countDocuments({ location: { $in: locationIds } }),
+        Task.countDocuments({ client: clientId }),
+    ]);
+
+    return {
+        total_cleaning_plans,
+        total_locations,
+        total_rooms,
+        total_tasks,
+    };
+};
+
+interface ClientRosterShiftEntry {
+    date: string;
+    shift_id: string | null;
+    is_virtual: boolean;
+    status: string;
+    start_time: Date;
+    end_time: Date;
+    duration_minutes: number;
+    rooms: { total: number; completed: number };
+    tasks: { total: number; completed: number };
+    assigned_workers: Array<{ worker_id: string; name: string; role: string }>;
+}
+
+interface ClientRosterParams {
+    view: TRosterView;
+    date?: string;
+    year?: number;
+    month?: number;
+    page?: number;
+    limit?: number;
+}
+
+// Client-facing counterpart to shift.services' getShiftRosterFromDB, but
+// grouped by CLEANING PLAN instead of by worker: for each of the client's
+// plans (paginated), every shift in the selected day/week/month window —
+// merging materialized Shift documents with not-yet-materialized virtual
+// occurrences, same universe as getClientScheduleRosterFromDB and the
+// manager roster. Reuses getRosterDateRange so 'week'/'month' boundaries
+// stay identical to the manager-facing roster.
+const getClientPlanRosterFromDB = async (clientId: string, params: ClientRosterParams) => {
+    const client = await Client.findById(clientId);
+    if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+
+    const { view, date, year, month } = params;
+    const { start, end } = getRosterDateRange(view, date, year, month);
+
+    const page = Math.max(1, Math.trunc(params.page ?? 1) || 1);
+    const limit = Math.min(50, Math.max(1, Math.trunc(params.limit ?? 10) || 10));
+
+    const planFilter = { client: clientId, isDeleted: { $ne: true } };
+
+    const [totalPlans, plans] = await Promise.all([
+        CleaningPlan.countDocuments(planFilter),
+        CleaningPlan.find(planFilter)
+            .select('title location rooms date_time end_date assigned_workers')
+            .sort({ title: 1, _id: 1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .populate('assigned_workers.worker', 'name')
+            .lean(),
+    ]);
+
+    const totalPage = totalPlans ? Math.ceil(totalPlans / limit) : 0;
+
+    if (!plans.length) {
+        return {
+            view,
+            start_date: start,
+            end_date: end,
+            meta: { page, limit, total: totalPlans, totalPage, total_shifts: 0 },
+            cleaning_plans: [],
+        };
+    }
+
+    const planIds = plans.map(p => p._id);
+    const allRoomIds = [...new Set(plans.flatMap(p => (p.rooms ?? []).map(r => r.toString())))];
+    const allLocationIds = [...new Set(plans.map(p => p.location.toString()))];
+
+    const [tasks, locations, materializedShifts] = await Promise.all([
+        Task.find({ room: { $in: allRoomIds }, is_active: true })
+            .select('room frequency_type days_of_week days_of_month duration_minutes')
+            .lean(),
+        Location.find({ _id: { $in: allLocationIds } }).select('name').lean(),
+        Shift.find({
+            cleaning_plan: { $in: planIds },
+            date: { $gte: start, $lt: end },
+        }).lean(),
+    ]);
+
+    const tasksByRoom = new Map<string, typeof tasks>();
+    for (const t of tasks) {
+        const key = t.room.toString();
+        const list = tasksByRoom.get(key);
+        if (list) list.push(t);
+        else tasksByRoom.set(key, [t]);
+    }
+    const locationNameById = new Map(locations.map(l => [l._id.toString(), l.name]));
+    const materializedByPlanDate = new Map(
+        materializedShifts.map(s => [`${s.cleaning_plan.toString()}|${s.date.toISOString()}`, s])
+    );
+
+    let totalShifts = 0;
+
+    const cleaning_plans = plans.map(plan => {
+        const planIdStr = plan._id.toString();
+        const planRoomIds = (plan.rooms ?? []).map(r => r.toString());
+        const planTasks = planRoomIds.flatMap(r => tasksByRoom.get(r) ?? []);
+        const patterns = planTasks.map(t => taskToPattern(t, plan.date_time, plan.end_date ?? null));
+        const locationName = locationNameById.get(plan.location.toString()) ?? '';
+
+        const shifts: ClientRosterShiftEntry[] = [];
+        let totalMinutes = 0;
+
+        for (
+            let cursor = new Date(start);
+            cursor < end;
+            cursor.setUTCDate(cursor.getUTCDate() + 1)
+        ) {
+            const day = new Date(cursor);
+            const dateKey = day.toISOString().slice(0, 10);
+            const materialized = materializedByPlanDate.get(`${planIdStr}|${day.toISOString()}`);
+
+            if (materialized) {
+                const planTasksInShift = (materialized.tasks || []).filter(
+                    t => t.source === 'plan_task' && t.room
+                );
+                const roomIds = (materialized.rooms || []).map(r => r.room.toString());
+                let completedRooms = 0;
+                for (const roomId of roomIds) {
+                    const tasksInRoom = planTasksInShift.filter(t => t.room?.toString() === roomId);
+                    if (tasksInRoom.length > 0 && tasksInRoom.every(t => t.is_completed)) {
+                        completedRooms += 1;
+                    }
+                }
+                const totalTasksInShift = (materialized.tasks || []).length;
+                const completedTasksInShift = (materialized.tasks || []).filter(t => t.is_completed).length;
+
+                shifts.push({
+                    date: dateKey,
+                    shift_id: materialized._id.toString(),
+                    is_virtual: false,
+                    status: materialized.status,
+                    start_time: materialized.date_time,
+                    end_time: new Date(
+                        materialized.date_time.getTime() + materialized.duration_minutes * 60_000
+                    ),
+                    duration_minutes: materialized.duration_minutes,
+                    rooms: { total: roomIds.length, completed: completedRooms },
+                    tasks: { total: totalTasksInShift, completed: completedTasksInShift },
+                    assigned_workers: (materialized.assigned_workers || []).map(w => ({
+                        worker_id: w.worker?.toString() || '',
+                        name: w.name,
+                        role: w.role,
+                    })),
+                });
+                totalMinutes += materialized.duration_minutes;
+                totalShifts += 1;
+                continue;
+            }
+
+            if (!planTasks.length) continue;
+            if (!anyPatternOccursOnDate(patterns, day)) continue;
+
+            const virtualDurationMinutes = planTasks.reduce(
+                (sum, t) => sum + (t.duration_minutes || 0),
+                0
+            );
+            const startTime = combineDateWithTimeOfDay(day, plan.date_time);
+
+            shifts.push({
+                date: dateKey,
+                shift_id: null,
+                is_virtual: true,
+                status: 'upcoming',
+                start_time: startTime,
+                end_time: new Date(startTime.getTime() + virtualDurationMinutes * 60_000),
+                duration_minutes: virtualDurationMinutes,
+                rooms: { total: planRoomIds.length, completed: 0 },
+                tasks: { total: planTasks.length, completed: 0 },
+                assigned_workers: (plan.assigned_workers || []).map(w => ({
+                    worker_id: (w.worker as any)?._id?.toString() || w.worker?.toString() || '',
+                    name: (w.worker as any)?.name || 'Specialist',
+                    role: w.role,
+                })),
+            });
+            totalMinutes += virtualDurationMinutes;
+            totalShifts += 1;
+        }
+
+        return {
+            plan_id: planIdStr,
+            plan_title: plan.title,
+            location_name: locationName,
+            total_shifts_in_range: shifts.length,
+            total_hours_in_range: parseFloat((totalMinutes / 60).toFixed(2)),
+            shifts,
+        };
+    });
+
+    return {
+        view,
+        start_date: start,
+        end_date: end,
+        meta: { page, limit, total: totalPlans, totalPage, total_shifts: totalShifts },
+        cleaning_plans,
+    };
+};
+
 const clientServices = {
     createClientIntoDB,
     updateClientIntoDB,
@@ -834,6 +1260,10 @@ const clientServices = {
     getAllClientsFromDB,
     getClientOverviewFromDB,
     getClientScheduleRosterFromDB,
+    getClientActiveProgressFromDB,
+    getClientShiftStatsFromDB,
+    getClientTotalsFromDB,
+    getClientPlanRosterFromDB,
 };
 
 export default clientServices;
