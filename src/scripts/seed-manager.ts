@@ -14,7 +14,7 @@ import { USER_ROLE } from '../app/modules/user/user.constant';
 import { User } from '../app/modules/user/user.model';
 
 const MANAGER_EMAIL = 'manager@yopmail.com';
-const MANAGER_PASSWORD = 'manager123';
+const MANAGER_PASSWORD = '12345678';
 const MANAGER_NAME = 'Manager';
 const MANAGER_PHONE = '0000000001';
 
