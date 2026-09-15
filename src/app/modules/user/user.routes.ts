@@ -40,7 +40,8 @@ router.get(
         USER_ROLE.client,
         USER_ROLE.worker,
         USER_ROLE.admin,
-        USER_ROLE.superAdmin
+        USER_ROLE.superAdmin,
+        USER_ROLE.manager
     ),
     userControllers.getMyProfile
 );
@@ -51,7 +52,8 @@ router.patch(
         USER_ROLE.client,
         USER_ROLE.worker,
         USER_ROLE.admin,
-        USER_ROLE.superAdmin
+        USER_ROLE.superAdmin,
+        USER_ROLE.manager
     ),
     uploadFile(),
     parseJsonBody(),
