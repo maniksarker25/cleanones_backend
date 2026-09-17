@@ -2266,7 +2266,7 @@ export const checkInToShift = async (
     coordinates: [number, number]
 ) => {
     const { shift, workerIndex } = await findAssignedShiftOrThrow(workerId, planId, date);
-    assertWithinGeofence(shift, coordinates);
+    // assertWithinGeofence(shift, coordinates);
 
     if (shift.assigned_workers[workerIndex].check_in_at) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
@@ -2327,7 +2327,7 @@ export const checkOutFromShift = async (
     coordinates: [number, number]
 ) => {
     const { shift, workerIndex } = await findAssignedShiftOrThrow(workerId, planId, date);
-    assertWithinGeofence(shift, coordinates);
+    // assertWithinGeofence(shift, coordinates);
 
     const checkInAt = shift.assigned_workers[workerIndex].check_in_at;
     if (!checkInAt) {
