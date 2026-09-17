@@ -461,6 +461,52 @@ export const resyncTodayShiftRoomsIfDue = async (
 };
 
 /**
+ * If today's shift for this plan is already materialized AND still
+ * 'upcoming', re-copies the plan's current Location (name + coordinates)
+ * into the shift's frozen `location` snapshot. Without this, a manager
+ * editing a Location's address/GPS point from the dashboard would leave
+ * today's already-materialized shift silently pointing at stale
+ * coordinates — including the ones the 50m check-in geofence validates
+ * against (see assertWithinGeofence) — until the next midnight cron
+ * re-materializes it fresh. Called from location.services.ts whenever a
+ * Location's coordinates or name change.
+ *
+ * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts,
+ * same reasoning as the other resync entry points: a worker already
+ * checked in against the old point must not have the ground shift under
+ * their feet mid-shift.
+ */
+export const resyncTodayShiftLocationIfDue = async (
+    planId: Types.ObjectId | string
+) => {
+    const today = normalizeToUTCDateOnly(new Date());
+    const shift = await Shift.findOne({
+        cleaning_plan: planId,
+        date: today,
+        status: 'upcoming',
+    });
+    if (!shift) return;
+
+    const plan = await CleaningPlan.findById(planId).select('location').lean();
+    if (!plan) return;
+
+    const location = await Location.findById(plan.location)
+        .select('name location')
+        .lean();
+    if (!location) return;
+
+    await Shift.updateOne(
+        { _id: shift._id, status: 'upcoming' },
+        {
+            $set: {
+                'location.name': location.name,
+                'location.coordinates': location.location ?? null,
+            },
+        }
+    );
+};
+
+/**
  * If the shift for this additional task's own date is already materialized
  * AND still 'upcoming', folds a newly-approved AdditionalTask into its
  * tasks[] and bumps duration_minutes. getOrCreateShift alone can't do this:
@@ -2266,7 +2312,7 @@ export const checkInToShift = async (
     coordinates: [number, number]
 ) => {
     const { shift, workerIndex } = await findAssignedShiftOrThrow(workerId, planId, date);
-    // assertWithinGeofence(shift, coordinates);
+    assertWithinGeofence(shift, coordinates);
 
     if (shift.assigned_workers[workerIndex].check_in_at) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
@@ -2327,7 +2373,7 @@ export const checkOutFromShift = async (
     coordinates: [number, number]
 ) => {
     const { shift, workerIndex } = await findAssignedShiftOrThrow(workerId, planId, date);
-    // assertWithinGeofence(shift, coordinates);
+    assertWithinGeofence(shift, coordinates);
 
     const checkInAt = shift.assigned_workers[workerIndex].check_in_at;
     if (!checkInAt) {
