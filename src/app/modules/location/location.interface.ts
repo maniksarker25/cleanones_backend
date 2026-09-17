@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
-
-export const LOCATION_TYPE = ['Hotel', 'School', 'Hospital', 'Other'] as const;
+// add office also
+export const LOCATION_TYPE = ['Hotel', 'School', 'Hospital', 'Office', 'Other'] as const;
 
 export type TLocationType = (typeof LOCATION_TYPE)[number];
 
