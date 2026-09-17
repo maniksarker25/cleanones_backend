@@ -401,7 +401,7 @@ const schemas = {
             },
             type: {
                 type: 'string',
-                enum: ['Hotel', 'School', 'Hospital', 'Other'],
+                enum: ['Hotel', 'School', 'Hospital', 'Office', 'Other'],
             },
             is_active: {
                 type: 'boolean',
@@ -431,7 +431,7 @@ const schemas = {
             },
             type: {
                 type: 'string',
-                enum: ['Hotel', 'School', 'Hospital', 'Other'],
+                enum: ['Hotel', 'School', 'Hospital', 'Office', 'Other'],
             },
             is_active: {
                 type: 'boolean',
@@ -1245,7 +1245,7 @@ const schemas = {
             },
             type: {
                 type: 'string',
-                enum: ['Hotel', 'School', 'Hospital', 'Other'],
+                enum: ['Hotel', 'School', 'Hospital', 'Office', 'Other'],
             },
             is_active: {
                 type: 'boolean',
