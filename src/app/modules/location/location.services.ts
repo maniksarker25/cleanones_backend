@@ -3,6 +3,7 @@ import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { Client } from '../client/client.model';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
+import { resyncTodayShiftLocationIfDue } from '../shift/shift.services';
 import { Worker } from '../worker/worker.model';
 import { TLocation } from './location.interface';
 import { Location } from './location.model';
@@ -60,6 +61,22 @@ const updateLocationIntoDB = async (
             new: true,
             runValidators: true,
         }
+    );
+
+    // Keep today's already-materialized (but not yet started) shifts in
+    // sync with the edited name/coordinates — otherwise the check-in
+    // geofence would keep validating against stale coordinates until the
+    // next midnight cron re-materializes them. Every plan using this
+    // location, not just one — a location can be shared across plans.
+    const affectedPlans = await CleaningPlan.find({
+        location: id,
+        is_active: true,
+        status: { $ne: 'completed' },
+    })
+        .select('_id')
+        .lean();
+    await Promise.all(
+        affectedPlans.map((plan) => resyncTodayShiftLocationIfDue(plan._id))
     );
 
     return result;
