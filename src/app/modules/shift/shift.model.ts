@@ -4,6 +4,8 @@ import { IShift } from './shift.interface';
 const photoRequirementSchema = new Schema(
     {
         title: { type: String, required: true, trim: true },
+        description: { type: String, default: null, trim: true },
+        reference_image_url: { type: String, default: null, trim: true },
         photo_url: { type: String, default: null },
         is_uploaded: { type: Boolean, default: false },
     },
@@ -93,6 +95,10 @@ const shiftSchema = new Schema<IShift>(
             type: Date,
             required: true,
         },
+        end_time: {
+            type: Date,
+            required: true,
+        },
         location: {
             type: shiftLocationSchema,
             required: true,
@@ -113,10 +119,6 @@ const shiftSchema = new Schema<IShift>(
         assigned_workers: {
             type: [shiftAssignedWorkerSchema],
             default: [],
-        },
-        is_worker_overridden: {
-            type: Boolean,
-            default: false,
         },
         status: {
             type: String,

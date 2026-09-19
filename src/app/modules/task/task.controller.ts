@@ -17,10 +17,13 @@ const createTask = catchAsync(async (req, res) => {
 });
 
 const updateTask = catchAsync(async (req, res) => {
+    const { force: rawForce, ...body } = req.body;
+    const force = rawForce === true || req.query.force === 'true';
     const result = await taskServices.updateTaskIntoDB(
         req.user.profileId as string,
         req.params.id,
-        req.body
+        body,
+        force
     );
     sendResponse(res, {
         statusCode: httpStatus.OK,
@@ -31,9 +34,11 @@ const updateTask = catchAsync(async (req, res) => {
 });
 
 const deleteTask = catchAsync(async (req, res) => {
+    const force = req.body?.force === true || req.query.force === 'true';
     const result = await taskServices.deleteTaskFromDB(
         req.user.profileId as string,
-        req.params.id
+        req.params.id,
+        force
     );
     sendResponse(res, {
         statusCode: httpStatus.OK,

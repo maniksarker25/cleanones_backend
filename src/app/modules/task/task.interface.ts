@@ -8,6 +8,12 @@ export type TTaskFrequency = 'daily' | 'weekly' | 'monthly';
 // own task-instance snapshot instead. See docs/SHIFT_MANAGEMENT_DESIGN.md.
 export interface ITaskPhotoRequirement {
     title: string;
+    // Both optional, shown to the worker alongside the title and carried
+    // through onto the Shift's own photo-requirement instance (see
+    // shift.snapshot.util.ts) — reserved for future AI-assisted photo
+    // verification (comparing an uploaded photo against this guidance).
+    description?: string;
+    reference_image_url?: string;
 }
 
 export const WEEKDAYS = [
@@ -39,4 +45,8 @@ export interface TTask {
     // 'monthly' tasks: which days of the month it's due on (1-31)
     days_of_month?: number[];
     is_active: boolean;
+    // Recurrence anchor for this task's occurrences (see availability.util's
+    // occursOnDate) — a task is never "due" before it existed.
+    createdAt: Date;
+    updatedAt: Date;
 }

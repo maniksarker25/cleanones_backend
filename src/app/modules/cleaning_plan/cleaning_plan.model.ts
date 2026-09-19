@@ -1,25 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { IAssignedWorker, ICleaningPlan } from './cleaning_plan.interface';
-
-const assignedWorkerSchema = new Schema<IAssignedWorker>(
-    {
-        worker: {
-            type: Schema.Types.ObjectId,
-            ref: 'Worker',
-            required: true,
-        },
-        role: {
-            type: String,
-            enum: ['Team leader', 'Co-leader', 'Normal worker'],
-            required: true,
-        },
-        assigned_with_conflict: {
-            type: Boolean,
-            default: false,
-        },
-    },
-    { _id: false }
-);
+import { ICleaningPlan } from './cleaning_plan.interface';
 
 const cleaningPlanSchema = new Schema<ICleaningPlan>(
     {
@@ -60,18 +40,6 @@ const cleaningPlanSchema = new Schema<ICleaningPlan>(
             ref: 'Room',
             default: [],
         },
-        assigned_workers: {
-            type: [assignedWorkerSchema] as unknown as typeof assignedWorkerSchema[],
-            default: [],
-        },
-        date_time: {
-            type: Date,
-            required: true,
-        },
-        end_date: {
-            type: Date,
-            default: null,
-        },
         max_estimated_duration: {
             type: Number,
             default: 0,
@@ -96,8 +64,6 @@ const cleaningPlanSchema = new Schema<ICleaningPlan>(
         versionKey: false,
     }
 );
-
-cleaningPlanSchema.index({ 'assigned_workers.worker': 1, is_active: 1 });
 
 export const CleaningPlan = model<ICleaningPlan>(
     'CleaningPlan',

@@ -80,34 +80,6 @@ const getSingleCleaningPlan = catchAsync(async (req, res) => {
     });
 });
 
-const getEligibleWorkers = catchAsync(async (req, res) => {
-    const result = await cleaningPlanServices.getEligibleWorkersForPlan(
-        req.params.id
-    );
-    sendResponse(res, {
-        statusCode: httpStatus.OK,
-        success: true,
-        message: 'Eligible workers retrieved successfully',
-        data: result,
-    });
-});
-
-const assignWorkers = catchAsync(async (req, res) => {
-    const force = req.body.force === true || req.query.force === 'true';
-    const result = await cleaningPlanServices.assignWorkersToPlan(
-        req.user.profileId as string,
-        req.params.id,
-        req.body.assigned_workers,
-        force
-    );
-    sendResponse(res, {
-        statusCode: httpStatus.OK,
-        success: true,
-        message: 'Workers assigned successfully',
-        data: result,
-    });
-});
-
 const cleaningPlanController = {
     getMyCleaningPlans,
     createCleaningPlan,
@@ -115,8 +87,6 @@ const cleaningPlanController = {
     deleteCleaningPlan,
     getAllCleaningPlans,
     getSingleCleaningPlan,
-    getEligibleWorkers,
-    assignWorkers,
 };
 
 export default cleaningPlanController;

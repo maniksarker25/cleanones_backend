@@ -38,6 +38,8 @@ const frequencyFieldsRefinement = (
 // Shift's own task-instance snapshot instead.
 const photoRequirementSchema = z.object({
     title: z.string().min(1, 'Photo title is required').trim(),
+    description: z.string().trim().optional(),
+    reference_image_url: z.string().trim().optional(),
 });
 
 const photoFieldsRefinement = (
@@ -115,6 +117,10 @@ const updateTaskValidationSchema = z.object({
             days_of_week: z.array(z.enum(WEEKDAYS)).optional(),
             days_of_month: z.array(z.number().min(1).max(31)).optional(),
             is_active: z.boolean().optional(),
+            // Confirms a recurrence change that would cancel already-staffed
+            // future shifts — see reconcileFutureShiftsForTaskChange. Without
+            // it, such a change is rejected with a 409 listing what's affected.
+            force: z.coerce.boolean().optional(),
         })
         .partial()
         .superRefine(frequencyFieldsRefinement)

@@ -25,7 +25,10 @@ const initializeSocket = (server: HTTPServer) => {
                     "http://10.10.28.195:3001",
                     "http://10.10.28.119:3001",
                     "https://cleanones.vercel.app",
-                    "https://cleanones-client-portal.vercel.app"
+                    "https://cleanones-client-portal.vercel.app",
+                    "https://cleanones-client-testing.vercel.app",
+                    "http://10.10.28.194:3001",
+
                 ],
             },
         });

@@ -64,6 +64,12 @@ router.get(
 );
 
 router.get(
+    '/plan-roster',
+    auth(USER_ROLE.manager),
+    shiftController.getManagerPlanRoster
+);
+
+router.get(
     '/today-live-shift-meta',
     auth(USER_ROLE.manager),
     shiftController.getTodayLiveShiftMeta
@@ -99,6 +105,12 @@ router.get(
     '/:planId/:date',
     auth(USER_ROLE.manager, USER_ROLE.worker),
     shiftController.getShift
+);
+
+router.get(
+    '/:planId/:date/eligible-workers',
+    auth(USER_ROLE.manager),
+    shiftController.getEligibleWorkers
 );
 
 router.patch(

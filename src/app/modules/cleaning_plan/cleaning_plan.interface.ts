@@ -6,24 +6,10 @@ export type CleaningPlanStatus =
     | 'completed'
 
 
-
-export interface IAssignedWorker {
-    worker: Types.ObjectId;
-    role: "Team leader" | "Co-leader" | "Normal worker";
-    assigned_with_conflict?: boolean;
-}
-
-export type ConflictReason = 'double_booked';
-
-export interface IWorkerConflict {
-    conflicting_plan_id: Types.ObjectId;
-    reason: ConflictReason;
-}
-
-
-
-
-
+// A blueprint only: WHAT needs cleaning and WHERE, on what recurring
+// checklist (via its rooms' Tasks) — no schedule and no crew of its own.
+// WHO does it and WHEN is decided per due date, at the Shift level (see
+// assignWorkersToShift in shift.services.ts).
 export interface ICleaningPlan {
     title: string;
     description:string;
@@ -32,9 +18,6 @@ export interface ICleaningPlan {
     client: Types.ObjectId;
     location: Types.ObjectId;
     rooms: Types.ObjectId[];
-    assigned_workers: IAssignedWorker[];
-    date_time: Date;
-    end_date?: Date | null;
     max_estimated_duration: number;
     note?: string | null;
     status: CleaningPlanStatus;
