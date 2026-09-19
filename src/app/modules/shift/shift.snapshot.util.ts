@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { AdditionalTask } from '../additional_task/additional_task.model';
 import {
     normalizeToUTCDateOnly,
+    occursOnDate,
     RecurrencePattern,
     taskToPattern,
 } from '../cleaning_plan/availability.util';
@@ -137,6 +138,33 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
         durationMinutes,
         patterns,
     };
+};
+
+/**
+ * The subset of a snapshot's tasks actually due on `day` — each task's own
+ * frequency/anchor (snapshot.patterns, built parallel to snapshot.tasks by
+ * buildShiftSnapshot) is checked individually, since a plan mixes daily,
+ * weekly and monthly tasks that don't all recur on the same days.
+ */
+export const tasksOccurringOnDate = (
+    snapshot: Pick<ShiftSnapshot, 'tasks' | 'patterns'>,
+    day: Date
+): IShiftTask[] =>
+    snapshot.tasks.filter((_, i) => occursOnDate(day, snapshot.patterns[i]));
+
+/**
+ * The subset of a snapshot's rooms that have at least one task among
+ * `dueTasks` (the result of tasksOccurringOnDate) — a room with nothing due
+ * on this date shouldn't be listed on the shift either.
+ */
+export const roomsWithDueTasks = (
+    rooms: IShiftRoom[],
+    dueTasks: IShiftTask[]
+): IShiftRoom[] => {
+    const roomIds = new Set(
+        dueTasks.map((t) => t.room?.toString()).filter((id): id is string => !!id)
+    );
+    return rooms.filter((r) => roomIds.has(r.room.toString()));
 };
 
 /** Recomputes is_completed/completed_at for one task entry from its current photo state. */
