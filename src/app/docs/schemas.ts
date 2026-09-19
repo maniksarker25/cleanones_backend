@@ -879,37 +879,6 @@ const schemas = {
                     $ref: '#/components/schemas/ObjectId',
                 },
             },
-            assigned_workers: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        worker: {
-                            $ref: '#/components/schemas/ObjectId',
-                        },
-                        role: {
-                            type: 'string',
-                            enum: [
-                                'Team leader',
-                                'Co-leader',
-                                'Normal worker',
-                            ],
-                        },
-                    },
-                    required: ['worker', 'role'],
-                },
-            },
-            date_time: {
-                type: 'string',
-                format: 'date-time',
-            },
-            end_date: {
-                type: 'string',
-                format: 'date-time',
-                nullable: true,
-                description:
-                    'Optional bound for recurrence-based conflict checking. Null/omitted means indefinite.',
-            },
             note: {
                 type: 'string',
                 nullable: true,
@@ -918,21 +887,15 @@ const schemas = {
                 type: 'string',
                 enum: ['active', 'inactive', 'completed'],
             },
-            force: {
-                type: 'boolean',
-                description:
-                    'When assigned_workers is provided and a worker has a scheduling conflict, set true to assign anyway.',
-            },
         },
         required: [
             'title',
             'description',
             'client',
             'location',
-            'date_time',
         ],
         description:
-            'manager is taken from the authenticated profile. Client must not be deleted and location must be active. max_estimated_duration is server-computed from the rooms\' active tasks and cannot be set directly.',
+            "A Cleaning Plan is a pure blueprint — client, location, rooms and (via the rooms' Tasks) the recurring checklist. It carries no schedule and no crew of its own: WHO works it and WHEN is decided per due date at the Shift level (see PATCH /shift/{planId}/{date}/assign-workers). manager is taken from the authenticated profile. Client must not be deleted and location must be active. max_estimated_duration is server-computed from the rooms' active tasks and cannot be set directly.",
     },
     CleaningPlanUpdate: {
         type: 'object',
@@ -953,35 +916,6 @@ const schemas = {
                     $ref: '#/components/schemas/ObjectId',
                 },
             },
-            assigned_workers: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        worker: {
-                            $ref: '#/components/schemas/ObjectId',
-                        },
-                        role: {
-                            type: 'string',
-                            enum: [
-                                'Team leader',
-                                'Co-leader',
-                                'Normal worker',
-                            ],
-                        },
-                    },
-                    required: ['worker', 'role'],
-                },
-            },
-            date_time: {
-                type: 'string',
-                format: 'date-time',
-            },
-            end_date: {
-                type: 'string',
-                format: 'date-time',
-                nullable: true,
-            },
             note: {
                 type: 'string',
                 nullable: true,
@@ -990,14 +924,9 @@ const schemas = {
                 type: 'string',
                 enum: ['active', 'inactive', 'completed'],
             },
-            force: {
-                type: 'boolean',
-                description:
-                    'When assigned_workers is provided and a worker has a scheduling conflict, set true to assign anyway.',
-            },
         },
         description:
-            'Partial update. Parent client/location cannot be changed through the documented update contract. max_estimated_duration is server-computed from the rooms\' active tasks whenever rooms changes.',
+            'Partial update. Parent client/location cannot be changed through the documented update contract. max_estimated_duration is server-computed from the rooms\' active tasks whenever rooms changes. There is no schedule or crew to update here — see PATCH /shift/{planId}/{date}/assign-workers.',
     },
     AdditionalTaskCreate: {
         type: 'object',
@@ -1831,58 +1760,6 @@ const schemas = {
                 description:
                     'ObjectIds on writes. The single-plan read populates full room documents (each with its active tasks[] populated); the list read omits this field entirely.',
             },
-            assigned_workers: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        worker: {
-                            oneOf: [
-                                {
-                                    type: 'string',
-                                    pattern: '^[a-fA-F0-9]{24}$',
-                                    example: '507f1f77bcf86cd799439011',
-                                },
-                                {
-                                    type: 'object',
-                                    properties: {
-                                        _id: {
-                                            type: 'string',
-                                            pattern: '^[a-fA-F0-9]{24}$',
-                                            example:
-                                                '507f1f77bcf86cd799439011',
-                                        },
-                                    },
-                                },
-                            ],
-                            description:
-                                'ObjectId on writes. The single-plan read populates the full worker document; the list read omits this field entirely.',
-                        },
-                        role: {
-                            type: 'string',
-                            enum: [
-                                'Team leader',
-                                'Co-leader',
-                                'Normal worker',
-                            ],
-                        },
-                        assigned_with_conflict: {
-                            type: 'boolean',
-                            description:
-                                'True if this worker was assigned via force=true despite a scheduling conflict.',
-                        },
-                    },
-                },
-            },
-            date_time: {
-                type: 'string',
-                format: 'date-time',
-            },
-            end_date: {
-                type: 'string',
-                format: 'date-time',
-                nullable: true,
-            },
             max_estimated_duration: {
                 type: 'number',
                 description:
@@ -1912,11 +1789,6 @@ const schemas = {
                 description:
                     'Included by the list aggregation only (count of rooms).',
             },
-            total_assigned_worker: {
-                type: 'integer',
-                readOnly: true,
-                description: 'Included by the list aggregation only.',
-            },
             total_additional_task: {
                 type: 'integer',
                 readOnly: true,
@@ -1927,11 +1799,6 @@ const schemas = {
                 readOnly: true,
                 description:
                     'Included by the single-plan aggregation only (count of rooms).',
-            },
-            total_assigned_workers: {
-                type: 'integer',
-                readOnly: true,
-                description: 'Included by the single-plan aggregation only.',
             },
             total_additional_tasks_pending: {
                 type: 'integer',
@@ -1948,6 +1815,8 @@ const schemas = {
                 format: 'date-time',
             },
         },
+        description:
+            "A pure blueprint — client, location, rooms and (via the rooms' Tasks) the recurring checklist. Carries no schedule and no crew of its own; see the Shift schema and PATCH /shift/{planId}/{date}/assign-workers for who works it and when.",
     },
     AdditionalTask: {
         type: 'object',
@@ -2571,7 +2440,14 @@ const schemas = {
             date_time: {
                 type: 'string',
                 format: 'date-time',
-                description: "This occurrence's actual start timestamp.",
+                description:
+                    "This occurrence's scheduled start — set by a manager at staffing time (PATCH /shift/{planId}/{date}/assign-workers), never inherited from the plan (which carries no schedule of its own).",
+            },
+            end_time: {
+                type: 'string',
+                format: 'date-time',
+                description:
+                    "This occurrence's scheduled end — set alongside date_time at staffing time.",
             },
             location: {
                 type: 'object',
@@ -2668,7 +2544,7 @@ const schemas = {
             },
             duration_minutes: {
                 type: 'number',
-                description: "Snapshot of the plan's max_estimated_duration at materialization time, plus the summed duration_minutes of any included additional tasks.",
+                description: "Sum of duration_minutes across this shift's tasks — an informational task-time estimate, shown to the manager while staffing. Not the authoritative scheduled window; that's date_time/end_time.",
             },
             assigned_workers: {
                 type: 'array',
@@ -2723,21 +2599,18 @@ const schemas = {
                     },
                 },
                 description:
-                    'Defaults to a snapshot of the plan\'s assigned_workers (with worker names resolved) at materialization time until overridden for this specific occurrence.',
-            },
-            is_worker_overridden: {
-                type: 'boolean',
-                description:
-                    "True once a manager has edited this occurrence's workers directly, diverging it from the plan's default assignment.",
+                    "Empty until a manager stages this occurrence via PATCH /shift/{planId}/{date}/assign-workers — a CleaningPlan carries no default crew to inherit from.",
             },
             is_virtual: {
                 type: 'boolean',
                 description:
-                    'True when this occurrence has not been persisted yet (computed live from the plan definition) — writing to it (assign-workers/status) materializes a real Shift document first.',
+                    "True when this occurrence has not been persisted yet — the date is due per the plan's current tasks but no manager has staffed it. A virtual occurrence has no date_time/end_time and an empty assigned_workers[]; status reads 'unstaffed' in that case. Calling assign-workers is what creates the real Shift document.",
             },
             status: {
                 type: 'string',
-                enum: ['upcoming', 'in_progress', 'completed', 'cancelled'],
+                enum: ['upcoming', 'in_progress', 'completed', 'cancelled', 'unstaffed'],
+                description:
+                    "'unstaffed' only appears on a virtual (is_virtual: true) occurrence that has never been persisted — a real Shift document is always one of the first four.",
             },
             last_updated_by: {
                 $ref: '#/components/schemas/ObjectId',
@@ -2745,7 +2618,7 @@ const schemas = {
             },
         },
         description:
-            'A single-day occurrence of a CleaningPlan, derived from the recurrence of the active Tasks on its rooms. See docs/SHIFT_MANAGEMENT_DESIGN.md.',
+            "A single-day occurrence of a CleaningPlan — the unit that's actually staffed and worked. Only ever created by a manager staffing a due date (PATCH /shift/{planId}/{date}/assign-workers); due dates that aren't staffed yet are shown as a virtual, unstaffed placeholder instead of a persisted document. See docs/SHIFT_MANAGEMENT_DESIGN.md.",
     },
     ShiftLiveStatus: {
         type: 'object',
@@ -2878,6 +2751,14 @@ const schemas = {
             date_time: {
                 type: 'string',
                 format: 'date-time',
+                nullable: true,
+                description: 'Absent (null) on an unstaffed virtual occurrence — see is_virtual.',
+            },
+            end_time: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+                description: 'Absent (null) on an unstaffed virtual occurrence — see is_virtual.',
             },
             location: {
                 type: 'object',
@@ -2905,10 +2786,9 @@ const schemas = {
             },
             status: {
                 type: 'string',
-                enum: ['upcoming', 'in_progress', 'completed', 'cancelled'],
-            },
-            is_worker_overridden: {
-                type: 'boolean',
+                enum: ['upcoming', 'in_progress', 'completed', 'cancelled', 'unstaffed'],
+                description:
+                    "'unstaffed' only appears on a virtual, not-yet-persisted occurrence.",
             },
             last_updated_by: {
                 $ref: '#/components/schemas/ObjectId',
@@ -2925,7 +2805,7 @@ const schemas = {
             is_virtual: {
                 type: 'boolean',
                 description:
-                    'True when this occurrence has no Shift document yet (projected from the plan\'s recurrence, not persisted) — no check-in/photo actions are possible on it until it materializes. _id/createdAt/updatedAt are absent in that case.',
+                    "True when this due date has no Shift document yet — a manager hasn't staffed it (see PATCH /shift/{planId}/{date}/assign-workers). No check-in/photo actions are possible on it until then. date_time/end_time are null and assigned_workers is empty; _id/createdAt/updatedAt are absent.",
             },
         },
         description:
@@ -3243,6 +3123,120 @@ const schemas = {
         },
         required: ['view', 'start_date', 'end_date', 'meta', 'workers'],
     },
+    PlanRosterShiftEntry: {
+        type: 'object',
+        properties: {
+            date: { type: 'string', format: 'date', example: '2026-09-20' },
+            shift_id: {
+                type: 'string',
+                nullable: true,
+                description: 'null when is_virtual is true.',
+            },
+            is_virtual: {
+                type: 'boolean',
+                description:
+                    "true = this due date is not yet staffed (no manager has assigned workers/a schedule to it via PATCH /shift/{planId}/{date}/assign-workers) — start_time/end_time are null and assigned_workers is empty.",
+            },
+            status: {
+                type: 'string',
+                enum: ['upcoming', 'in_progress', 'completed', 'cancelled', 'unstaffed'],
+                description: "'unstaffed' only appears when is_virtual is true.",
+            },
+            start_time: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+                description: 'null when is_virtual is true.',
+            },
+            end_time: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+                description: 'null when is_virtual is true.',
+            },
+            duration_minutes: { type: 'integer' },
+            rooms: {
+                type: 'object',
+                properties: {
+                    total: { type: 'integer' },
+                    completed: { type: 'integer' },
+                },
+            },
+            tasks: {
+                type: 'object',
+                properties: {
+                    total: { type: 'integer' },
+                    completed: { type: 'integer' },
+                },
+            },
+            assigned_workers: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        worker_id: { type: 'string' },
+                        name: { type: 'string' },
+                        role: {
+                            type: 'string',
+                            enum: ['Team leader', 'Co-leader', 'Normal worker'],
+                        },
+                    },
+                },
+            },
+        },
+    },
+    PlanRoster: {
+        type: 'object',
+        properties: {
+            view: { type: 'string', enum: ['day', 'week', 'month'] },
+            start_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Inclusive UTC start of the range.',
+            },
+            end_date: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Exclusive UTC end of the range.',
+            },
+            meta: {
+                type: 'object',
+                properties: {
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: {
+                        type: 'integer',
+                        description: 'Total cleaning plans matching the filters, across all pages.',
+                    },
+                    totalPage: { type: 'integer' },
+                    total_shifts: {
+                        type: 'integer',
+                        description: 'Total shift entries (staffed + unstaffed) across every plan on this page.',
+                    },
+                },
+                required: ['page', 'limit', 'total', 'totalPage', 'total_shifts'],
+            },
+            cleaning_plans: {
+                type: 'array',
+                description: 'This page only (size meta.limit, or fewer on the last page).',
+                items: {
+                    type: 'object',
+                    properties: {
+                        plan_id: { type: 'string' },
+                        plan_title: { type: 'string' },
+                        location_name: { type: 'string' },
+                        total_shifts_in_range: { type: 'integer' },
+                        total_hours_in_range: { type: 'number' },
+                        shifts: {
+                            type: 'array',
+                            items: { $ref: '#/components/schemas/PlanRosterShiftEntry' },
+                        },
+                    },
+                },
+            },
+        },
+        required: ['view', 'start_date', 'end_date', 'meta', 'cleaning_plans'],
+    },
     TodayLiveShiftMeta: {
         type: 'object',
         properties: {
@@ -3462,6 +3456,12 @@ const schemas = {
             date_time: {
                 type: 'string',
                 format: 'date-time',
+                description: 'Scheduled start, set by the manager at staffing time.',
+            },
+            end_time: {
+                type: 'string',
+                format: 'date-time',
+                description: 'Scheduled end, set alongside date_time at staffing time.',
             },
             status: {
                 type: 'string',
@@ -3583,9 +3583,6 @@ const schemas = {
                     },
                 },
             },
-            is_worker_overridden: {
-                type: 'boolean',
-            },
             last_updated_by: {
                 $ref: '#/components/schemas/ObjectId',
                 nullable: true,
@@ -3611,7 +3608,7 @@ const schemas = {
             },
         },
         description:
-            'Full single-shift detail: everything Shift has (rooms[] with per-room progress fields appended, tasks[], assigned_workers[]) plus resolved cleaning_plan/client context and overall progress totals. Returned by GET /shift/single-live-shift/{id}.',
+            'Full single-shift detail: everything Shift has (rooms[] with per-room progress fields appended, tasks[], assigned_workers[]) plus resolved cleaning_plan/client context and overall progress totals. Returned by GET /shift/single-live-shift/{id} — always a real, staffed shift (never a virtual/unstaffed one).',
     },
     InvoiceCreate: {
         type: 'object',

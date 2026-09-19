@@ -39,4 +39,8 @@ export interface TTask {
     // 'monthly' tasks: which days of the month it's due on (1-31)
     days_of_month?: number[];
     is_active: boolean;
+    // Recurrence anchor for this task's occurrences (see availability.util's
+    // occursOnDate) — a task is never "due" before it existed.
+    createdAt: Date;
+    updatedAt: Date;
 }

@@ -277,6 +277,57 @@ const getShiftRoster = catchAsync(async (req, res) => {
     });
 });
 
+const getManagerPlanRoster = catchAsync(async (req, res) => {
+    const view = (req.query.view as string | undefined) ?? 'day';
+    if (!ROSTER_VIEWS.includes(view as (typeof ROSTER_VIEWS)[number])) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            "view must be one of 'day', 'week', 'month'"
+        );
+    }
+
+    const date = req.query.date as string | undefined;
+    const year = req.query.year !== undefined ? Number(req.query.year) : undefined;
+    const month = req.query.month !== undefined ? Number(req.query.month) : undefined;
+    if (year !== undefined && Number.isNaN(year)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid year');
+    }
+    if (month !== undefined && Number.isNaN(month)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid month');
+    }
+
+    const page = req.query.page !== undefined ? Number(req.query.page) : undefined;
+    const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    if (page !== undefined && (Number.isNaN(page) || page < 1)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'page must be a positive integer');
+    }
+    if (limit !== undefined && (Number.isNaN(limit) || limit < 1 || limit > 100)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'limit must be between 1 and 100');
+    }
+
+    const client = (req.query.client as string | undefined) || undefined;
+    const location = (req.query.location as string | undefined) || undefined;
+    const searchTerm = (req.query.search as string | undefined)?.trim() || undefined;
+
+    const result = await shiftServices.getManagerPlanRosterFromDB({
+        view: view as (typeof ROSTER_VIEWS)[number],
+        date,
+        year,
+        month,
+        page,
+        limit,
+        client,
+        location,
+        searchTerm,
+    });
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Cleaning plan roster retrieved successfully',
+        data: result,
+    });
+});
+
 const getPhotoReviewList = catchAsync(async (req, res) => {
     const { from, to, planId, locationId } = req.query;
 
@@ -375,6 +426,31 @@ const getShift = catchAsync(async (req, res) => {
     });
 });
 
+const getEligibleWorkers = catchAsync(async (req, res) => {
+    const date = parseDateParam(req.params.date);
+    if (!req.query.start_time || !req.query.end_time) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'start_time and end_time query parameters are required'
+        );
+    }
+    const startTime = parseDateParam(String(req.query.start_time), 'start_time');
+    const endTime = parseDateParam(String(req.query.end_time), 'end_time');
+
+    const result = await shiftServices.listEligibleWorkersForShift(
+        req.params.planId,
+        date,
+        startTime,
+        endTime
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Eligible workers retrieved successfully',
+        data: result,
+    });
+});
+
 const assignWorkers = catchAsync(async (req, res) => {
     const date = parseDateParam(req.params.date);
     const force = req.body.force === true || req.query.force === 'true';
@@ -383,6 +459,8 @@ const assignWorkers = catchAsync(async (req, res) => {
         req.params.planId,
         date,
         req.body.assigned_workers,
+        new Date(req.body.start_time),
+        new Date(req.body.end_time),
         force
     );
     sendResponse(res, {
@@ -490,9 +568,11 @@ const shiftController = {
     getWorkerAttendanceSummary,
     getWorkersAttendanceList,
     getShiftRoster,
+    getManagerPlanRoster,
     getPhotoReviewList,
     listShifts,
     getShift,
+    getEligibleWorkers,
     assignWorkers,
     updateStatus,
     uploadTaskPhoto,

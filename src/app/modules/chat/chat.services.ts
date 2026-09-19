@@ -6,23 +6,33 @@ import { USER_ROLE } from '../user/user.constant';
 import { ICleaningPlan } from '../cleaning_plan/cleaning_plan.interface';
 import { Chat } from './chat.model';
 
-type TMinimalPlan = Pick<
-    ICleaningPlan,
-    'title' | 'client' | 'assigned_workers'
-> & { _id: Types.ObjectId | string };
+type TMinimalPlan = Pick<ICleaningPlan, 'title' | 'client'> & {
+    _id: Types.ObjectId | string;
+};
 
 // ─── Group chat lifecycle hooks (called from cleaning_plan.services.ts) ───────
 
+// A Cleaning Plan carries no crew of its own (see cleaning_plan.interface.ts)
+// — the group chat starts with just the client and gains workers one at a
+// time via syncChatGroupWorkers as they're staffed onto specific shifts (see
+// assignWorkersToShift in shift.services.ts).
 const createChatGroupForPlan = async (plan: TMinimalPlan) => {
-    const workers = (plan.assigned_workers || []).map((aw) => aw.worker);
-
     return Chat.create({
         type: 'group',
         cleaning_plan: plan._id,
         name: plan.title,
         client: plan.client,
-        workers,
+        workers: [],
     });
+};
+
+const getChatGroupWorkerIds = async (
+    planId: Types.ObjectId | string
+): Promise<string[]> => {
+    const group = await Chat.findOne({ cleaning_plan: planId, type: 'group' })
+        .select('workers')
+        .lean();
+    return (group?.workers ?? []).map((w) => w.toString());
 };
 
 const syncChatGroupWorkers = async (
@@ -394,6 +404,7 @@ const getGroupMembersFromDB = async (
 
 const chatServices = {
     createChatGroupForPlan,
+    getChatGroupWorkerIds,
     syncChatGroupWorkers,
     deactivateChatGroupForPlan,
     createWorkerManagersChat,

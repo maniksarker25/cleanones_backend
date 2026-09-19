@@ -93,6 +93,10 @@ const shiftSchema = new Schema<IShift>(
             type: Date,
             required: true,
         },
+        end_time: {
+            type: Date,
+            required: true,
+        },
         location: {
             type: shiftLocationSchema,
             required: true,
@@ -113,10 +117,6 @@ const shiftSchema = new Schema<IShift>(
         assigned_workers: {
             type: [shiftAssignedWorkerSchema],
             default: [],
-        },
-        is_worker_overridden: {
-            type: Boolean,
-            default: false,
         },
         status: {
             type: String,

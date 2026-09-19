@@ -2112,7 +2112,7 @@ const paths = {
                 summary: 'Get my cleaning plans',
                 operationId: 'getMyCleaningPlans',
                 description:
-                    'Pagination is nested under data.meta; records are under data.result. Returns only active plans belonging to the authenticated client. rooms and assigned_workers are omitted from list results, replaced by total_room, total_assigned_worker and total_additional_task counts (the latter computed from the additional-tasks collection). Supports page, limit, searchTerm, sort and an optional location ObjectId filter. Other query keys are ignored; client ownership and active status cannot be overridden.\n\nRequired role: client.',
+                    'Pagination is nested under data.meta; records are under data.result. Returns only active plans belonging to the authenticated client. rooms is omitted from list results, replaced by total_room and total_additional_task counts (the latter computed from the additional-tasks collection). Supports page, limit, searchTerm, sort and an optional location ObjectId filter. Other query keys are ignored; client ownership and active status cannot be overridden.\n\nRequired role: client.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['client'],
                 parameters: [
@@ -2192,7 +2192,7 @@ const paths = {
                 summary: 'List cleaning plans',
                 operationId: 'getCleaningPlanAllCleaningPlans',
                 description:
-                    'Pagination is nested under data.meta; records are under data.result. Defaults to active plans. rooms and assigned_workers are omitted from list results, replaced by total_room, total_assigned_worker and total_additional_task counts (the latter computed from the additional-tasks collection). Any unrecognized query key is applied as an equality filter on the underlying collection, so pass query parameters carefully.\n\nRequired role: manager.',
+                    'Pagination is nested under data.meta; records are under data.result. Defaults to active plans. rooms is omitted from list results, replaced by total_room and total_additional_task counts (the latter computed from the additional-tasks collection). Any unrecognized query key is applied as an equality filter on the underlying collection, so pass query parameters carefully.\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -2272,7 +2272,7 @@ const paths = {
                 summary: 'Get cleaning plan',
                 operationId: 'getCleaningPlanSingleCleaningPlanId',
                 description:
-                    "Includes populated references and full rooms/assigned_workers documents (each room's active tasks[] populated in full). additional_tasks is populated via a lookup against the additional-tasks collection (matched by cleaning_plan_id, not stored on the plan), plus single-plan aggregation totals. The service does not exclude inactive records.\n\nRequired role: manager.",
+                    "Includes populated references and full room documents (each room's active tasks[] populated in full). additional_tasks is populated via a lookup against the additional-tasks collection (matched by cleaning_plan_id, not stored on the plan), plus single-plan aggregation totals. The service does not exclude inactive records.\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -2284,165 +2284,6 @@ const paths = {
                         schema: { $ref: '#/components/schemas/ObjectId' },
                     },
                 ],
-            },
-            responses: {
-                ...errors,
-                ...{
-                    '200': {
-                        description:
-                            'Successful request. HTTP 200 is also used for create and delete operations.',
-                        content: {
-                            'application/json': {
-                                schema: {
-                                    type: 'object',
-                                    properties: {
-                                        success: {
-                                            type: 'boolean',
-                                            enum: [true],
-                                        },
-                                        message: { type: 'string' },
-                                        data: {
-                                            $ref: '#/components/schemas/CleaningPlan',
-                                        },
-                                    },
-                                    required: ['success', 'message'],
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    },
-    '/cleaning-plan/{id}/eligible-workers': {
-        get: {
-            ...{
-                tags: ['Cleaning plans'],
-                summary: 'List eligible workers with conflict flags',
-                operationId: 'getCleaningPlanIdEligibleWorkers',
-                description:
-                    'Returns active, non-blocked workers for this plan, each with is_conflict/conflict_reason/conflicting_plan_id computed against the plan\'s date_time, end_date and the recurrence (frequency_type/days_of_week/days_of_month) of the active tasks on the plan\'s rooms. Excludes this plan itself from the conflict search. Ineligible workers (deleted/blocked/inactive) are omitted entirely rather than flagged.\n\nRequired role: manager.',
-                security: [{ bearerAuth: [] }],
-                'x-roles': ['manager'],
-                parameters: [
-                    {
-                        name: 'id',
-                        in: 'path',
-                        required: true,
-                        description: 'Cleaning plan identifier.',
-                        schema: { $ref: '#/components/schemas/ObjectId' },
-                    },
-                ],
-            },
-            responses: {
-                ...errors,
-                ...{
-                    '200': {
-                        description:
-                            'Successful request. HTTP 200 is also used for create and delete operations.',
-                        content: {
-                            'application/json': {
-                                schema: {
-                                    type: 'object',
-                                    properties: {
-                                        success: {
-                                            type: 'boolean',
-                                            enum: [true],
-                                        },
-                                        message: { type: 'string' },
-                                        data: {
-                                            type: 'array',
-                                            items: {
-                                                type: 'object',
-                                                properties: {
-                                                    worker: {
-                                                        type: 'object',
-                                                    },
-                                                    is_conflict: {
-                                                        type: 'boolean',
-                                                    },
-                                                    conflict_reason: {
-                                                        type: 'string',
-                                                        enum: ['double_booked'],
-                                                        nullable: true,
-                                                    },
-                                                    conflicting_plan_id: {
-                                                        $ref: '#/components/schemas/ObjectId',
-                                                        nullable: true,
-                                                    },
-                                                },
-                                            },
-                                        },
-                                    },
-                                    required: ['success', 'message'],
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    },
-    '/cleaning-plan/{id}/assign-workers': {
-        patch: {
-            ...{
-                tags: ['Cleaning plans'],
-                summary: 'Assign workers to a cleaning plan',
-                operationId: 'patchCleaningPlanIdAssignWorkers',
-                description:
-                    'Replaces assigned_workers. Pass an empty array to unassign all workers (also removes them from the cleaning plan chat group). Ineligible workers (deleted/blocked/inactive) are always rejected with 400. When one or more submitted workers has a scheduling conflict, the request is rejected with 409 (body.errorDetails.conflicts lists the offending workers) unless force=true, in which case those entries are saved with assigned_with_conflict=true for audit purposes.\n\nRequired role: manager.',
-                security: [{ bearerAuth: [] }],
-                'x-roles': ['manager'],
-                parameters: [
-                    {
-                        name: 'id',
-                        in: 'path',
-                        required: true,
-                        description: 'Cleaning plan identifier.',
-                        schema: { $ref: '#/components/schemas/ObjectId' },
-                    },
-                    {
-                        name: 'force',
-                        in: 'query',
-                        schema: { type: 'boolean' },
-                        description:
-                            'Alternative to force in the body; assign despite scheduling conflicts.',
-                    },
-                ],
-                requestBody: {
-                    required: true,
-                    content: {
-                        'application/json': {
-                            schema: {
-                                type: 'object',
-                                properties: {
-                                    assigned_workers: {
-                                        type: 'array',
-                                        items: {
-                                            type: 'object',
-                                            properties: {
-                                                worker: {
-                                                    $ref: '#/components/schemas/ObjectId',
-                                                },
-                                                role: {
-                                                    type: 'string',
-                                                    enum: [
-                                                        'Team leader',
-                                                        'Co-leader',
-                                                        'Normal worker',
-                                                    ],
-                                                },
-                                            },
-                                            required: ['worker', 'role'],
-                                        },
-                                    },
-                                    force: { type: 'boolean' },
-                                },
-                                required: ['assigned_workers'],
-                            },
-                        },
-                    },
-                },
             },
             responses: {
                 ...errors,
@@ -6196,7 +6037,7 @@ const paths = {
             tags: ['Shifts'],
             summary: 'List my shifts for a specific date',
             operationId: 'getShiftMyShifts',
-            description: 'Returns the authenticated worker\'s saved and virtual shifts across cleaning plans, ordered by start time. Saved assignments override plan defaults, including worker removals. Includes completed and cancelled saved shifts. Virtual occurrences use active, non-completed plans and current task recurrence; past virtual entries are not historical snapshots. cleaning_plan is an object containing _id and title; title is null if the plan is missing. This read never creates shifts. Required role: worker.',
+            description: "Returns the authenticated worker's staffed shifts for this date across cleaning plans, ordered by start time. A worker only ever appears on a real, staffed Shift (see PATCH /shift/{planId}/{date}/assign-workers) — there is no plan-level default roster to fall back to. Includes completed and cancelled shifts. cleaning_plan is an object containing _id and title; title is null if the plan is missing. Required role: worker.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['worker'],
             parameters: [{
@@ -6269,7 +6110,7 @@ const paths = {
             summary: "My today's shift counts",
             operationId: 'getShiftMyTodayMeta',
             description:
-                "Worker-only. Counters for today's shifts (saved + virtual occurrences, same universe as /shift/my-shifts): total_shift, completed, and pending (total_shift - completed; covers upcoming/in_progress/cancelled alike).\n\nRequired role: worker.",
+                "Worker-only. Counters for today's staffed shifts (same universe as /shift/my-shifts): total_shift, completed, and pending (total_shift - completed; covers upcoming/in_progress/cancelled alike).\n\nRequired role: worker.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['worker'],
             parameters: [],
@@ -6308,7 +6149,7 @@ const paths = {
             summary: 'My next shift',
             operationId: 'getShiftMyNextShift',
             description:
-                "Worker-only. The next upcoming shift strictly after now, whichever is sooner of: the nearest already-materialized Shift assigned to this worker, or the nearest not-yet-materialized occurrence projected from the recurrence patterns of this worker's currently assigned plans (up to a 90-day horizon). is_virtual: true marks a projected occurrence that has no Shift document yet (no check-in/photo actions are possible on it until it materializes, which happens automatically once its own day arrives). Returns {} (empty object) when there is none within the horizon.\n\nRequired role: worker.",
+                "Worker-only. The nearest already-staffed Shift assigned to this worker, strictly after now. A worker only ever appears on a real, staffed Shift (see PATCH /shift/{planId}/{date}/assign-workers) — there is no plan-level default roster to project forward through. Returns {} (empty object) when nothing is scheduled.\n\nRequired role: worker.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['worker'],
             parameters: [],
@@ -6344,7 +6185,7 @@ const paths = {
             summary: 'Worker performance for a month',
             operationId: 'getShiftWorkerPerformanceWorkerId',
             description:
-                "Manager-only. Monthly performance counters for one worker, combining materialized Shift documents (the only source for completed/in_progress/late/absent/worked-hours, since those need real check-in/check-out data) with not-yet-materialized future occurrences projected from the worker's currently active plans (so a mostly-future month doesn't look artificially empty). late has no grace period (any check_in_at after the scheduled date_time counts). absent only ever counts materialized shifts whose date has passed with no check-in — an occurrence that was never materialized leaves no record to judge. Defaults to the current UTC month/year when month/year aren't given.\n\nRequired role: manager.",
+                "Manager-only. Monthly performance counters for one worker, computed entirely from this worker's materialized (staffed) Shift documents in the month — there is no plan-level default roster to project unstaffed future occurrences from. late has no grace period (any check_in_at after the scheduled date_time counts). absent counts shifts whose date has passed with no check-in. Defaults to the current UTC month/year when month/year aren't given.\n\nRequired role: manager.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [
@@ -6534,7 +6375,7 @@ const paths = {
             summary: 'Shift roster (day/week/month)',
             operationId: 'getShiftRoster',
             description:
-                "Manager-only. Powers the \"Shift Roster\" page. One row per active worker matching the filters, for the current page ONLY (including workers with zero shifts in the range), each with its shifts grouped by ISO date across the requested range — merging already-materialized Shift documents with not-yet-materialized virtual occurrences of active plans (the same universe as every other worker-facing shift listing), so a shift shows up here whether or not the daily cron has materialized it yet. A materialized shift's own assigned_workers/status is authoritative for that day; a virtual occurrence uses the plan's current default roster and is always 'upcoming'. 'week' runs Sunday-Saturday (matching the roster UI), 'month' is the full calendar month. Pagination runs on the worker query itself (single $facet aggregation for the page + total count together), and every downstream query (plans/tasks/locations/shifts) is scoped to only that page's workers — so a larger roster does not make a single page's request more expensive. meta.total_shifts counts distinct shift occurrences in range for THIS PAGE's workers only (not roster-wide); meta.total/meta.totalPage are the roster-wide worker count/page count.\n\nRequired role: manager.",
+                "Manager-only. Powers the \"Shift Roster\" page. One row per active worker matching the filters, for the current page ONLY (including workers with zero shifts in the range), each with its STAFFED shifts grouped by ISO date across the requested range. A worker only ever appears on a real, staffed Shift (see PATCH /shift/{planId}/{date}/assign-workers) — there is no plan-level default roster to merge in, so every entry here is real. 'week' runs Sunday-Saturday (matching the roster UI), 'month' is the full calendar month. Pagination runs on the worker query itself (single $facet aggregation for the page + total count together), and the materialized-Shift query is scoped to only that page's workers — so a larger roster does not make a single page's request more expensive. meta.total_shifts counts distinct shift occurrences in range for THIS PAGE's workers only (not roster-wide); meta.total/meta.totalPage are the roster-wide worker count/page count.\n\nRequired role: manager.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [
@@ -6609,13 +6450,100 @@ const paths = {
             },
         },
     },
+    '/shift/plan-roster': {
+        get: {
+            tags: ['Shifts'],
+            summary: 'Cleaning-plan roster, system-wide (day/week/month)',
+            operationId: 'getShiftPlanRoster',
+            description:
+                "Manager-only. The system-wide counterpart to GET /client/roster: every active cleaning plan (not scoped to one client), optionally narrowed by client, location, or a plan-title search. One row per matching plan, for the current page ONLY, each with every due date in the selected day/week/month window — the real, staffed Shift where one exists, otherwise an unstaffed placeholder (is_virtual: true, status 'unstaffed', no start_time/end_time/assigned_workers) for a due date nobody has scheduled yet. See PATCH /shift/{planId}/{date}/assign-workers to stage one. 'week' runs Sunday-Saturday, 'month' is the full calendar month. meta.total_shifts counts staffed + unstaffed shift entries in range for THIS PAGE's plans only; meta.total/meta.totalPage are the filtered plan count/page count.\n\nRequired role: manager.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'view',
+                    in: 'query',
+                    schema: { type: 'string', enum: ['day', 'week', 'month'], default: 'day' },
+                    description: "Defaults to 'day'.",
+                },
+                {
+                    name: 'date',
+                    in: 'query',
+                    schema: { type: 'string', format: 'date' },
+                    description:
+                        "Anchors 'day' (that exact date) and 'week' (the Sunday-Saturday week containing it). ISO date (YYYY-MM-DD). Defaults to today (UTC). Ignored for view=month (use year/month instead).",
+                },
+                {
+                    name: 'year',
+                    in: 'query',
+                    schema: { type: 'integer' },
+                    description: 'view=month only. Defaults to the current UTC year.',
+                },
+                {
+                    name: 'month',
+                    in: 'query',
+                    schema: { type: 'integer', minimum: 1, maximum: 12 },
+                    description: 'view=month only. Defaults to the current UTC month.',
+                },
+                {
+                    name: 'client',
+                    in: 'query',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                    description: 'Narrow to one client\'s plans.',
+                },
+                {
+                    name: 'location',
+                    in: 'query',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                    description: 'Narrow to one location\'s plans.',
+                },
+                {
+                    name: 'search',
+                    in: 'query',
+                    schema: { type: 'string' },
+                    description: 'Case-insensitive substring match against the plan title.',
+                },
+                {
+                    name: 'page',
+                    in: 'query',
+                    schema: { type: 'integer', minimum: 1, default: 1 },
+                    description: 'Plan page (1-based). Defaults to 1.',
+                },
+                {
+                    name: 'limit',
+                    in: 'query',
+                    schema: { type: 'integer', minimum: 1, maximum: 50, default: 10 },
+                    description: 'Plans per page. Defaults to 10, capped at 50.',
+                },
+            ],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Cleaning-plan roster for the given view/range and filters.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string', example: 'Cleaning plan roster retrieved successfully' },
+                                    data: { $ref: '#/components/schemas/PlanRoster' },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/shift/today-live-shift-meta': {
         get: {
             tags: ['Shifts'],
             summary: "Today's live shift metadata (system-wide)",
             operationId: 'getShiftTodayLiveShiftMeta',
             description:
-                "Manager-only, but NOT scoped to the calling manager — every manager sees the same system-wide numbers. Counters for today's shifts across all cleaning plans: today_total_shift, today_total_completed_shift, today_total_in_progress_shift, today_total_pending_shift (status 'upcoming'), and today_total_worker_late (distinct workers past their shift's scheduled start time who still haven't checked in). Also includes total_issue_report — NOT date-scoped, the current system-wide count of issue reports still open (status PENDING or IN_PROGRESS). Only counts already-materialized Shift documents — the nightly cron plus this system's same-day auto-materialization on plan create/update/assign means today's occurrences are expected to already exist by the time anyone looks at this.\n\nRequired role: manager.",
+                "Manager-only, but NOT scoped to the calling manager — every manager sees the same system-wide numbers. Counters for today's shifts across all cleaning plans: today_total_shift, today_total_completed_shift, today_total_in_progress_shift, today_total_pending_shift (status 'upcoming'), and today_total_worker_late (distinct workers past their shift's scheduled start time who still haven't checked in). Also includes total_issue_report — NOT date-scoped, the current system-wide count of issue reports still open (status PENDING or IN_PROGRESS). Only counts already-staffed Shift documents (see PATCH /shift/{planId}/{date}/assign-workers) — a due date nobody has staffed today does not contribute to any of these counters.\n\nRequired role: manager.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [],
@@ -6900,10 +6828,10 @@ const paths = {
         get: {
             ...{
                 tags: ['Shifts'],
-                summary: 'List a cleaning plan\'s shift occurrences in a date range',
+                summary: 'List a cleaning plan\'s due dates in a date range',
                 operationId: 'getShiftPlanId',
                 description:
-                    'Returns one entry per date the plan actually occurs on within [from, to] (dates it does not occur on are omitted, not returned empty). Each entry is either an already-materialized Shift or a virtual, unsaved preview (is_virtual: true) computed live from the plan\'s current rooms/tasks/assigned_workers. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: manager.',
+                    "Returns one entry per date the plan's tasks are actually due within [from, to] (dates with nothing due are omitted, not returned empty). Each entry is either an already-staffed Shift or an unstaffed placeholder (is_virtual: true, status: 'unstaffed', no date_time/end_time/assigned_workers) for a due date nobody has scheduled yet — see PATCH /shift/{planId}/{date}/assign-workers to stage it. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -6967,7 +6895,7 @@ const paths = {
                 summary: 'Get one shift occurrence',
                 operationId: 'getShiftPlanIdDate',
                 description:
-                    'date is an ISO date (YYYY-MM-DD). Returns the materialized Shift if one exists, otherwise a virtual preview (is_virtual: true) computed from the plan\'s current state. 404 if the plan has no occurrence on that date. A worker caller is only allowed to view a shift they are actually in assigned_workers for — 403 otherwise; a manager may view any shift.\n\nRequired role: manager or worker.',
+                    "date is an ISO date (YYYY-MM-DD). Returns the staffed Shift if one exists, otherwise an unstaffed placeholder (is_virtual: true, status: 'unstaffed') if the plan's tasks are due that date but nobody has been assigned yet. 404 if the plan has no occurrence on that date at all. A worker caller is only allowed to view a shift they are actually in assigned_workers for — 403 otherwise (an unstaffed placeholder always fails this, since nobody is assigned to it yet); a manager may view any shift.\n\nRequired role: manager or worker.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager', 'worker'],
                 parameters: [
@@ -7016,14 +6944,109 @@ const paths = {
             },
         },
     },
+    '/shift/{planId}/{date}/eligible-workers': {
+        get: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Worker picker for staffing a due date',
+                operationId: 'getShiftPlanIdDateEligibleWorkers',
+                description:
+                    "Manager-only. Preview list for the \"assign workers\" screen: every active, eligible worker (deleted/blocked/inactive accounts are omitted entirely, not flagged), each annotated with is_available (from the worker's own working_days vs this date's weekday — a worker with no working_days set at all is treated as available every day) and is_conflict (would staffing them for the given start_time/end_time double-book them against another already-staffed shift that day — reuses the exact same check PATCH .../assign-workers itself runs). Nothing is written and neither flag blocks anything here; it's purely informational so the UI can show availability/conflict before the manager commits. 400 if the plan has no occurrence on this date, or if end_time is not after start_time.\n\nRequired role: manager.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'date',
+                        in: 'path',
+                        required: true,
+                        description: 'ISO date (YYYY-MM-DD).',
+                        schema: { type: 'string', format: 'date' },
+                    },
+                    {
+                        name: 'start_time',
+                        in: 'query',
+                        required: true,
+                        schema: { type: 'string', format: 'date-time' },
+                        description: 'The candidate shift\'s start time, for the conflict check.',
+                    },
+                    {
+                        name: 'end_time',
+                        in: 'query',
+                        required: true,
+                        schema: { type: 'string', format: 'date-time' },
+                        description: 'Must be after start_time.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: {
+                                            type: 'boolean',
+                                            enum: [true],
+                                        },
+                                        message: { type: 'string' },
+                                        data: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    worker: {
+                                                        type: 'object',
+                                                    },
+                                                    is_available: {
+                                                        type: 'boolean',
+                                                        description:
+                                                            "From the worker's own working_days against this date's weekday. true when working_days is empty (not yet configured) — advisory, not a hard restriction.",
+                                                    },
+                                                    is_conflict: {
+                                                        type: 'boolean',
+                                                    },
+                                                    conflict_reason: {
+                                                        type: 'string',
+                                                        enum: ['double_booked'],
+                                                        nullable: true,
+                                                    },
+                                                    conflicting_plan_id: {
+                                                        $ref: '#/components/schemas/ObjectId',
+                                                        nullable: true,
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/shift/{planId}/{date}/assign-workers': {
         patch: {
             ...{
                 tags: ['Shifts'],
-                summary: 'Assign workers to one specific shift occurrence',
+                summary: 'Stage a due date: assign workers and set its schedule',
                 operationId: 'patchShiftPlanIdDateAssignWorkers',
                 description:
-                    'Materializes the shift for this date first if it does not exist yet, then replaces its assigned_workers, diverging it from the plan\'s default assignment (is_worker_overridden becomes true). Ineligible workers (deleted/blocked/inactive) are always rejected with 400. A scheduling conflict — against either another materialized shift or another plan\'s not-yet-materialized occurrence — is rejected with 409 unless force=true, in which case the conflicted entries are saved with assigned_with_conflict=true for audit purposes. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: manager.',
+                    "The single staffing action, and the only way a Shift document is ever created. A CleaningPlan carries no schedule or crew of its own — this is where a manager decides who works a due date and when. The first call for a given (planId, date) creates that day's Shift (rooms/tasks snapshotted from the plan's current state); later calls edit the crew and/or schedule of the same Shift. end_time must be after start_time. Ineligible workers (deleted/blocked/inactive) are always rejected with 400. A worker already double-booked on another staffed shift that day is rejected with 409 unless force=true, in which case the conflicted entry is saved with assigned_with_conflict=true for audit purposes. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -7076,9 +7099,21 @@ const paths = {
                                             required: ['worker', 'role'],
                                         },
                                     },
+                                    start_time: {
+                                        type: 'string',
+                                        format: 'date-time',
+                                        description:
+                                            "This occurrence's scheduled start.",
+                                    },
+                                    end_time: {
+                                        type: 'string',
+                                        format: 'date-time',
+                                        description:
+                                            'Must be after start_time.',
+                                    },
                                     force: { type: 'boolean' },
                                 },
-                                required: ['assigned_workers'],
+                                required: ['assigned_workers', 'start_time', 'end_time'],
                             },
                         },
                     },
@@ -7120,7 +7155,7 @@ const paths = {
                 summary: 'Update one shift occurrence\'s status',
                 operationId: 'patchShiftPlanIdDateStatus',
                 description:
-                    'Materializes the shift for this date first if it does not exist yet, then updates its status.\n\nRequired role: manager.',
+                    "The shift for this date must already be staffed (see PATCH /shift/{planId}/{date}/assign-workers) — 404 otherwise. No enforced transition rules: any status can be set to any other at any time.\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -7198,7 +7233,7 @@ const paths = {
                 summary: 'Upload a required photo for one shift task',
                 operationId: 'patchShiftPlanIdDateTasksTaskIdPhoto',
                 description:
-                    'Materializes the shift for this date first if it does not exist yet. title must match one of that task instance\'s photo_requirements titles (frozen at materialization time) or this returns 400. Only a worker assigned to this shift may upload. is_completed on the task entry is recomputed automatically once every required photo is uploaded. This endpoint only applies to tasks with is_photo_required: true — a task with no photo requirement is completed via PATCH /shift/{planId}/{date}/tasks/{taskId}/complete instead. Once every task on the shift has is_completed: true, the shift\'s own top-level status auto-advances to \'completed\'. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
+                    "The shift for this date must already be staffed (see PATCH /shift/{planId}/{date}/assign-workers) — 404 otherwise. title must match one of that task instance's photo_requirements titles (frozen at staffing time) or this returns 400. Only a worker assigned to this shift may upload. is_completed on the task entry is recomputed automatically once every required photo is uploaded. This endpoint only applies to tasks with is_photo_required: true — a task with no photo requirement is completed via PATCH /shift/{planId}/{date}/tasks/{taskId}/complete instead. Once every task on the shift has is_completed: true, the shift's own top-level status auto-advances to 'completed'. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['worker'],
                 parameters: [
@@ -7284,7 +7319,7 @@ const paths = {
             summary: 'Mark a no-photo shift task as complete',
             operationId: 'patchShiftPlanIdDateTasksTaskIdComplete',
             description:
-                "Materializes the shift for this date first if it does not exist yet. For tasks with is_photo_required: false only — those are no longer auto-completed on shift creation, so the assigned worker must explicitly mark them done here. Returns 400 if the task actually requires a photo (use PATCH /shift/{planId}/{date}/tasks/{taskId}/photo instead) or is already completed. Only a worker assigned to this shift may call this. Once every task on the shift has is_completed: true, the shift's own top-level status auto-advances to 'completed'. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.",
+                "The shift for this date must already be staffed (see PATCH /shift/{planId}/{date}/assign-workers) — 404 otherwise. For tasks with is_photo_required: false only — those are not auto-completed, so the assigned worker must explicitly mark them done here. Returns 400 if the task actually requires a photo (use PATCH /shift/{planId}/{date}/tasks/{taskId}/photo instead) or is already completed. Only a worker assigned to this shift may call this. Once every task on the shift has is_completed: true, the shift's own top-level status auto-advances to 'completed'. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['worker'],
             parameters: [
@@ -7339,7 +7374,7 @@ const paths = {
                 summary: 'Check in to a shift',
                 operationId: 'patchShiftPlanIdDateCheckIn',
                 description:
-                    'Does NOT materialize a virtual shift — only an already-materialized shift (created by the daily cron or an earlier edit) can be checked into; 404 otherwise. No time-window restriction: valid any time on the shift\'s date. The submitted coordinates must be within 50 meters of the shift\'s frozen location snapshot (Haversine distance) or this returns 400; a location with no configured GPS point always fails closed. Only a worker assigned to this shift may check in, and only once. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.',
+                    "The shift for this date must already be staffed by a manager (see PATCH /shift/{planId}/{date}/assign-workers) — 404 otherwise; a worker is never assigned to a shift that doesn't already exist. No time-window restriction: valid any time on the shift's date. The submitted coordinates must be within 50 meters of the shift's frozen location snapshot (Haversine distance) or this returns 400; a location with no configured GPS point always fails closed. Only a worker assigned to this shift may check in, and only once. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['worker'],
                 parameters: [
