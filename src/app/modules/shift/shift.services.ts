@@ -142,6 +142,8 @@ const computeSyncedShiftTasks = async (
 
         let photoRequirements: {
             title: string;
+            description?: string | null;
+            reference_image_url?: string | null;
             photo_url: string | null;
             is_uploaded: boolean;
         }[];
@@ -152,14 +154,26 @@ const computeSyncedShiftTasks = async (
             // Brand-new task, or a task just switched to photo-required: fresh random pick.
             photoRequirements = pickRandom(pool, targetCount).map((pr) => ({
                 title: pr.title,
+                description: pr.description ?? null,
+                reference_image_url: pr.reference_image_url ?? null,
                 photo_url: null,
                 is_uploaded: false,
             }));
         } else {
-            const poolTitles = new Set(pool.map((pr) => pr.title));
-            let kept = existing.photo_requirements.filter((p) =>
-                poolTitles.has(p.title)
-            );
+            const poolByTitle = new Map(pool.map((pr) => [pr.title, pr]));
+            // Refreshes description/reference_image_url from the current
+            // template on every sync (pure guidance, not upload state) while
+            // preserving this occurrence's own photo_url/is_uploaded.
+            let kept = existing.photo_requirements
+                .filter((p) => poolByTitle.has(p.title))
+                .map((p) => {
+                    const current = poolByTitle.get(p.title)!;
+                    return {
+                        ...p,
+                        description: current.description ?? null,
+                        reference_image_url: current.reference_image_url ?? null,
+                    };
+                });
 
             if (kept.length > targetCount) {
                 const uploaded = kept.filter((p) => p.is_uploaded);
@@ -181,6 +195,8 @@ const computeSyncedShiftTasks = async (
                     targetCount - kept.length
                 ).map((pr) => ({
                     title: pr.title,
+                    description: pr.description ?? null,
+                    reference_image_url: pr.reference_image_url ?? null,
                     photo_url: null,
                     is_uploaded: false,
                 }));

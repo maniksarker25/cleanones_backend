@@ -134,6 +134,22 @@ This endpoint's shape is unchanged, but a bug is fixed: previously an unstaffed 
 
 **If your UI was checking `workerId === ''` or `workerName === 'Unassigned Specialist'` to detect an unstaffed row, switch to checking `isStaffed === false` instead** — it's now explicit and reliable.
 
+### 3.9 Task (and Shift task) `photo_requirements` — two new optional fields
+
+`POST /task/create-task`, `PATCH /task/update-task/{id}`, and every response that includes a task's `photo_requirements` (Task itself, Cleaning Plan's `rooms[].tasks[]`, and every Shift's `tasks[].photo_requirements`):
+
+```jsonc
+{
+  "title": "Before cleaning",
+  "description": "Take from directly above the sink",   // NEW, optional
+  "reference_image_url": "https://.../example.jpg"      // NEW, optional
+}
+```
+
+Both are optional (`null` if not set) — reserved for a future AI-assisted photo-verification feature. Purely additive: existing `photo_requirements` payloads with just `title` keep working unchanged. If you build a photo-requirement editor, you can add optional "description" and "reference image" inputs; if you show the checklist to a worker, you can display the description/reference image alongside the title when present.
+
+**Same two fields also added to Additional Task's `photo_requirements`** (`POST /additional-task/create-additional-task`, `PATCH /additional-task/update-additional-task/{id}`, `PATCH /additional-task/approve-additional-task/{id}`, and every response including one) — identical shape, identical optionality.
+
 ---
 
 ## 4. New endpoints

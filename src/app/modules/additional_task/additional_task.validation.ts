@@ -20,6 +20,8 @@ export const additionalTaskListQuerySchema = z.object({
 
 const photoRequirementSchema = z.object({
     title: z.string().min(1, 'Photo title is required').trim(),
+    description: z.string().trim().optional(),
+    reference_image_url: z.string().trim().optional(),
     photo_url: z.string().nullable().optional(),
     is_uploaded: z.boolean().optional(),
 });

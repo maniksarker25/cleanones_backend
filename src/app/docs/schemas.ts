@@ -528,18 +528,21 @@ const schemas = {
                             example: 'Before cleaning',
                             description: 'Photo label defined by the admin.',
                         },
-                        photo_url: {
+                        description: {
                             type: 'string',
-                            nullable: true,
+                            description:
+                                'Optional guidance shown to the worker alongside the title. Reserved for future AI-assisted photo verification.',
                         },
-                        is_uploaded: {
-                            type: 'boolean',
+                        reference_image_url: {
+                            type: 'string',
+                            description:
+                                'Optional example/reference photo URL. Reserved for future AI-assisted photo verification.',
                         },
                     },
                     required: ['title'],
                 },
                 description:
-                    'Pool of possible photo titles. required_photo_count of these are picked at random per shift occurrence.',
+                    'Pool of possible photo requirements. required_photo_count of these are picked at random per shift occurrence. This is a template only — photo_url/is_uploaded (upload state) live on the Shift\'s own task-instance snapshot instead, never here.',
             },
             required_photo_count: {
                 type: 'integer',
@@ -602,18 +605,21 @@ const schemas = {
                             example: 'Before cleaning',
                             description: 'Photo label defined by the admin.',
                         },
-                        photo_url: {
+                        description: {
                             type: 'string',
-                            nullable: true,
+                            description:
+                                'Optional guidance shown to the worker alongside the title. Reserved for future AI-assisted photo verification.',
                         },
-                        is_uploaded: {
-                            type: 'boolean',
+                        reference_image_url: {
+                            type: 'string',
+                            description:
+                                'Optional example/reference photo URL. Reserved for future AI-assisted photo verification.',
                         },
                     },
                     required: ['title'],
                 },
                 description:
-                    'Pool of possible photo titles. required_photo_count of these are picked at random per shift occurrence.',
+                    'Pool of possible photo requirements. required_photo_count of these are picked at random per shift occurrence. This is a template only — photo_url/is_uploaded (upload state) live on the Shift\'s own task-instance snapshot instead, never here.',
             },
             required_photo_count: {
                 type: 'integer',
@@ -960,6 +966,16 @@ const schemas = {
                             minLength: 1,
                             example: 'Before cleaning',
                         },
+                        description: {
+                            type: 'string',
+                            description:
+                                'Optional guidance shown to the worker alongside the title. Reserved for future AI-assisted photo verification.',
+                        },
+                        reference_image_url: {
+                            type: 'string',
+                            description:
+                                'Optional example/reference photo URL. Reserved for future AI-assisted photo verification.',
+                        },
                         photo_url: {
                             type: 'string',
                             nullable: true,
@@ -1013,6 +1029,16 @@ const schemas = {
                             type: 'string',
                             minLength: 1,
                             example: 'Before cleaning',
+                        },
+                        description: {
+                            type: 'string',
+                            description:
+                                'Optional guidance shown to the worker alongside the title. Reserved for future AI-assisted photo verification.',
+                        },
+                        reference_image_url: {
+                            type: 'string',
+                            description:
+                                'Optional example/reference photo URL. Reserved for future AI-assisted photo verification.',
                         },
                         photo_url: {
                             type: 'string',
@@ -1361,17 +1387,22 @@ const schemas = {
                             example: 'Before cleaning',
                             description: 'Photo label defined by the admin.',
                         },
-                        photo_url: {
+                        description: {
                             type: 'string',
                             nullable: true,
+                            description:
+                                'Optional guidance shown to the worker alongside the title. Reserved for future AI-assisted photo verification.',
                         },
-                        is_uploaded: {
-                            type: 'boolean',
+                        reference_image_url: {
+                            type: 'string',
+                            nullable: true,
+                            description:
+                                'Optional example/reference photo URL. Reserved for future AI-assisted photo verification.',
                         },
                     },
                 },
                 description:
-                    'Pool of possible photo titles. required_photo_count of these are picked at random per shift occurrence.',
+                    'Pool of possible photo requirements. required_photo_count of these are picked at random per shift occurrence. Template only — photo_url/is_uploaded (upload state) live on the Shift\'s own task-instance snapshot instead, never here.',
             },
             required_photo_count: {
                 type: 'integer',
@@ -1854,6 +1885,18 @@ const schemas = {
                             type: 'string',
                             minLength: 1,
                             example: 'Before cleaning',
+                        },
+                        description: {
+                            type: 'string',
+                            nullable: true,
+                            description:
+                                'Optional guidance shown to the worker alongside the title. Reserved for future AI-assisted photo verification.',
+                        },
+                        reference_image_url: {
+                            type: 'string',
+                            nullable: true,
+                            description:
+                                'Optional example/reference photo URL. Reserved for future AI-assisted photo verification.',
                         },
                         photo_url: {
                             type: 'string',
@@ -2512,12 +2555,24 @@ const schemas = {
                                 type: 'object',
                                 properties: {
                                     title: { type: 'string' },
+                                    description: {
+                                        type: 'string',
+                                        nullable: true,
+                                        description:
+                                            'Copied from the source Task\'s photo requirement at selection time. Reserved for future AI-assisted photo verification.',
+                                    },
+                                    reference_image_url: {
+                                        type: 'string',
+                                        nullable: true,
+                                        description:
+                                            'Copied from the source Task\'s photo requirement at selection time. Reserved for future AI-assisted photo verification.',
+                                    },
                                     photo_url: { type: 'string', nullable: true },
                                     is_uploaded: { type: 'boolean' },
                                 },
                             },
                             description:
-                                "Titles are a frozen snapshot of the source Task's (or AdditionalTask's) template; photo_url/is_uploaded always start unset for this occurrence, independent of any other day's shift.",
+                                "Titles (and description/reference_image_url) are a frozen snapshot of the source Task's (or AdditionalTask's) template; photo_url/is_uploaded always start unset for this occurrence, independent of any other day's shift.",
                         },
                         is_completed: {
                             type: 'boolean',
@@ -3526,6 +3581,8 @@ const schemas = {
                                 type: 'object',
                                 properties: {
                                     title: { type: 'string' },
+                                    description: { type: 'string', nullable: true },
+                                    reference_image_url: { type: 'string', nullable: true },
                                     photo_url: { type: 'string', nullable: true },
                                     is_uploaded: { type: 'boolean' },
                                 },
