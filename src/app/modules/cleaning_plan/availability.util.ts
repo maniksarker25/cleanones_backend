@@ -1,7 +1,5 @@
 import { TTask, TTaskFrequency, WEEKDAYS } from '../task/task.interface';
 
-const MAX_PROJECTION_HORIZON_DAYS = 90;
-
 const WEEKDAY_INDEX_TO_CODE: Record<number, (typeof WEEKDAYS)[number]> = {
     0: 'sun',
     1: 'mon',
@@ -75,52 +73,6 @@ export const occursOnDate = (
     }
 };
 
-/**
- * Whether the two patterns' active date ranges (anchor_date..end_date, end_date
- * = indefinite when absent) overlap at all. A prerequisite for every fast-path
- * decision below — two "every Monday" patterns that are months apart with no
- * date-range overlap must never be reported as conflicting just because they
- * share a weekday label.
- */
-const dateRangesOverlap = (a: RecurrencePattern, b: RecurrencePattern): boolean => {
-    const laterStart = a.anchor_date > b.anchor_date ? a.anchor_date : b.anchor_date;
-    const ends = [a.end_date, b.end_date].filter((d): d is Date => !!d);
-    if (ends.length === 0) return true; // both indefinite: always overlap from laterStart onward
-    const earlierEnd = ends.reduce((min, d) => (d < min ? d : min));
-    return laterStart <= earlierEnd;
-};
-
-/**
- * Fast path: when both patterns share the same frequency type (and their date
- * ranges overlap), conflict can be decided by intersecting their day sets
- * directly, without projecting real calendar dates. This is a deliberate
- * approximation for very short overlap windows (e.g. a 2-day overlap that
- * happens not to contain either pattern's weekday) — acceptable here since
- * this feeds a human-reviewed warning (with a `force` override), not a hard
- * constraint, and erring toward over-flagging is the safer default.
- */
-const sameTypeFastOverlap = (
-    a: RecurrencePattern,
-    b: RecurrencePattern
-): boolean | null => {
-    if (!dateRangesOverlap(a, b)) return false;
-
-    if (a.frequency_type === 'daily' || b.frequency_type === 'daily') {
-        return true;
-    }
-    if (a.frequency_type !== b.frequency_type) return null;
-
-    if (a.frequency_type === 'weekly') {
-        const setA = new Set(a.days_of_week ?? []);
-        return (b.days_of_week ?? []).some((d) => setA.has(d));
-    }
-    if (a.frequency_type === 'monthly') {
-        const setA = new Set(a.days_of_month ?? []);
-        return (b.days_of_month ?? []).some((d) => setA.has(d));
-    }
-    return null;
-};
-
 export interface RecurrencePattern {
     frequency_type: TTaskFrequency | 'once';
     anchor_date: Date;
@@ -128,35 +80,6 @@ export interface RecurrencePattern {
     days_of_month?: number[] | null;
     end_date?: Date | null;
 }
-
-/**
- * Whether two recurring/one-off patterns ever land on the same calendar date,
- * bounded by MAX_PROJECTION_HORIZON_DAYS when a real date projection is required
- * (i.e. mismatched frequency types such as weekly vs monthly).
- */
-export const patternsShareADate = (a: RecurrencePattern, b: RecurrencePattern): boolean => {
-    const fast = sameTypeFastOverlap(a, b);
-    if (fast !== null) return fast;
-
-    const rangeStart = new Date(
-        Math.max(a.anchor_date.getTime(), b.anchor_date.getTime())
-    );
-    const rangeEndCap = new Date(rangeStart);
-    rangeEndCap.setUTCDate(rangeEndCap.getUTCDate() + MAX_PROJECTION_HORIZON_DAYS);
-
-    const rangeEnd = [a.end_date, b.end_date, rangeEndCap]
-        .filter((d): d is Date => !!d)
-        .reduce((min, d) => (d < min ? d : min), rangeEndCap);
-
-    for (
-        let cursor = new Date(rangeStart);
-        cursor <= rangeEnd;
-        cursor.setUTCDate(cursor.getUTCDate() + 1)
-    ) {
-        if (occursOnDate(cursor, a) && occursOnDate(cursor, b)) return true;
-    }
-    return false;
-};
 
 export const timeWindowsOverlap = (
     startA: Date,

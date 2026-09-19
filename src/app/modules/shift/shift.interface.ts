@@ -6,6 +6,22 @@ export type ShiftStatus =
     | 'completed'
     | 'cancelled';
 
+// A worker staffed onto one specific Shift occurrence — set by a manager at
+// staffing time (PATCH /shift/:planId/:date/assign-workers), never on the
+// CleaningPlan itself (which carries no crew — see cleaning_plan.interface.ts).
+export interface IAssignedWorker {
+    worker: Types.ObjectId;
+    role: 'Team leader' | 'Co-leader' | 'Normal worker';
+    assigned_with_conflict?: boolean;
+}
+
+export type ConflictReason = 'double_booked';
+
+export interface IWorkerConflict {
+    conflicting_plan_id: Types.ObjectId;
+    reason: ConflictReason;
+}
+
 export interface IShiftPhotoRequirement {
     title: string;
     photo_url: string | null;
@@ -84,16 +100,18 @@ export interface IShift {
     cleaning_plan: Types.ObjectId;
     // Calendar day only (normalized to UTC midnight) — identifies the occurrence.
     date: Date;
-    // Actual start timestamp for this occurrence (date + plan's time-of-day).
+    // Scheduled start, set by the manager at staffing time (see
+    // assignWorkersToShift) — a Shift only ever exists once staffed, so this
+    // is always a real value, never inherited from the plan (which carries
+    // no schedule of its own).
     date_time: Date;
+    // Scheduled end, set alongside date_time at staffing time.
+    end_time: Date;
     location: IShiftLocation;
     rooms: IShiftRoom[];
     tasks: IShiftTask[];
     duration_minutes: number;
     assigned_workers: IShiftAssignedWorker[];
-    // true once a manager has edited this shift's workers directly, diverging
-    // it from the plan's default assignment.
-    is_worker_overridden: boolean;
     status: ShiftStatus;
     last_updated_by?: Types.ObjectId | null;
     createdAt: Date;

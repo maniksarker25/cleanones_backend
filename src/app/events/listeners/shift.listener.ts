@@ -25,6 +25,81 @@ const notifyAllManagers = async (
     );
 };
 
+// A worker was newly staffed onto a shift occurrence.
+onAppEvent('shift.worker_assigned', async (payload) => {
+    await Promise.all(
+        payload.addedWorkerIds.map((workerId) =>
+            NotificationService.sendNotification({
+                receiver: workerId,
+                title: 'New shift assignment',
+                message: `You've been scheduled for a shift on "${payload.title}".`,
+                type: ENUM_NOTIFICATION_TYPE.SHIFT_WORKER_ASSIGNED,
+                entity: NOTIFICATION_ENTITY.SHIFT,
+                action: NOTIFICATION_ACTION.VIEW,
+                entityId: payload.shiftId,
+                meta: { planId: payload.planId, start_date: payload.start_date },
+            }).catch((err) =>
+                errorLogger.error('shift.worker_assigned notification failed', err)
+            )
+        )
+    );
+});
+
+// A worker was taken off a shift occurrence.
+onAppEvent('shift.worker_removed', async (payload) => {
+    await Promise.all(
+        payload.removedWorkerIds.map((workerId) =>
+            NotificationService.sendNotification({
+                receiver: workerId,
+                title: 'Removed from shift',
+                message: `You've been removed from a shift on "${payload.title}".`,
+                type: ENUM_NOTIFICATION_TYPE.SHIFT_WORKER_REMOVED,
+                entity: NOTIFICATION_ENTITY.SHIFT,
+                action: NOTIFICATION_ACTION.VIEW,
+                entityId: payload.shiftId,
+                meta: { planId: payload.planId },
+            }).catch((err) =>
+                errorLogger.error('shift.worker_removed notification failed', err)
+            )
+        )
+    );
+});
+
+// A future, already-staffed shift was cancelled by a task/room recurrence
+// edit that took its date out of the plan's pattern (see
+// reconcileFutureShiftsForTaskChange in shift.services.ts). Both the crew
+// that was scheduled and the client need to know their date fell through.
+onAppEvent('shift.cancelled', async (payload) => {
+    await Promise.all([
+        ...payload.cancelledWorkerIds.map((workerId) =>
+            NotificationService.sendNotification({
+                receiver: workerId,
+                title: 'Shift cancelled',
+                message: `Your shift on "${payload.title}" was cancelled — the schedule for this plan changed.`,
+                type: ENUM_NOTIFICATION_TYPE.SHIFT_CANCELLED,
+                entity: NOTIFICATION_ENTITY.SHIFT,
+                action: NOTIFICATION_ACTION.VIEW,
+                entityId: payload.shiftId,
+                meta: { planId: payload.planId, date: payload.date },
+            }).catch((err) =>
+                errorLogger.error('shift.cancelled notification failed (worker)', err)
+            )
+        ),
+        NotificationService.sendNotification({
+            receiver: payload.clientId,
+            title: 'A scheduled shift was cancelled',
+            message: `A shift on "${payload.title}" was cancelled because its schedule changed.`,
+            type: ENUM_NOTIFICATION_TYPE.SHIFT_CANCELLED,
+            entity: NOTIFICATION_ENTITY.SHIFT,
+            action: NOTIFICATION_ACTION.VIEW,
+            entityId: payload.shiftId,
+            meta: { planId: payload.planId, date: payload.date },
+        }).catch((err) =>
+            errorLogger.error('shift.cancelled notification failed (client)', err)
+        ),
+    ]);
+});
+
 onAppEvent('shift.checked_in', async (payload) => {
     await notifyAllManagers((managerId) => ({
         receiver: managerId,

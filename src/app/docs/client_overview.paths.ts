@@ -314,7 +314,7 @@ const clientOverviewPaths = {
             summary: 'Cleaning-plan-based shift roster',
             operationId: 'getClientPlanRoster',
             description:
-                "Client-only. A day/week/month schedule grouped by CLEANING PLAN (not by worker): a page of the authenticated client's cleaning plans, each with every shift falling in the selected window. Merges already-materialized Shift documents with not-yet-materialized virtual occurrences projected from the plan's recurring tasks — the same source of truth used by /client/schedule-roster and the manager-facing /shift/roster (which is the by-worker equivalent of this endpoint). A virtual entry has shift_id: null, status 'upcoming', and 0 completed rooms/tasks since nothing has happened yet.\n\nRequired role: client.",
+                "Client-only. A day/week/month schedule grouped by CLEANING PLAN (not by worker): a page of the authenticated client's cleaning plans, each with every due date falling in the selected window. A Cleaning Plan carries no schedule or crew of its own — a due date shows the real, staffed Shift once a manager assigns it (see PATCH /shift/{planId}/{date}/assign-workers), otherwise an unstaffed placeholder (is_virtual: true, status 'unstaffed', shift_id: null, no start_time/end_time/assigned_workers, 0 completed rooms/tasks). The manager-facing /shift/roster is the by-worker equivalent, showing staffed shifts only.\n\nRequired role: client.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['client'],
             parameters: [
@@ -372,127 +372,7 @@ const clientOverviewPaths = {
                                 properties: {
                                     success: { type: 'boolean', enum: [true] },
                                     message: { type: 'string' },
-                                    data: {
-                                        type: 'object',
-                                        properties: {
-                                            view: {
-                                                type: 'string',
-                                                enum: ['day', 'week', 'month'],
-                                            },
-                                            start_date: {
-                                                type: 'string',
-                                                format: 'date-time',
-                                                description: 'Inclusive UTC start of the window.',
-                                            },
-                                            end_date: {
-                                                type: 'string',
-                                                format: 'date-time',
-                                                description: 'Exclusive UTC end of the window.',
-                                            },
-                                            meta: {
-                                                type: 'object',
-                                                properties: {
-                                                    page: { type: 'integer' },
-                                                    limit: { type: 'integer' },
-                                                    total: {
-                                                        type: 'integer',
-                                                        description: 'Total cleaning plans matching the client, across all pages.',
-                                                    },
-                                                    totalPage: { type: 'integer' },
-                                                    total_shifts: {
-                                                        type: 'integer',
-                                                        description: 'Total shift entries across every plan on this page.',
-                                                    },
-                                                },
-                                            },
-                                            cleaning_plans: {
-                                                type: 'array',
-                                                items: {
-                                                    type: 'object',
-                                                    properties: {
-                                                        plan_id: { type: 'string' },
-                                                        plan_title: { type: 'string' },
-                                                        location_name: { type: 'string' },
-                                                        total_shifts_in_range: { type: 'integer' },
-                                                        total_hours_in_range: { type: 'number' },
-                                                        shifts: {
-                                                            type: 'array',
-                                                            items: {
-                                                                type: 'object',
-                                                                properties: {
-                                                                    date: {
-                                                                        type: 'string',
-                                                                        format: 'date',
-                                                                        description: 'e.g. 2026-09-15',
-                                                                    },
-                                                                    shift_id: {
-                                                                        type: 'string',
-                                                                        nullable: true,
-                                                                        description: 'null when is_virtual is true.',
-                                                                    },
-                                                                    is_virtual: {
-                                                                        type: 'boolean',
-                                                                        description: 'true = projected from the plan, not yet materialized in the database.',
-                                                                    },
-                                                                    status: {
-                                                                        type: 'string',
-                                                                        enum: [
-                                                                            'upcoming',
-                                                                            'in_progress',
-                                                                            'completed',
-                                                                            'cancelled',
-                                                                        ],
-                                                                    },
-                                                                    start_time: {
-                                                                        type: 'string',
-                                                                        format: 'date-time',
-                                                                    },
-                                                                    end_time: {
-                                                                        type: 'string',
-                                                                        format: 'date-time',
-                                                                    },
-                                                                    duration_minutes: { type: 'integer' },
-                                                                    rooms: {
-                                                                        type: 'object',
-                                                                        properties: {
-                                                                            total: { type: 'integer' },
-                                                                            completed: { type: 'integer' },
-                                                                        },
-                                                                    },
-                                                                    tasks: {
-                                                                        type: 'object',
-                                                                        properties: {
-                                                                            total: { type: 'integer' },
-                                                                            completed: { type: 'integer' },
-                                                                        },
-                                                                    },
-                                                                    assigned_workers: {
-                                                                        type: 'array',
-                                                                        items: {
-                                                                            type: 'object',
-                                                                            properties: {
-                                                                                worker_id: { type: 'string' },
-                                                                                name: { type: 'string' },
-                                                                                role: {
-                                                                                    type: 'string',
-                                                                                    enum: [
-                                                                                        'Team leader',
-                                                                                        'Co-leader',
-                                                                                        'Normal worker',
-                                                                                    ],
-                                                                                },
-                                                                            },
-                                                                        },
-                                                                    },
-                                                                },
-                                                            },
-                                                        },
-                                                    },
-                                                },
-                                            },
-                                        },
-                                        required: ['view', 'start_date', 'end_date', 'meta', 'cleaning_plans'],
-                                    },
+                                    data: { $ref: '#/components/schemas/PlanRoster' },
                                 },
                                 required: ['success', 'message'],
                             },

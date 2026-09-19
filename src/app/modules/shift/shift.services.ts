@@ -4,26 +4,30 @@ import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
 import {
     anyPatternOccursOnDate,
-    combineDateWithTimeOfDay,
     normalizeToUTCDateOnly,
+    RecurrencePattern,
     taskToPattern,
 } from '../cleaning_plan/availability.util';
-import { IAssignedWorker } from '../cleaning_plan/cleaning_plan.interface';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
 import { Room } from '../room/room.model';
 import { Task } from '../task/task.model';
-import { assertWorkersEligible } from '../worker/worker.eligibility.util';
+import { TTaskFrequency } from '../task/task.interface';
+import {
+    activeWorkerFilter,
+    assertWorkersEligible,
+    filterEligibleWorkers,
+} from '../worker/worker.eligibility.util';
 import { WorkerType } from '../worker/worker.constant';
 import { Worker } from '../worker/worker.model';
 import { IssueReport } from '../issue_report/issue_report.model';
+import chatServices from '../chat/chat.services';
 import { haversineDistanceMeters } from './geo.util';
 import { findWorkerConflictOnDate } from './shift.availability.services';
-import { IShift } from './shift.interface';
+import { ConflictReason, IAssignedWorker, IShift } from './shift.interface';
 import { Shift } from './shift.model';
 import {
-    buildAdditionalTaskEntriesByDay,
     buildAdditionalTaskEntriesForDay,
     buildShiftSnapshot,
     pickRandom,
@@ -39,6 +43,19 @@ const isDuplicateKeyError = (error: unknown): boolean =>
     'code' in error &&
     (error as { code: number }).code === MONGO_DUPLICATE_KEY_ERROR;
 
+/**
+ * `end_time` is a required field going forward (set by the manager at
+ * staffing time — see assignWorkersToShift), but Shift documents
+ * materialized before it existed on the schema have none stored. Falls back
+ * to date_time + duration_minutes for those so every response still carries
+ * a real end_time instead of silently omitting the field.
+ */
+const resolveShiftEndTime = (shift: {
+    date_time: Date;
+    end_time?: Date | null;
+    duration_minutes: number;
+}): Date => shift.end_time ?? new Date(shift.date_time.getTime() + shift.duration_minutes * 60_000);
+
 const ensureActivePlan = async (planId: string | Types.ObjectId) => {
     const plan = await CleaningPlan.findById(planId);
     if (!plan)
@@ -46,157 +63,25 @@ const ensureActivePlan = async (planId: string | Types.ObjectId) => {
     return plan;
 };
 
-/** Builds an unsaved (`is_virtual: true`) shift shape from the plan's current live state. */
-const buildVirtualShift = async (
-    plan: {
-        _id: Types.ObjectId;
-        location: Types.ObjectId;
-        rooms: Types.ObjectId[];
-        assigned_workers: IAssignedWorker[];
-        date_time: Date;
-        end_date?: Date | null;
-    },
-    day: Date
-) => {
-    const snapshot = await buildShiftSnapshot(plan);
-    if (!anyPatternOccursOnDate(snapshot.patterns, day)) return null;
-
-    const additional = await buildAdditionalTaskEntriesForDay(plan._id, day);
-
-    return {
-        cleaning_plan: plan._id,
-        date: day,
-        date_time: combineDateWithTimeOfDay(day, plan.date_time),
-        location: snapshot.location,
-        rooms: snapshot.rooms,
-        tasks: [...snapshot.tasks, ...additional.tasks],
-        duration_minutes: snapshot.durationMinutes + additional.durationMinutes,
-        assigned_workers: snapshot.assignedWorkers,
-        is_worker_overridden: false,
-        status: 'upcoming' as const,
-        is_virtual: true,
-    };
-};
-
 /**
- * The single write path for materializing a Shift. Called from both the
- * manual worker-reassignment/photo-upload flows and the daily cron job, so
- * exactly one code path ever creates a Shift document — behavior can't drift
- * between them.
- *
- * Idempotent under concurrency via the { cleaning_plan, date } unique index:
- * if two callers race to create the same occurrence, the loser's insert
- * fails with a duplicate-key error, which it recovers from by re-fetching
- * the winner's document instead of erroring out.
+ * Loads an already-staffed Shift or throws 404. A Shift only ever exists
+ * once a manager has staffed it (see assignWorkersToShift) — there is no
+ * more auto-materialization from a plan default, since a CleaningPlan
+ * carries no schedule/crew of its own to materialize from.
  */
-export const getOrCreateShift = async (
+const getShiftOrThrow = async (
     planId: string | Types.ObjectId,
     date: Date
 ): Promise<IShift & { _id: Types.ObjectId }> => {
     const day = normalizeToUTCDateOnly(date);
-
-    const existing = await Shift.findOne({ cleaning_plan: planId, date: day });
-    if (existing) return existing;
-
-    const plan = await ensureActivePlan(planId);
-    if (!plan.is_active) {
+    const shift = await Shift.findOne({ cleaning_plan: planId, date: day });
+    if (!shift) {
         throw new AppError(
-            httpStatus.BAD_REQUEST,
-            'Cannot create a shift for an inactive cleaning plan'
+            httpStatus.NOT_FOUND,
+            'No shift has been scheduled for this date yet'
         );
     }
-
-    const snapshot = await buildShiftSnapshot(plan);
-    if (!anyPatternOccursOnDate(snapshot.patterns, day)) {
-        throw new AppError(
-            httpStatus.BAD_REQUEST,
-            'This cleaning plan has no occurrence on the given date'
-        );
-    }
-
-    const additional = await buildAdditionalTaskEntriesForDay(plan._id, day);
-
-    try {
-        return await Shift.create({
-            cleaning_plan: plan._id,
-            date: day,
-            date_time: combineDateWithTimeOfDay(day, plan.date_time),
-            location: snapshot.location,
-            rooms: snapshot.rooms,
-            tasks: [...snapshot.tasks, ...additional.tasks],
-            duration_minutes: snapshot.durationMinutes + additional.durationMinutes,
-            assigned_workers: snapshot.assignedWorkers,
-            is_worker_overridden: false,
-            status: 'upcoming',
-        });
-    } catch (error) {
-        if (isDuplicateKeyError(error)) {
-            // Lost the race to a concurrent creator (another request or the
-            // cron job) — their document is authoritative, use it.
-            const winner = await Shift.findOne({ cleaning_plan: planId, date: day });
-            if (winner) return winner;
-        }
-        throw error;
-    }
-};
-
-/**
- * If today's shift is already materialized, keeps its assigned_workers in
- * sync with the plan's current roster. getOrCreateShift alone can't do this:
- * it only ever creates a shift on first materialization and is a no-op
- * afterward, so a plan-level assignment change made after today's shift
- * already exists would otherwise leave that shift permanently pointing at
- * whoever was assigned at materialization time — invisible to the worker's
- * own shift list/check-in, since both key off the shift's own snapshot, not
- * the live plan.
- *
- * Skipped when a manager has manually overridden this specific day via
- * PATCH /shift/:planId/:date/assign-workers (`is_worker_overridden`) — that
- * per-day override is deliberately more specific than the plan's default
- * roster and must not be clobbered by a plan-level edit.
- *
- * Preserves each remaining worker's check-in/check-out timestamps so this
- * can never erase in-progress attendance — it only adds/removes roster
- * entries and refreshes name/role snapshots.
- */
-export const resyncTodayShiftWorkersIfDue = async (
-    planId: Types.ObjectId | string,
-    assignedWorkers: IAssignedWorker[]
-) => {
-    const today = normalizeToUTCDateOnly(new Date());
-    const shift = await Shift.findOne({ cleaning_plan: planId, date: today });
-    if (!shift || shift.is_worker_overridden) return null;
-
-    const previousByWorker = new Map(
-        shift.assigned_workers.map((aw) => [aw.worker.toString(), aw])
-    );
-
-    const workerDocs = await Worker.find({
-        _id: { $in: assignedWorkers.map((aw) => aw.worker) },
-    })
-        .select('name')
-        .lean();
-    const nameById = new Map(workerDocs.map((w) => [w._id.toString(), w.name]));
-
-    const nextAssignedWorkers = assignedWorkers.map((aw) => {
-        const previous = previousByWorker.get(aw.worker.toString());
-        return {
-            worker: aw.worker,
-            name: nameById.get(aw.worker.toString()) ?? '',
-            role: aw.role,
-            assigned_with_conflict: aw.assigned_with_conflict ?? false,
-            check_in_at: previous?.check_in_at ?? null,
-            check_in_coordinates: previous?.check_in_coordinates ?? null,
-            check_out_at: previous?.check_out_at ?? null,
-            check_out_coordinates: previous?.check_out_coordinates ?? null,
-        };
-    });
-
-    return Shift.findByIdAndUpdate(
-        shift._id,
-        { assigned_workers: nextAssignedWorkers },
-        { new: true, runValidators: true }
-    );
+    return shift;
 };
 
 /**
@@ -460,6 +345,201 @@ export const resyncTodayShiftRoomsIfDue = async (
     return null;
 };
 
+export interface AffectedFutureShift {
+    shift_id: string;
+    plan_id: string;
+    plan_title: string;
+    date: Date;
+    assigned_worker_ids: string[];
+}
+
+/** The task's would-be recurrence fields after a pending edit; null means the
+ * task is being deleted/deactivated (removed from the room's active set). */
+export interface FutureTaskPatternChange {
+    frequency_type: TTaskFrequency;
+    days_of_week?: string[];
+    days_of_month?: number[];
+    createdAt: Date;
+}
+
+/**
+ * A Task's frequency_type/days_of_week/days_of_month edit (or its deletion/
+ * deactivation) changes which future dates the plan is actually "due" on
+ * (see occursOnDate) — but any already-materialized 'upcoming' Shift dated
+ * after today was snapshotted at staffing time and does NOT recompute
+ * itself. Left alone, it would keep showing on the roster (with its crew)
+ * even after the date it's on no longer matches the new pattern.
+ *
+ * Reconciles that gap for every plan touching `roomIds`, comparing each of
+ * their future 'upcoming' Shifts against the plan's pattern AS IT WILL BE
+ * after this edit (every other active task's real pattern, plus
+ * `nextPattern` for the task being changed):
+ *  - still due → left alone (see resyncFutureShiftTasksForRoomsIfDue for
+ *    keeping its tasks[] content in sync).
+ *  - no longer due, nobody staffed → deleted outright; nobody is affected.
+ *  - no longer due, staffed → a worker was told to show up and the client
+ *    may already know, so it's never silently discarded. Blocked behind
+ *    `force` (409, same convention as assignWorkersToShift's conflict
+ *    gate) until the caller confirms, then CANCELLED (not deleted, so the
+ *    record survives as history) with the crew and client notified.
+ *
+ * Must be called BEFORE the Task write itself (from task.services.ts), so a
+ * blocked change (409, no `force`) leaves nothing mutated at all — Shifts
+ * included.
+ */
+export const reconcileFutureShiftsForTaskChange = async (
+    roomIds: (Types.ObjectId | string)[],
+    changedTaskId: Types.ObjectId | string,
+    nextPattern: FutureTaskPatternChange | null,
+    managerId: string,
+    force: boolean
+): Promise<void> => {
+    const today = normalizeToUTCDateOnly(new Date());
+
+    const plans = await CleaningPlan.find({
+        rooms: { $in: roomIds },
+        is_active: true,
+        status: { $ne: 'completed' },
+    })
+        .select('title client rooms')
+        .lean();
+    if (!plans.length) return;
+
+    const orphansByPlan = new Map<
+        string,
+        { plan: (typeof plans)[number]; shifts: (IShift & { _id: Types.ObjectId })[] }
+    >();
+
+    for (const plan of plans) {
+        const otherTasks = await Task.find({
+            room: { $in: plan.rooms },
+            is_active: true,
+            _id: { $ne: changedTaskId },
+        })
+            .select('frequency_type days_of_week days_of_month createdAt')
+            .lean();
+
+        const newPatterns: RecurrencePattern[] = otherTasks.map((t) =>
+            taskToPattern(t, t.createdAt, null)
+        );
+        if (nextPattern) {
+            newPatterns.push(taskToPattern(nextPattern, nextPattern.createdAt, null));
+        }
+
+        const futureShifts = await Shift.find({
+            cleaning_plan: plan._id,
+            date: { $gt: today },
+            status: 'upcoming',
+        });
+
+        const orphaned = futureShifts.filter(
+            (s) => !anyPatternOccursOnDate(newPatterns, s.date)
+        );
+        if (orphaned.length) {
+            orphansByPlan.set(plan._id.toString(), { plan, shifts: orphaned });
+        }
+    }
+    if (!orphansByPlan.size) return;
+
+    const staffedAffected: AffectedFutureShift[] = [];
+    for (const { plan, shifts } of orphansByPlan.values()) {
+        for (const shift of shifts) {
+            if (shift.assigned_workers.length) {
+                staffedAffected.push({
+                    shift_id: shift._id.toString(),
+                    plan_id: plan._id.toString(),
+                    plan_title: plan.title,
+                    date: shift.date,
+                    assigned_worker_ids: shift.assigned_workers.map((aw) =>
+                        aw.worker.toString()
+                    ),
+                });
+            }
+        }
+    }
+
+    if (staffedAffected.length && !force) {
+        throw new AppError(
+            httpStatus.CONFLICT,
+            'This change removes one or more already-staffed future shifts from the schedule. Pass force=true to proceed — those shifts will be cancelled and the assigned crew/client notified.',
+            '',
+            { affected_shifts: staffedAffected }
+        );
+    }
+
+    for (const { plan, shifts } of orphansByPlan.values()) {
+        const unstaffed = shifts.filter((s) => !s.assigned_workers.length);
+        const staffed = shifts.filter((s) => s.assigned_workers.length);
+
+        if (unstaffed.length) {
+            await Shift.deleteMany({ _id: { $in: unstaffed.map((s) => s._id) } });
+        }
+
+        for (const shift of staffed) {
+            const cancelledWorkerIds = shift.assigned_workers.map((aw) =>
+                aw.worker.toString()
+            );
+            await Shift.updateOne(
+                { _id: shift._id, status: 'upcoming' },
+                { status: 'cancelled', last_updated_by: managerId }
+            );
+            emitAppEvent('shift.cancelled', {
+                shiftId: shift._id.toString(),
+                planId: plan._id.toString(),
+                clientId: plan.client.toString(),
+                title: plan.title,
+                date: shift.date,
+                cancelledWorkerIds,
+            });
+        }
+    }
+};
+
+/**
+ * Keeps every already-materialized future ('upcoming', dated after today)
+ * Shift's tasks[]/duration_minutes in sync with the rooms' current active
+ * Tasks — the forward-looking counterpart to
+ * resyncTodayShiftTasksForRoomsIfDue, covering shifts a manager staffed
+ * ahead of time. Call AFTER reconcileFutureShiftsForTaskChange (so orphaned
+ * shifts are already gone/cancelled and don't get needlessly resynced here)
+ * and after the Task write itself has landed (so this reads the new task
+ * state, not the pre-edit one).
+ */
+export const resyncFutureShiftTasksForRoomsIfDue = async (
+    roomIds: (Types.ObjectId | string)[]
+) => {
+    const today = normalizeToUTCDateOnly(new Date());
+
+    const plans = await CleaningPlan.find({
+        rooms: { $in: roomIds },
+        is_active: true,
+        status: { $ne: 'completed' },
+    })
+        .select('rooms')
+        .lean();
+
+    for (const plan of plans) {
+        const shifts = await Shift.find({
+            cleaning_plan: plan._id,
+            date: { $gt: today },
+            status: 'upcoming',
+        });
+
+        for (const shift of shifts) {
+            const { tasks, durationMinutes, changed } = await computeSyncedShiftTasks(
+                shift,
+                plan.rooms
+            );
+            if (!changed) continue;
+
+            await Shift.updateOne(
+                { _id: shift._id, status: 'upcoming' },
+                { $set: { tasks, duration_minutes: durationMinutes } }
+            );
+        }
+    }
+};
+
 /**
  * If today's shift for this plan is already materialized AND still
  * 'upcoming', re-copies the plan's current Location (name + coordinates)
@@ -565,15 +645,16 @@ export const resyncTodayShiftAdditionalTaskIfDue = async (additionalTask: {
 };
 
 /**
- * Read-only preview for a single date: returns the materialized Shift if one
- * exists, otherwise builds an equivalent, unsaved shape from the plan's
- * current live state (`is_virtual: true`) — no DB write happens here.
+ * Read-only preview for a single date: returns the materialized (staffed)
+ * Shift if one exists, otherwise — when the date is genuinely due per the
+ * plan's current tasks — an unstaffed placeholder (`is_virtual: true`, no
+ * crew, no time) rather than 404, so a manager can see "this date needs
+ * staffing" before anyone's been assigned. No DB write happens here.
  *
  * `requestingWorkerId` is an ownership gate: when provided (the caller is a
- * worker, not a manager), the shift/preview is only returned if that worker
- * is actually in `assigned_workers` — otherwise 403, regardless of whether
- * the shift is real or virtual. Omitted entirely for manager calls, which
- * can view any shift.
+ * worker, not a manager), the shift is only returned if that worker is
+ * actually in `assigned_workers` — otherwise 403. An unstaffed placeholder
+ * always fails this gate (nobody is assigned to it yet), which is correct.
  */
 export const getShiftForDate = async (
     planId: string,
@@ -582,9 +663,27 @@ export const getShiftForDate = async (
 ) => {
     const day = normalizeToUTCDateOnly(date);
     const existing = await Shift.findOne({ cleaning_plan: planId, date: day }).lean();
-    const result = existing
-        ? { ...existing, is_virtual: false }
-        : await buildVirtualShift(await ensureActivePlan(planId), day);
+
+    let result: (Record<string, unknown> & { assigned_workers: IAssignedWorker[] }) | null;
+    if (existing) {
+        result = { ...existing, end_time: resolveShiftEndTime(existing), is_virtual: false };
+    } else {
+        const plan = await ensureActivePlan(planId);
+        const snapshot = await buildShiftSnapshot(plan);
+        result = anyPatternOccursOnDate(snapshot.patterns, day)
+            ? {
+                  cleaning_plan: plan._id,
+                  date: day,
+                  location: snapshot.location,
+                  rooms: snapshot.rooms,
+                  tasks: snapshot.tasks,
+                  duration_minutes: snapshot.durationMinutes,
+                  assigned_workers: [],
+                  status: 'unstaffed',
+                  is_virtual: true,
+              }
+            : null;
+    }
 
     if (
         result &&
@@ -603,9 +702,10 @@ export const getShiftForDate = async (
 };
 
 /**
- * Lists every occurrence of the plan between [from, to], each either the
- * materialized Shift or a virtual preview — dates the plan doesn't occur on
- * are omitted entirely rather than returned as empty placeholders.
+ * Lists every occurrence of the plan between [from, to]: the materialized
+ * (staffed) Shift where one exists, otherwise an unstaffed placeholder for
+ * any date the plan's current tasks are actually due on. Dates the plan
+ * doesn't occur on at all are omitted entirely.
  */
 export const listShiftsInRange = async (planId: string, from: Date, to: Date) => {
     const plan = await ensureActivePlan(planId);
@@ -616,7 +716,6 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
     }
 
     const snapshot = await buildShiftSnapshot(plan);
-    const additionalByDay = await buildAdditionalTaskEntriesByDay(plan._id, fromDay, toDay);
 
     const existingShifts = await Shift.find({
         cleaning_plan: planId,
@@ -633,66 +732,43 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
         const day = new Date(cursor);
         const existing = existingByDate.get(day.toISOString());
         if (existing) {
-            results.push({ ...existing, is_virtual: false });
+            results.push({ ...existing, end_time: resolveShiftEndTime(existing), is_virtual: false });
             continue;
         }
         if (!anyPatternOccursOnDate(snapshot.patterns, day)) continue;
-        const additional = additionalByDay.get(day.toISOString());
         results.push({
             cleaning_plan: plan._id,
             date: day,
-            date_time: combineDateWithTimeOfDay(day, plan.date_time),
             location: snapshot.location,
             rooms: snapshot.rooms,
-            tasks: additional ? [...snapshot.tasks, ...additional.tasks] : snapshot.tasks,
-            duration_minutes: snapshot.durationMinutes + (additional?.durationMinutes ?? 0),
-            assigned_workers: snapshot.assignedWorkers,
-            is_worker_overridden: false,
-            status: 'upcoming',
+            tasks: snapshot.tasks,
+            duration_minutes: snapshot.durationMinutes,
+            assigned_workers: [],
+            status: 'unstaffed',
             is_virtual: true,
         });
     }
     return results;
 };
 
-/** Saved assignments always override plan defaults, including worker removals. */
+/**
+ * A worker only ever appears on a real, staffed Shift (see
+ * assignWorkersToShift) — there is no plan-level default roster to preview,
+ * so this is a plain query, not a merge with a virtual projection.
+ */
 export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
     const day = normalizeToUTCDateOnly(date);
-    const plans = await CleaningPlan.find({
-        'assigned_workers.worker': workerId,
-        is_active: true,
-        status: { $ne: 'completed' },
-    })
-        .select('location rooms date_time end_date assigned_workers')
-        .lean();
-
-    // Include saved occurrences of candidate plans even if this worker was
-    // removed from them. Their existence must suppress a virtual fallback.
-    const saved = await Shift.find({
+    const shifts = await Shift.find({
         date: day,
-        $or: [
-            { 'assigned_workers.worker': workerId },
-            { cleaning_plan: { $in: plans.map((plan) => plan._id) } },
-        ],
-    }).lean();
-    const savedPlanIds = new Set(saved.map((shift) => shift.cleaning_plan.toString()));
-    const results = saved
-        .filter((shift) =>
-            shift.assigned_workers.some((entry) => entry.worker.toString() === workerId)
-        )
-        .map((shift) => ({ ...shift, is_virtual: false }));
-
-    const virtual = [];
-    for (const plan of plans) {
-        if (savedPlanIds.has(plan._id.toString())) continue;
-        const virtualShift = await buildVirtualShift(plan, day);
-        if (virtualShift) virtual.push(virtualShift);
-    }
-    return [...results, ...virtual].sort(
-        (a, b) =>
-            a.date_time.getTime() - b.date_time.getTime() ||
-            a.cleaning_plan.toString().localeCompare(b.cleaning_plan.toString())
-    );
+        'assigned_workers.worker': workerId,
+    })
+        .sort({ date_time: 1 })
+        .lean();
+    return shifts.map((shift) => ({
+        ...shift,
+        end_time: resolveShiftEndTime(shift),
+        is_virtual: false,
+    }));
 };
 
 /**
@@ -728,6 +804,7 @@ const attachProgress = (shift: IShift & { _id: Types.ObjectId }) => {
 
     return {
         ...shift,
+        end_time: resolveShiftEndTime(shift),
         rooms,
         total_room: shift.rooms.length,
         completed_room: rooms.filter((r) => r.progress_percent === 100).length,
@@ -799,21 +876,11 @@ export const getWorkerTodayMetaFromDB = async (workerId: string) => {
     };
 };
 
-// A materialized Shift only ever exists for TODAY at the earliest (the
-// nightly cron materializes one day at a time; nothing pre-materializes
-// further out). So "next shift" can't rely on Shift documents alone — a
-// worker's next occurrence days out is real, it just hasn't been written to
-// the DB yet. This projects forward through the recurrence patterns of the
-// worker's active plans to find it, same as the cron/virtual-preview paths
-// already do for a single day.
-const NEXT_SHIFT_PROJECTION_HORIZON_DAYS = 90;
-
 /**
- * The worker's next upcoming shift, strictly after now — whichever is
- * sooner of: the nearest already-materialized Shift assigned to this worker,
- * or the nearest not-yet-materialized occurrence projected from the
- * recurrence patterns of the plans this worker is currently assigned to.
- * Returns {} when there is genuinely nothing within the projection horizon.
+ * The worker's next upcoming shift, strictly after now. A worker only ever
+ * appears on a real, staffed Shift (see assignWorkersToShift) — there is no
+ * plan-level default roster to project forward through — so this is a plain
+ * query. Returns {} when there is genuinely nothing scheduled.
  */
 export const getNextShiftForWorker = async (workerId: string) => {
     const now = new Date();
@@ -826,60 +893,9 @@ export const getNextShiftForWorker = async (workerId: string) => {
         .sort({ date_time: 1 })
         .lean();
 
-    const plans = await CleaningPlan.find({
-        'assigned_workers.worker': workerId,
-        is_active: true,
-        status: { $ne: 'completed' },
-    }).lean();
-
-    let bestVirtual: {
-        plan: (typeof plans)[number];
-        day: Date;
-        occurrenceDateTime: Date;
-        snapshot: Awaited<ReturnType<typeof buildShiftSnapshot>>;
-    } | null = null;
-
-    for (const plan of plans) {
-        const snapshot = await buildShiftSnapshot(plan);
-        const today = normalizeToUTCDateOnly(now);
-        for (let i = 0; i <= NEXT_SHIFT_PROJECTION_HORIZON_DAYS; i++) {
-            const day = new Date(today);
-            day.setUTCDate(day.getUTCDate() + i);
-            if (!anyPatternOccursOnDate(snapshot.patterns, day)) continue;
-
-            const occurrenceDateTime = combineDateWithTimeOfDay(day, plan.date_time);
-            if (occurrenceDateTime <= now) continue; // today's slot already passed
-
-            if (!bestVirtual || occurrenceDateTime < bestVirtual.occurrenceDateTime) {
-                bestVirtual = { plan, day, occurrenceDateTime, snapshot };
-            }
-            break; // nearest occurrence for THIS plan found — stop scanning further days
-        }
-    }
-
-    const materializedAt = materialized?.date_time ?? null;
-    const virtualAt = bestVirtual?.occurrenceDateTime ?? null;
-
-    if (materializedAt && (!virtualAt || materializedAt <= virtualAt)) {
-        const { tasks, rooms, assigned_workers, ...rest } = materialized!;
-        return { ...rest, is_virtual: false };
-    }
-
-    if (bestVirtual) {
-        const { plan, day, snapshot, occurrenceDateTime } = bestVirtual;
-        return {
-            cleaning_plan: plan._id,
-            date: day,
-            date_time: occurrenceDateTime,
-            location: snapshot.location,
-            duration_minutes: snapshot.durationMinutes,
-            is_worker_overridden: false,
-            status: 'upcoming' as const,
-            is_virtual: true,
-        };
-    }
-
-    return {};
+    if (!materialized) return {};
+    const { tasks, rooms, assigned_workers, ...rest } = materialized;
+    return { ...rest, end_time: resolveShiftEndTime(materialized), is_virtual: false };
 };
 
 /**
@@ -1312,41 +1328,13 @@ export const getWorkerPerformanceFromDB = async (
     const monthEnd = new Date(Date.UTC(targetYear, targetMonth, 0)); // last day of the month
     const today = normalizeToUTCDateOnly(now);
 
+    // A worker only ever appears on a real, staffed Shift — there is no
+    // plan-level default roster to project unstaffed future occurrences
+    // from, so this month's total is exactly its materialized shifts.
     const materialized = await Shift.find({
         'assigned_workers.worker': workerId,
         date: { $gte: monthStart, $lte: monthEnd },
     }).lean();
-
-    const materializedKeys = new Set(
-        materialized.map((s) => `${s.cleaning_plan.toString()}|${s.date.toISOString()}`)
-    );
-
-    // Not-yet-materialized occurrences: only ever future (today-or-later, and
-    // within this month), only from plans the worker is CURRENTLY assigned
-    // to, skipping any (plan, day) pair that's already materialized.
-    const plans = await CleaningPlan.find({
-        'assigned_workers.worker': workerId,
-        is_active: true,
-        status: { $ne: 'completed' },
-    }).lean();
-
-    const projectionStart = today > monthStart ? today : monthStart;
-    let virtualCount = 0;
-    if (projectionStart <= monthEnd) {
-        for (const plan of plans) {
-            const snapshot = await buildShiftSnapshot(plan);
-            for (
-                let day = new Date(projectionStart);
-                day <= monthEnd;
-                day.setUTCDate(day.getUTCDate() + 1)
-            ) {
-                const key = `${plan._id.toString()}|${day.toISOString()}`;
-                if (materializedKeys.has(key)) continue;
-                if (!anyPatternOccursOnDate(snapshot.patterns, day)) continue;
-                virtualCount += 1;
-            }
-        }
-    }
 
     let completed = 0;
     let inProgress = 0;
@@ -1381,10 +1369,10 @@ export const getWorkerPerformanceFromDB = async (
     return {
         month: targetMonth,
         year: targetYear,
-        total_shift_on_this_month: materialized.length + virtualCount,
+        total_shift_on_this_month: materialized.length,
         total_completed_on_this_month: completed,
         total_in_progress: inProgress,
-        total_upcoming_on_this_month: upcomingMaterialized + virtualCount,
+        total_upcoming_on_this_month: upcomingMaterialized,
         total_late_on_this_month: late,
         total_absent_on_this_month: absent,
         total_work_on_this_month: roundToTwoDecimals(workedMs / 3_600_000),
@@ -1721,27 +1709,14 @@ export const getRosterDateRange = (
  * Manager-facing shift roster for the "Shift Roster" page: for `view`
  * ('day' | 'week' | 'month'), one PAGE of active workers (optionally
  * filtered by name/type, same filters as getWorkersAttendanceListFromDB)
- * with their shifts for each date in the range — merging already-
- * materialized Shift documents with not-yet-materialized virtual
- * occurrences of active plans, the same universe every other worker-facing
- * shift listing uses (e.g. listWorkerShiftsForDate). A materialized shift's
- * own assigned_workers/status is authoritative (it may have been reassigned
- * or progressed for that specific day); a virtual occurrence uses the
- * plan's current default roster and is always 'upcoming'.
+ * with their STAFFED shifts for each date in the range. A worker only ever
+ * appears on a real, staffed Shift (see assignWorkersToShift) — there is no
+ * plan-level default roster to merge in, so every entry here is real.
  *
  * Pagination happens FIRST, on the Worker query itself (via a single
  * `$facet` aggregation that returns the page and the total count in one
- * round trip) — everything downstream (plans, tasks, locations,
- * materialized shifts) is then scoped to only this page's workers, not the
- * whole roster. This is what makes pagination actually cheap here: a
- * 500-worker company paginated at 20/page does five bulk queries sized for
- * 20 workers' plans, never for 500.
- *
- * Otherwise optimized the same way regardless of page size: one CleaningPlan
- * query, one bulk Task query across every candidate plan's rooms combined,
- * one bulk Location query, one bulk materialized-Shift query across the
- * whole date range — occurrence checking and duration for virtual days is
- * then pure in-memory work (no query inside the plan/day loop).
+ * round trip) — the materialized-Shift query is then scoped to only this
+ * page's workers, not the whole roster.
  */
 export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
     const { view, date, year, month, searchTerm, workerType } = params;
@@ -1803,45 +1778,10 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
     const workerIds = workers.map((w) => w._id);
     const workerIdSet = new Set(workerIds.map((id) => id.toString()));
 
-    const plans = await CleaningPlan.find({
+    const materializedShifts = await Shift.find({
         'assigned_workers.worker': { $in: workerIds },
-        is_active: true,
-        status: { $ne: 'completed' },
-    })
-        .select('location rooms date_time end_date assigned_workers')
-        .lean();
-
-    const allRoomIds = [
-        ...new Set(plans.flatMap((p) => (p.rooms ?? []).map((r) => r.toString()))),
-    ];
-    const allLocationIds = [...new Set(plans.map((p) => p.location.toString()))];
-    const planIds = plans.map((p) => p._id);
-
-    const [tasks, locations, materializedShifts] = await Promise.all([
-        Task.find({ room: { $in: allRoomIds }, is_active: true })
-            .select('room frequency_type days_of_week days_of_month duration_minutes')
-            .lean(),
-        Location.find({ _id: { $in: allLocationIds } }).select('name').lean(),
-        Shift.find({
-            cleaning_plan: { $in: planIds },
-            date: { $gte: start, $lt: end },
-        }).lean(),
-    ]);
-
-    const tasksByRoom = new Map<string, typeof tasks>();
-    for (const t of tasks) {
-        const key = t.room.toString();
-        const list = tasksByRoom.get(key);
-        if (list) list.push(t);
-        else tasksByRoom.set(key, [t]);
-    }
-    const locationNameById = new Map(locations.map((l) => [l._id.toString(), l.name]));
-    const materializedByPlanDate = new Map(
-        materializedShifts.map((s) => [
-            `${s.cleaning_plan.toString()}|${s.date.toISOString()}`,
-            s,
-        ])
-    );
+        date: { $gte: start, $lt: end },
+    }).lean();
 
     // workerId -> dateKey -> entries
     const shiftsByWorkerDate = new Map<string, Map<string, RosterShiftEntry[]>>();
@@ -1858,80 +1798,26 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
 
     let totalShifts = 0;
 
-    for (const plan of plans) {
-        const planRoomIds = (plan.rooms ?? []).map((r) => r.toString());
-        const planTasks = planRoomIds.flatMap((r) => tasksByRoom.get(r) ?? []);
-        const patterns = planTasks.map((t) =>
-            taskToPattern(t, plan.date_time, plan.end_date ?? null)
-        );
-        const virtualDurationMinutes = planTasks.reduce(
-            (sum, t) => sum + (t.duration_minutes || 0),
-            0
-        );
-        const locationName = locationNameById.get(plan.location.toString()) ?? '';
-        const planIdStr = plan._id.toString();
+    for (const shift of materializedShifts) {
+        const matchingWorkerIds = shift.assigned_workers
+            .map((aw) => aw.worker.toString())
+            .filter((id) => workerIdSet.has(id));
+        if (!matchingWorkerIds.length) continue;
 
-        for (
-            let cursor = new Date(start);
-            cursor < end;
-            cursor.setUTCDate(cursor.getUTCDate() + 1)
-        ) {
-            const day = new Date(cursor);
-            const materialized = materializedByPlanDate.get(
-                `${planIdStr}|${day.toISOString()}`
-            );
-
-            if (materialized) {
-                const matchingWorkerIds = materialized.assigned_workers
-                    .map((aw) => aw.worker.toString())
-                    .filter((id) => workerIdSet.has(id));
-                if (!matchingWorkerIds.length) continue;
-
-                const dateKey = day.toISOString().slice(0, 10);
-                const entry: RosterShiftEntry = {
-                    shift_id: materialized._id.toString(),
-                    is_virtual: false,
-                    plan_id: planIdStr,
-                    location_name: materialized.location?.name ?? locationName,
-                    start_time: materialized.date_time,
-                    duration_minutes: materialized.duration_minutes,
-                    end_time: new Date(
-                        materialized.date_time.getTime() +
-                            materialized.duration_minutes * 60_000
-                    ),
-                    status: materialized.status,
-                };
-                totalShifts += 1;
-                for (const workerId of matchingWorkerIds) {
-                    addEntry(workerId, dateKey, entry);
-                }
-                continue;
-            }
-
-            if (!planTasks.length) continue;
-            if (!anyPatternOccursOnDate(patterns, day)) continue;
-
-            const matchingWorkerIds = plan.assigned_workers
-                .map((aw) => aw.worker.toString())
-                .filter((id) => workerIdSet.has(id));
-            if (!matchingWorkerIds.length) continue;
-
-            const dateKey = day.toISOString().slice(0, 10);
-            const startTime = combineDateWithTimeOfDay(day, plan.date_time);
-            const entry: RosterShiftEntry = {
-                shift_id: null,
-                is_virtual: true,
-                plan_id: planIdStr,
-                location_name: locationName,
-                start_time: startTime,
-                duration_minutes: virtualDurationMinutes,
-                end_time: new Date(startTime.getTime() + virtualDurationMinutes * 60_000),
-                status: 'upcoming',
-            };
-            totalShifts += 1;
-            for (const workerId of matchingWorkerIds) {
-                addEntry(workerId, dateKey, entry);
-            }
+        const dateKey = shift.date.toISOString().slice(0, 10);
+        const entry: RosterShiftEntry = {
+            shift_id: shift._id.toString(),
+            is_virtual: false,
+            plan_id: shift.cleaning_plan.toString(),
+            location_name: shift.location?.name ?? '',
+            start_time: shift.date_time,
+            duration_minutes: shift.duration_minutes,
+            end_time: resolveShiftEndTime(shift),
+            status: shift.status,
+        };
+        totalShifts += 1;
+        for (const workerId of matchingWorkerIds) {
+            addEntry(workerId, dateKey, entry);
         }
     }
 
@@ -1975,21 +1861,327 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
     };
 };
 
+export interface PlanRosterShiftEntry {
+    date: string;
+    shift_id: string | null;
+    is_virtual: boolean;
+    status: string;
+    // null until a manager has staffed this due date (see
+    // assignWorkersToShift) — a Cleaning Plan carries no schedule of its own.
+    start_time: Date | null;
+    end_time: Date | null;
+    duration_minutes: number;
+    rooms: { total: number; completed: number };
+    tasks: { total: number; completed: number };
+    assigned_workers: Array<{ worker_id: string; name: string; role: string }>;
+}
+
+export interface PlanGroupedRosterParams {
+    view: TRosterView;
+    date?: string;
+    year?: number;
+    month?: number;
+    page?: number;
+    limit?: number;
+}
+
 /**
- * Reassigns workers for one specific occurrence only, materializing the
- * shift first if it doesn't exist yet. Mirrors the plan-level assignment
- * rules: ineligible workers are always rejected; scheduling conflicts are
- * rejected unless `force`, in which case the conflicted entries are flagged
- * for audit purposes.
+ * Core of the "roster grouped by cleaning plan" view, shared by the
+ * client-facing GET /client/roster (scoped to that client's own plans) and
+ * the manager-facing GET /shift/plan-roster (scoped by whatever `planFilter`
+ * the caller passes — e.g. every active plan, or narrowed by client/location).
+ * For each matching plan (paginated), every due date in the selected day/
+ * week/month window: the real, staffed Shift where one exists, otherwise an
+ * unstaffed placeholder (is_virtual: true, status 'unstaffed', no start_time/
+ * end_time/assigned_workers) for a date the plan's current tasks are due on
+ * but nobody has scheduled yet.
+ */
+export const getPlanGroupedRosterFromDB = async (
+    planFilter: Record<string, unknown>,
+    params: PlanGroupedRosterParams
+) => {
+    const { view, date, year, month } = params;
+    const { start, end } = getRosterDateRange(view, date, year, month);
+
+    const page = Math.max(1, Math.trunc(params.page ?? 1) || 1);
+    const limit = Math.min(50, Math.max(1, Math.trunc(params.limit ?? 10) || 10));
+
+    const [totalPlans, plans] = await Promise.all([
+        CleaningPlan.countDocuments(planFilter),
+        CleaningPlan.find(planFilter)
+            .select('title location rooms')
+            .sort({ title: 1, _id: 1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .lean(),
+    ]);
+
+    const totalPage = totalPlans ? Math.ceil(totalPlans / limit) : 0;
+
+    if (!plans.length) {
+        return {
+            view,
+            start_date: start,
+            end_date: end,
+            meta: { page, limit, total: totalPlans, totalPage, total_shifts: 0 },
+            cleaning_plans: [],
+        };
+    }
+
+    const planIds = plans.map((p) => p._id);
+    const allRoomIds = [
+        ...new Set(plans.flatMap((p) => (p.rooms ?? []).map((r) => r.toString()))),
+    ];
+    const allLocationIds = [...new Set(plans.map((p) => p.location.toString()))];
+
+    const [tasks, locations, materializedShifts] = await Promise.all([
+        Task.find({ room: { $in: allRoomIds }, is_active: true })
+            .select('room frequency_type days_of_week days_of_month duration_minutes createdAt')
+            .lean(),
+        Location.find({ _id: { $in: allLocationIds } }).select('name').lean(),
+        Shift.find({
+            cleaning_plan: { $in: planIds },
+            date: { $gte: start, $lt: end },
+        }).lean(),
+    ]);
+
+    const tasksByRoom = new Map<string, typeof tasks>();
+    for (const t of tasks) {
+        const key = t.room.toString();
+        const list = tasksByRoom.get(key);
+        if (list) list.push(t);
+        else tasksByRoom.set(key, [t]);
+    }
+    const locationNameById = new Map(locations.map((l) => [l._id.toString(), l.name]));
+    const materializedByPlanDate = new Map(
+        materializedShifts.map((s) => [`${s.cleaning_plan.toString()}|${s.date.toISOString()}`, s])
+    );
+
+    let totalShifts = 0;
+
+    const cleaning_plans = plans.map((plan) => {
+        const planIdStr = plan._id.toString();
+        const planRoomIds = (plan.rooms ?? []).map((r) => r.toString());
+        const planTasks = planRoomIds.flatMap((r) => tasksByRoom.get(r) ?? []);
+        // Anchored per-task on its own createdAt — see shift.snapshot.util.ts.
+        const patterns = planTasks.map((t) => taskToPattern(t, t.createdAt, null));
+        const locationName = locationNameById.get(plan.location.toString()) ?? '';
+
+        const shifts: PlanRosterShiftEntry[] = [];
+        let totalMinutes = 0;
+
+        for (
+            let cursor = new Date(start);
+            cursor < end;
+            cursor.setUTCDate(cursor.getUTCDate() + 1)
+        ) {
+            const day = new Date(cursor);
+            const dateKey = day.toISOString().slice(0, 10);
+            const materialized = materializedByPlanDate.get(`${planIdStr}|${day.toISOString()}`);
+
+            if (materialized) {
+                const planTasksInShift = (materialized.tasks || []).filter(
+                    (t) => t.source === 'plan_task' && t.room
+                );
+                const roomIds = (materialized.rooms || []).map((r) => r.room.toString());
+                let completedRooms = 0;
+                for (const roomId of roomIds) {
+                    const tasksInRoom = planTasksInShift.filter((t) => t.room?.toString() === roomId);
+                    if (tasksInRoom.length > 0 && tasksInRoom.every((t) => t.is_completed)) {
+                        completedRooms += 1;
+                    }
+                }
+                const totalTasksInShift = (materialized.tasks || []).length;
+                const completedTasksInShift = (materialized.tasks || []).filter((t) => t.is_completed).length;
+
+                shifts.push({
+                    date: dateKey,
+                    shift_id: materialized._id.toString(),
+                    is_virtual: false,
+                    status: materialized.status,
+                    start_time: materialized.date_time,
+                    end_time: resolveShiftEndTime(materialized),
+                    duration_minutes: materialized.duration_minutes,
+                    rooms: { total: roomIds.length, completed: completedRooms },
+                    tasks: { total: totalTasksInShift, completed: completedTasksInShift },
+                    assigned_workers: (materialized.assigned_workers || []).map((w) => ({
+                        worker_id: w.worker?.toString() || '',
+                        name: w.name,
+                        role: w.role,
+                    })),
+                });
+                totalMinutes += materialized.duration_minutes;
+                totalShifts += 1;
+                continue;
+            }
+
+            if (!planTasks.length) continue;
+            if (!anyPatternOccursOnDate(patterns, day)) continue;
+
+            // Due, but not yet staffed (see assignWorkersToShift) — no time
+            // or crew to show until a manager schedules it.
+            const virtualDurationMinutes = planTasks.reduce(
+                (sum, t) => sum + (t.duration_minutes || 0),
+                0
+            );
+
+            shifts.push({
+                date: dateKey,
+                shift_id: null,
+                is_virtual: true,
+                status: 'unstaffed',
+                start_time: null,
+                end_time: null,
+                duration_minutes: virtualDurationMinutes,
+                rooms: { total: planRoomIds.length, completed: 0 },
+                tasks: { total: planTasks.length, completed: 0 },
+                assigned_workers: [],
+            });
+            totalMinutes += virtualDurationMinutes;
+            totalShifts += 1;
+        }
+
+        return {
+            plan_id: planIdStr,
+            plan_title: plan.title,
+            location_name: locationName,
+            total_shifts_in_range: shifts.length,
+            total_hours_in_range: roundToTwoDecimals(totalMinutes / 60),
+            shifts,
+        };
+    });
+
+    return {
+        view,
+        start_date: start,
+        end_date: end,
+        meta: { page, limit, total: totalPlans, totalPage, total_shifts: totalShifts },
+        cleaning_plans,
+    };
+};
+
+export interface ManagerPlanRosterParams extends PlanGroupedRosterParams {
+    client?: string;
+    location?: string;
+    searchTerm?: string;
+}
+
+/**
+ * Manager-facing plan-grouped roster: every active cleaning plan in the
+ * system (not scoped to one client), optionally narrowed to one client,
+ * one location, or a plan-title search — the system-wide counterpart to
+ * GET /client/roster. Same day/week/month semantics and response shape.
+ */
+export const getManagerPlanRosterFromDB = async (params: ManagerPlanRosterParams) => {
+    const { client, location, searchTerm, ...rosterParams } = params;
+    const planFilter: Record<string, unknown> = { is_active: true };
+
+    if (client !== undefined) {
+        if (!mongoose.isValidObjectId(client)) {
+            throw new AppError(httpStatus.BAD_REQUEST, 'Invalid client ID');
+        }
+        planFilter.client = new Types.ObjectId(client);
+    }
+    if (location !== undefined) {
+        if (!mongoose.isValidObjectId(location)) {
+            throw new AppError(httpStatus.BAD_REQUEST, 'Invalid location ID');
+        }
+        planFilter.location = new Types.ObjectId(location);
+    }
+    if (searchTerm) {
+        const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        planFilter.title = { $regex: escaped, $options: 'i' };
+    }
+
+    return getPlanGroupedRosterFromDB(planFilter, rosterParams);
+};
+
+/**
+ * Loads the existing Shift for (planId, date), or builds and creates a fresh
+ * one (rooms/tasks/location snapshotted from the plan's current state, plus
+ * any already-approved AdditionalTasks for that day) if this is the first
+ * time this due date is being staffed. Throws if the plan's current tasks
+ * don't actually occur on this date. Idempotent under concurrency via the
+ * { cleaning_plan, date } unique index: if two managers race to staff the
+ * same date, the loser recovers by re-fetching the winner's document.
+ */
+const getOrCreateBareShift = async (
+    planId: string | Types.ObjectId,
+    date: Date
+): Promise<IShift & { _id: Types.ObjectId }> => {
+    const day = normalizeToUTCDateOnly(date);
+
+    const existing = await Shift.findOne({ cleaning_plan: planId, date: day });
+    if (existing) return existing;
+
+    const plan = await ensureActivePlan(planId);
+    if (!plan.is_active) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'Cannot schedule a shift for an inactive cleaning plan'
+        );
+    }
+
+    const snapshot = await buildShiftSnapshot(plan);
+    if (!anyPatternOccursOnDate(snapshot.patterns, day)) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'This cleaning plan has no occurrence on the given date'
+        );
+    }
+
+    const additional = await buildAdditionalTaskEntriesForDay(plan._id, day);
+
+    try {
+        return await Shift.create({
+            cleaning_plan: plan._id,
+            date: day,
+            // Placeholder until the caller (assignWorkersToShift) sets the
+            // manager-chosen schedule right below — never left this way.
+            date_time: day,
+            end_time: day,
+            location: snapshot.location,
+            rooms: snapshot.rooms,
+            tasks: [...snapshot.tasks, ...additional.tasks],
+            duration_minutes: snapshot.durationMinutes + additional.durationMinutes,
+            assigned_workers: [],
+            status: 'upcoming',
+        });
+    } catch (error) {
+        if (isDuplicateKeyError(error)) {
+            // Lost the race to a concurrent creator — their document is
+            // authoritative, use it.
+            const winner = await Shift.findOne({ cleaning_plan: planId, date: day });
+            if (winner) return winner;
+        }
+        throw error;
+    }
+};
+
+/**
+ * The single staffing action: schedules who works a due date and when. The
+ * first call for a given (planId, date) creates that day's Shift (rooms/
+ * tasks snapshotted from the plan's current state); later calls edit the
+ * crew and/or schedule of the same Shift. Ineligible workers are always
+ * rejected; a worker already double-booked on another staffed shift that
+ * day is rejected unless `force`, in which case the conflicting entry is
+ * flagged (assigned_with_conflict) rather than silently allowed.
  */
 export const assignWorkersToShift = async (
     managerId: string,
     planId: string,
     date: Date,
     assignedWorkers: IAssignedWorker[],
+    startTime: Date,
+    endTime: Date,
     force: boolean
 ) => {
-    const shift = await getOrCreateShift(planId, date);
+    if (!(endTime > startTime)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'end_time must be after start_time');
+    }
+
+    const shift = await getOrCreateBareShift(planId, date);
+    const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / 60_000);
 
     await assertWorkersEligible(assignedWorkers.map((aw) => aw.worker));
 
@@ -2001,9 +2193,9 @@ export const assignWorkersToShift = async (
         const conflict = await findWorkerConflictOnDate(
             aw.worker,
             shift.date,
-            shift.date_time,
-            shift.duration_minutes,
-            { shiftId: shift._id, planId: shift.cleaning_plan }
+            startTime,
+            durationMinutes,
+            { shiftId: shift._id }
         );
         if (conflict) conflictEntries.set(aw.worker.toString(), conflict);
     }
@@ -2034,6 +2226,8 @@ export const assignWorkersToShift = async (
         .lean();
     const nameById = new Map(workerDocs.map((w) => [w._id.toString(), w.name]));
 
+    const previousWorkerIds = shift.assigned_workers.map((aw) => aw.worker.toString());
+
     const result = await Shift.findByIdAndUpdate(
         shift._id,
         {
@@ -2043,12 +2237,143 @@ export const assignWorkersToShift = async (
                 role: aw.role,
                 assigned_with_conflict: conflictEntries.has(aw.worker.toString()),
             })),
-            is_worker_overridden: true,
+            date_time: startTime,
+            end_time: endTime,
             last_updated_by: managerId,
         },
         { new: true, runValidators: true }
     );
+    if (!result) throw new AppError(httpStatus.NOT_FOUND, 'Shift not found');
+
+    const newWorkerIds = result.assigned_workers.map((aw) => aw.worker.toString());
+    const addedWorkerIds = newWorkerIds.filter((id) => !previousWorkerIds.includes(id));
+    const removedWorkerIds = previousWorkerIds.filter((id) => !newWorkerIds.includes(id));
+
+    const plan = await CleaningPlan.findById(planId).select('title').lean();
+    const planTitle = plan?.title ?? '';
+
+    if (addedWorkerIds.length) {
+        emitAppEvent('shift.worker_assigned', {
+            shiftId: result._id.toString(),
+            planId,
+            title: planTitle,
+            addedWorkerIds,
+            start_date: result.date_time,
+        });
+    }
+    if (removedWorkerIds.length) {
+        emitAppEvent('shift.worker_removed', {
+            shiftId: result._id.toString(),
+            planId,
+            title: planTitle,
+            removedWorkerIds,
+        });
+    }
+
+    // Chat group membership for the plan accumulates every worker ever
+    // staffed onto any of its shifts — never auto-removed, since a crew
+    // rotating day to day shouldn't lose access to prior context. A manager
+    // can still remove someone from the group chat manually.
+    if (addedWorkerIds.length) {
+        const currentGroupWorkerIds = await chatServices.getChatGroupWorkerIds(planId);
+        const unionWorkerIds = [
+            ...new Set([...currentGroupWorkerIds, ...addedWorkerIds]),
+        ];
+        await chatServices.syncChatGroupWorkers(planId, unionWorkerIds);
+    }
+
     return result;
+};
+
+const FULL_WEEKDAY_NAMES = [
+    'sunday',
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+];
+
+export interface EligibleWorkerRow {
+    worker: Record<string, unknown>;
+    // Based on the worker's own declared working_days (see worker.model.ts)
+    // against this date's weekday. A worker who hasn't set any working_days
+    // at all (empty array — most workers today) is treated as available
+    // every day: this is an advisory preference, not a hard restriction, and
+    // failing closed for everyone who never filled it in would be wrong.
+    is_available: boolean;
+    is_conflict: boolean;
+    conflict_reason: ConflictReason | null;
+    conflicting_plan_id: Types.ObjectId | null;
+}
+
+/**
+ * Worker picker for staffing one due date: every active, eligible worker
+ * (deleted/blocked/inactive accounts are omitted entirely, not flagged),
+ * each annotated with whether they're generally available that weekday
+ * (is_available, from their own working_days) and whether staffing them for
+ * this exact start/end window would double-book them against another
+ * already-staffed shift (is_conflict, reusing the same check
+ * assignWorkersToShift itself runs). Purely a preview — nothing is written,
+ * and neither flag blocks anything here; assignWorkersToShift is still what
+ * actually enforces the conflict gate (unless force=true).
+ */
+export const listEligibleWorkersForShift = async (
+    planId: string,
+    date: Date,
+    startTime: Date,
+    endTime: Date
+): Promise<EligibleWorkerRow[]> => {
+    if (!(endTime > startTime)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'end_time must be after start_time');
+    }
+
+    const day = normalizeToUTCDateOnly(date);
+    const plan = await ensureActivePlan(planId);
+    const snapshot = await buildShiftSnapshot(plan);
+    if (!anyPatternOccursOnDate(snapshot.patterns, day)) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'This cleaning plan has no occurrence on the given date'
+        );
+    }
+
+    const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / 60_000);
+    const weekdayName = FULL_WEEKDAY_NAMES[day.getUTCDay()];
+
+    // Excludes today's own shift (if it already exists) from the conflict
+    // search — reassigning a currently-assigned worker to the same shift
+    // must never read back as a conflict against themselves.
+    const existingShift = await Shift.findOne({ cleaning_plan: planId, date: day })
+        .select('_id')
+        .lean();
+
+    const allWorkers = await Worker.find(activeWorkerFilter).lean();
+    const eligibleWorkers = await filterEligibleWorkers(allWorkers);
+
+    const results: EligibleWorkerRow[] = [];
+    for (const worker of eligibleWorkers) {
+        const workingDays = worker.working_days ?? [];
+        const isAvailable = workingDays.length === 0 || workingDays.includes(weekdayName);
+
+        const conflict = await findWorkerConflictOnDate(
+            worker._id,
+            day,
+            startTime,
+            durationMinutes,
+            { shiftId: existingShift?._id }
+        );
+
+        results.push({
+            worker,
+            is_available: isAvailable,
+            is_conflict: !!conflict,
+            conflict_reason: conflict?.reason ?? null,
+            conflicting_plan_id: conflict?.conflicting_plan_id ?? null,
+        });
+    }
+    return results;
 };
 
 export const updateShiftStatus = async (
@@ -2057,7 +2382,7 @@ export const updateShiftStatus = async (
     date: Date,
     status: IShift['status']
 ) => {
-    const shift = await getOrCreateShift(planId, date);
+    const shift = await getShiftOrThrow(planId, date);
     const result = await Shift.findByIdAndUpdate(
         shift._id,
         { status, last_updated_by: managerId },
@@ -2082,7 +2407,7 @@ export const uploadShiftTaskPhoto = async (
     title: string,
     photoUrl: string
 ) => {
-    const shift = await getOrCreateShift(planId, date);
+    const shift = await getShiftOrThrow(planId, date);
 
     const isAssigned = shift.assigned_workers.some(
         (aw) => aw.worker.toString() === workerId
@@ -2165,7 +2490,7 @@ export const markShiftTaskComplete = async (
     date: Date,
     taskId: string
 ) => {
-    const shift = await getOrCreateShift(planId, date);
+    const shift = await getShiftOrThrow(planId, date);
 
     const isAssigned = shift.assigned_workers.some(
         (aw) => aw.worker.toString() === workerId
@@ -2246,25 +2571,18 @@ const maybeAutoCompleteShift = async (shiftId: Types.ObjectId) => {
 const GEOFENCE_RADIUS_METERS = 50;
 
 /**
- * Shared lookup + eligibility check for check-in/check-out. Uses
- * getOrCreateShift rather than a strict findOne: materialization otherwise
- * depends entirely on the nightly cron having already run (or a manager
- * having touched the plan today), and a worker's check-in should not 404
- * just because neither happened to occur yet on this particular day (e.g.
- * the server was down at cron time). getOrCreateShift only ever creates a
- * shift when the plan's own recurrence pattern actually occurs on this date,
- * so this can't materialize a shift that shouldn't exist.
+ * Shared lookup + eligibility check for check-in/check-out. A worker is only
+ * ever assigned once a manager has staffed that date's shift (see
+ * assignWorkersToShift), so the shift is guaranteed to already exist by the
+ * time a genuinely-assigned worker calls this — a plain lookup, not an
+ * auto-materializing one.
  */
 const findAssignedShiftOrThrow = async (
     workerId: string,
     planId: string,
     date: Date
 ) => {
-    const day = normalizeToUTCDateOnly(date);
-    // Errors here (plan not found/inactive, or no occurrence on this date)
-    // already carry accurate AppErrors of their own — let them propagate
-    // rather than flattening everything into a generic "Shift not found".
-    const shift = await getOrCreateShift(planId, day);
+    const shift = await getShiftOrThrow(planId, date);
     const workerIndex = shift.assigned_workers.findIndex(
         (aw) => aw.worker.toString() === workerId
     );
@@ -2561,11 +2879,11 @@ export const getPhotoReviewListFromDB = async (
 
 const shiftServices = {
     listWorkerShiftsForDate,
-    getOrCreateShift,
-    resyncTodayShiftWorkersIfDue,
     resyncTodayShiftTasksForRoomsIfDue,
     resyncTodayShiftRoomsIfDue,
     resyncTodayShiftAdditionalTaskIfDue,
+    reconcileFutureShiftsForTaskChange,
+    resyncFutureShiftTasksForRoomsIfDue,
     getShiftForDate,
     listShiftsInRange,
     getClientLiveShiftsFromDB,
@@ -2581,8 +2899,10 @@ const shiftServices = {
     getWorkersAttendanceListFromDB,
     getWorkerAttendanceSummaryFromDB,
     getShiftRosterFromDB,
+    getManagerPlanRosterFromDB,
     getPhotoReviewListFromDB,
     assignWorkersToShift,
+    listEligibleWorkersForShift,
     updateShiftStatus,
     uploadShiftTaskPhoto,
     markShiftTaskComplete,

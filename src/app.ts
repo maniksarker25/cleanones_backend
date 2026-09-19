@@ -16,7 +16,6 @@ import router from './app/routes';
 import { setupSwagger } from './app/docs/swagger';
 
 import './app/events/listeners';
-import './app/modules/shift/shift.cron';
 const app: Application = express();
 // VERY IMPORTANT (for proxy / nginx)
 app.set('trust proxy', 1);
@@ -39,8 +38,10 @@ app.use(
             "http://10.10.28.195:3001",
             "http://10.10.28.119:3001",
             "http://10.10.28.194:3003",
+            "http://10.10.28.194:3001",
             "https://cleanones.vercel.app",
-            "https://cleanones-client-portal.vercel.app"
+            "https://cleanones-client-portal.vercel.app",
+            "https://cleanones-client-testing.vercel.app"
         ],
         credentials: true,
     })
