@@ -5,6 +5,7 @@ import { emitAppEvent } from '../../events/eventEmitter';
 import {
     anyPatternOccursOnDate,
     normalizeToUTCDateOnly,
+    occursOnDate,
     RecurrencePattern,
     taskToPattern,
 } from '../cleaning_plan/availability.util';
@@ -32,6 +33,8 @@ import {
     buildShiftSnapshot,
     pickRandom,
     recomputeTaskCompletion,
+    roomsWithDueTasks,
+    tasksOccurringOnDate,
     toShiftTaskFromAdditionalTask,
 } from './shift.snapshot.util';
 
@@ -56,8 +59,10 @@ const resolveShiftEndTime = (shift: {
     duration_minutes: number;
 }): Date => shift.end_time ?? new Date(shift.date_time.getTime() + shift.duration_minutes * 60_000);
 
+// .lean() — every caller only reads plan fields (location, rooms, is_active,
+// _id) to build a snapshot or check state; none of them save this doc back.
 const ensureActivePlan = async (planId: string | Types.ObjectId) => {
-    const plan = await CleaningPlan.findById(planId);
+    const plan = await CleaningPlan.findById(planId).lean();
     if (!plan)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
     return plan;
@@ -108,17 +113,23 @@ const getShiftOrThrow = async (
  * mark-complete action, never by a plan edit.
  */
 const computeSyncedShiftTasks = async (
-    shift: Pick<IShift, 'tasks'>,
+    shift: Pick<IShift, 'tasks' | 'date'>,
     roomIds: (Types.ObjectId | string)[]
 ) => {
-    const activeTasks = await Task.find({
+    const allActiveTasks = await Task.find({
         room: { $in: roomIds },
         is_active: true,
     })
         .select(
-            'room name duration_minutes is_photo_required photo_requirements required_photo_count'
+            'room name duration_minutes is_photo_required photo_requirements required_photo_count frequency_type days_of_week days_of_month createdAt'
         )
         .lean();
+    // Same per-task recurrence check as tasksOccurringOnDate: a room mixes
+    // daily/weekly/monthly tasks, so only the ones actually due on this
+    // shift's own date belong in its tasks[] — not every active task in the room.
+    const activeTasks = allActiveTasks.filter((t) =>
+        occursOnDate(shift.date, taskToPattern(t, t.createdAt, null))
+    );
 
     // Additional tasks folded into this shift (see buildAdditionalTaskEntriesForDay)
     // aren't sourced from the Task collection at all, so this room/task sync
@@ -343,13 +354,14 @@ export const resyncTodayShiftRoomsIfDue = async (
     const rooms = await Room.find({ _id: { $in: roomIds } })
         .select('name room_type')
         .lean();
-    const nextRooms = rooms.map((r) => ({
+    const allRooms = rooms.map((r) => ({
         room: r._id,
         name: r.name,
         room_type: r.room_type,
     }));
 
     const { tasks, durationMinutes } = await computeSyncedShiftTasks(shift, roomIds);
+    const nextRooms = roomsWithDueTasks(allRooms, tasks);
 
     await Shift.updateOne(
         { _id: shift._id, status: 'upcoming' },
@@ -686,14 +698,18 @@ export const getShiftForDate = async (
     } else {
         const plan = await ensureActivePlan(planId);
         const snapshot = await buildShiftSnapshot(plan);
-        result = anyPatternOccursOnDate(snapshot.patterns, day)
+        const dueTasks = tasksOccurringOnDate(snapshot, day);
+        result = dueTasks.length
             ? {
                   cleaning_plan: plan._id,
                   date: day,
                   location: snapshot.location,
-                  rooms: snapshot.rooms,
-                  tasks: snapshot.tasks,
-                  duration_minutes: snapshot.durationMinutes,
+                  rooms: roomsWithDueTasks(snapshot.rooms, dueTasks),
+                  tasks: dueTasks,
+                  duration_minutes: dueTasks.reduce(
+                      (sum, t) => sum + t.duration_minutes,
+                      0
+                  ),
                   assigned_workers: [],
                   status: 'unstaffed',
                   is_virtual: true,
@@ -751,14 +767,15 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
             results.push({ ...existing, end_time: resolveShiftEndTime(existing), is_virtual: false });
             continue;
         }
-        if (!anyPatternOccursOnDate(snapshot.patterns, day)) continue;
+        const dueTasks = tasksOccurringOnDate(snapshot, day);
+        if (!dueTasks.length) continue;
         results.push({
             cleaning_plan: plan._id,
             date: day,
             location: snapshot.location,
-            rooms: snapshot.rooms,
-            tasks: snapshot.tasks,
-            duration_minutes: snapshot.durationMinutes,
+            rooms: roomsWithDueTasks(snapshot.rooms, dueTasks),
+            tasks: dueTasks,
+            duration_minutes: dueTasks.reduce((sum, t) => sum + t.duration_minutes, 0),
             assigned_workers: [],
             status: 'unstaffed',
             is_virtual: true,
@@ -2032,11 +2049,20 @@ export const getPlanGroupedRosterFromDB = async (
             }
 
             if (!planTasks.length) continue;
-            if (!anyPatternOccursOnDate(patterns, day)) continue;
+            // Each task's own frequency/anchor is checked individually — a
+            // room mixes daily/weekly/monthly tasks that don't all recur on
+            // the same days, so planTasks.length is never the right count
+            // for this specific date (see tasksOccurringOnDate).
+            const dueTasksForDay = planTasks.filter((_, i) =>
+                occursOnDate(day, patterns[i])
+            );
+            if (!dueTasksForDay.length) continue;
+
+            const dueRoomIds = new Set(dueTasksForDay.map((t) => t.room.toString()));
 
             // Due, but not yet staffed (see assignWorkersToShift) — no time
             // or crew to show until a manager schedules it.
-            const virtualDurationMinutes = planTasks.reduce(
+            const virtualDurationMinutes = dueTasksForDay.reduce(
                 (sum, t) => sum + (t.duration_minutes || 0),
                 0
             );
@@ -2049,8 +2075,8 @@ export const getPlanGroupedRosterFromDB = async (
                 start_time: null,
                 end_time: null,
                 duration_minutes: virtualDurationMinutes,
-                rooms: { total: planRoomIds.length, completed: 0 },
-                tasks: { total: planTasks.length, completed: 0 },
+                rooms: { total: dueRoomIds.size, completed: 0 },
+                tasks: { total: dueTasksForDay.length, completed: 0 },
                 assigned_workers: [],
             });
             totalMinutes += virtualDurationMinutes;
@@ -2139,7 +2165,8 @@ const getOrCreateBareShift = async (
     }
 
     const snapshot = await buildShiftSnapshot(plan);
-    if (!anyPatternOccursOnDate(snapshot.patterns, day)) {
+    const dueTasks = tasksOccurringOnDate(snapshot, day);
+    if (!dueTasks.length) {
         throw new AppError(
             httpStatus.BAD_REQUEST,
             'This cleaning plan has no occurrence on the given date'
@@ -2147,6 +2174,10 @@ const getOrCreateBareShift = async (
     }
 
     const additional = await buildAdditionalTaskEntriesForDay(plan._id, day);
+    const dueTasksDurationMinutes = dueTasks.reduce(
+        (sum, t) => sum + t.duration_minutes,
+        0
+    );
 
     try {
         return await Shift.create({
@@ -2157,9 +2188,9 @@ const getOrCreateBareShift = async (
             date_time: day,
             end_time: day,
             location: snapshot.location,
-            rooms: snapshot.rooms,
-            tasks: [...snapshot.tasks, ...additional.tasks],
-            duration_minutes: snapshot.durationMinutes + additional.durationMinutes,
+            rooms: roomsWithDueTasks(snapshot.rooms, dueTasks),
+            tasks: [...dueTasks, ...additional.tasks],
+            duration_minutes: dueTasksDurationMinutes + additional.durationMinutes,
             assigned_workers: [],
             status: 'upcoming',
         });
