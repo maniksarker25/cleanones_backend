@@ -16,32 +16,12 @@ export interface CleaningPlanCreatedPayload {
     title: string;
     clientId: string;
     managerId: string;
-    assignedWorkerIds: string[];
-    /** The plan's date_time — when the assigned worker's shift actually starts. */
-    start_date: Date;
-}
-
-export interface CleaningPlanWorkerAssignedPayload {
-    planId: string;
-    title: string;
-    /** Only the newly-added workers, not the plan's full roster. */
-    addedWorkerIds: string[];
-    /** The plan's date_time — when the assigned worker's shift actually starts. */
-    start_date: Date;
-}
-
-export interface CleaningPlanWorkerRemovedPayload {
-    planId: string;
-    title: string;
-    /** Only the workers just taken off the plan. */
-    removedWorkerIds: string[];
 }
 
 export interface CleaningPlanDeletedPayload {
     planId: string;
     title: string;
     clientId: string;
-    workerIds: string[];
 }
 
 // ─── Additional task (client-requested extra work) ─────────────────────────
@@ -90,6 +70,38 @@ export interface ShiftCompletedPayload {
     clientId: string;
 }
 
+export interface ShiftWorkerAssignedPayload {
+    shiftId: string;
+    planId: string;
+    title: string;
+    /** Only the newly-added workers, not the shift's full roster. */
+    addedWorkerIds: string[];
+    /** The shift's own scheduled start — set by the manager at staffing time. */
+    start_date: Date;
+}
+
+export interface ShiftWorkerRemovedPayload {
+    shiftId: string;
+    planId: string;
+    title: string;
+    /** Only the workers just taken off this shift. */
+    removedWorkerIds: string[];
+}
+
+// A future, already-staffed shift was cancelled because a room task edit
+// (frequency/days changed, or the task was deleted/deactivated) took its
+// date out of the plan's recurrence pattern — see
+// shift.services.ts's reconcileFutureShiftsForTaskChange.
+export interface ShiftCancelledPayload {
+    shiftId: string;
+    planId: string;
+    clientId: string;
+    title: string;
+    date: Date;
+    /** The crew that was assigned before this shift got cancelled. */
+    cancelledWorkerIds: string[];
+}
+
 // ─── Chat (offline push only — realtime delivery is already handled by ────
 // the Socket.IO layer in chat_message.services.ts; this event exists purely
 // so an offline recipient still gets a push/notification-center entry) ─────
@@ -106,8 +118,6 @@ export interface ChatMessageReceivedPayload {
 /** Every event name mapped to its payload type — the single source of truth. */
 export interface AppEventPayloadMap {
     'cleaning_plan.created': CleaningPlanCreatedPayload;
-    'cleaning_plan.worker_assigned': CleaningPlanWorkerAssignedPayload;
-    'cleaning_plan.worker_removed': CleaningPlanWorkerRemovedPayload;
     'cleaning_plan.deleted': CleaningPlanDeletedPayload;
     'additional_task.created': AdditionalTaskCreatedPayload;
     'additional_task.approved': AdditionalTaskApprovedPayload;
@@ -115,6 +125,9 @@ export interface AppEventPayloadMap {
     'shift.checked_in': ShiftCheckedInPayload;
     'shift.checked_out': ShiftCheckedOutPayload;
     'shift.completed': ShiftCompletedPayload;
+    'shift.worker_assigned': ShiftWorkerAssignedPayload;
+    'shift.worker_removed': ShiftWorkerRemovedPayload;
+    'shift.cancelled': ShiftCancelledPayload;
     'chat.message_received': ChatMessageReceivedPayload;
 }
 

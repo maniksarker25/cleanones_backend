@@ -12,7 +12,16 @@ const photoRequirementSchema = new Schema<IPhotoRequirement>(
             required: true,
             trim: true,
         },
-    
+        description: {
+            type: String,
+            default: null,
+            trim: true,
+        },
+        reference_image_url: {
+            type: String,
+            default: null,
+            trim: true,
+        },
         photo_url: {
             type: String,
             default: null,

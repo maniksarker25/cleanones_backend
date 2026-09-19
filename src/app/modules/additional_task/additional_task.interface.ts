@@ -2,6 +2,10 @@ import { Types } from "mongoose";
 
 export interface IPhotoRequirement {
     title: string;        // photo label defined by admin (e.g. "Before cleaning")
+    // Both optional — same guidance fields as Task's ITaskPhotoRequirement,
+    // reserved for future AI-assisted photo verification.
+    description?: string | null;
+    reference_image_url?: string | null;
     photo_url: string | null;  // uploaded by worker, null until uploaded
     is_uploaded: boolean;
 }

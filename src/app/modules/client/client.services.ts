@@ -18,12 +18,7 @@ import { Task } from '../task/task.model';
 import { AdditionalTask } from '../additional_task/additional_task.model';
 import '../worker/worker.model';
 import { Worker } from '../worker/worker.model';
-import {
-    anyPatternOccursOnDate,
-    combineDateWithTimeOfDay,
-    taskToPattern,
-} from '../cleaning_plan/availability.util';
-import { getRosterDateRange, TRosterView } from '../shift/shift.services';
+import { TRosterView, getPlanGroupedRosterFromDB } from '../shift/shift.services';
 
 const createClientIntoDB = async (
     managerId: string,
@@ -560,7 +555,6 @@ async function getClientScheduleRosterFromDB(
         status: { $ne: 'completed' },
     })
         .populate('location')
-        .populate('assigned_workers.worker', 'name email phone profile_photo')
         .lean();
 
     const clientPlanIds = clientPlans.map((p) => p._id);
@@ -617,7 +611,7 @@ async function getClientScheduleRosterFromDB(
 
     const rosterShifts: Array<{
         id: string;
-        shiftId: string;
+        shiftId: string | null;
         planId: string;
         planTitle: string;
         workerName: string;
@@ -626,10 +620,16 @@ async function getClientScheduleRosterFromDB(
         location: string;
         locationAddress: string;
         date: string;
-        startTime: string;
-        endTime: string;
+        // null until a manager has staffed this due date (see
+        // assignWorkersToShift) — no real time to show before that.
+        startTime: string | null;
+        endTime: string | null;
         durationMinutes: number;
+        // A Shift's real lifecycle status ('upcoming'/'in_progress'/
+        // 'completed'/'cancelled'), or 'unstaffed' for a due date nobody
+        // has been assigned to yet.
         status: string;
+        isStaffed: boolean;
         roomsCount: number;
         tasksCount: number;
         assignedWorkers: Array<{ name: string; role?: string }>;
@@ -652,19 +652,22 @@ async function getClientScheduleRosterFromDB(
         const planTitle =
             (shift.cleaning_plan as any)?.title || 'Cleaning Plan';
 
-        const startTime = shift.date_time ? formatTime(new Date(shift.date_time)) : '08:00';
+        // A materialized Shift always carries a real date_time/end_time —
+        // both are set together, required, at staffing time.
         const durationMinutes = shift.duration_minutes || 480;
-        const endTime = shift.date_time
-            ? calculateEndTime(new Date(shift.date_time), durationMinutes)
-            : '16:00';
+        const startTime = formatTime(new Date(shift.date_time));
+        const endTime = calculateEndTime(new Date(shift.date_time), durationMinutes);
 
         const workers = shift.assigned_workers || [];
+        const isStaffed = workers.length > 0;
         const assignedWorkers = workers.map((w) => ({
             name: w.name || (w.worker as any)?.name || 'Specialist',
             role: w.role || 'Specialist',
         }));
 
-        if (workers.length === 0) {
+        if (!isStaffed) {
+            // Edge case: a manager staffed this date with an empty crew.
+            // The Shift document exists, but nobody is actually assigned.
             rosterShifts.push({
                 id: `${shift._id}_unassigned`,
                 shiftId: shift._id.toString(),
@@ -679,7 +682,8 @@ async function getClientScheduleRosterFromDB(
                 startTime,
                 endTime,
                 durationMinutes,
-                status: shift.status || 'upcoming',
+                status: 'unstaffed',
+                isStaffed,
                 roomsCount: shift.rooms?.length || 0,
                 tasksCount: shift.tasks?.length || 0,
                 assignedWorkers,
@@ -706,7 +710,8 @@ async function getClientScheduleRosterFromDB(
                     startTime,
                     endTime,
                     durationMinutes,
-                    status: shift.status || 'upcoming',
+                    status: shift.status,
+                    isStaffed,
                     roomsCount: shift.rooms?.length || 0,
                     tasksCount: shift.tasks?.length || 0,
                     assignedWorkers,
@@ -744,75 +749,39 @@ async function getClientScheduleRosterFromDB(
                 ? planTasksDuration
                 : plan.max_estimated_duration || 480;
 
-        let planStartTimeObj = new Date(dateStart);
-        if (plan.date_time) {
-            const pt = new Date(plan.date_time);
-            planStartTimeObj.setHours(pt.getHours(), pt.getMinutes(), 0, 0);
-        } else {
-            planStartTimeObj.setHours(8, 0, 0, 0);
-        }
-
-        const startTime = formatTime(planStartTimeObj);
-        const endTime = calculateEndTime(planStartTimeObj, durationMinutes);
-
-        const workers = plan.assigned_workers || [];
-        const assignedWorkers = workers.map((w) => ({
-            name: (w.worker as any)?.name || 'Specialist',
-            role: w.role || 'Specialist',
-        }));
-
-        if (workers.length === 0) {
-            rosterShifts.push({
-                id: `${plan._id}_unassigned`,
-                shiftId: plan._id.toString(),
-                planId,
-                planTitle,
-                workerName: 'Unassigned Specialist',
-                workerId: '',
-                workerRole: 'Specialist',
-                location: locationName,
-                locationAddress,
-                date: dateStr,
-                startTime,
-                endTime,
-                durationMinutes,
-                status: 'upcoming',
-                roomsCount: planRooms.length,
-                tasksCount: planTasksCount,
-                assignedWorkers,
-            });
-            teamMembersSet.add('Unassigned Specialist');
-        } else {
-            for (const aw of workers) {
-                const workerName =
-                    (aw.worker as any)?.name ||
-                    'Specialist';
-                teamMembersSet.add(workerName);
-                rosterShifts.push({
-                    id: `${plan._id}_${(aw.worker as any)?._id || workerName}`,
-                    shiftId: plan._id.toString(),
-                    planId,
-                    planTitle,
-                    workerName,
-                    workerId: (aw.worker as any)?._id?.toString() || '',
-                    workerRole: aw.role || 'Specialist',
-                    location: locationName,
-                    locationAddress,
-                    date: dateStr,
-                    startTime,
-                    endTime,
-                    durationMinutes,
-                    status: 'upcoming',
-                    roomsCount: planRooms.length,
-                    tasksCount: planTasksCount,
-                    assignedWorkers,
-                });
-            }
-        }
+        // A Cleaning Plan carries no schedule or crew of its own — this due
+        // date hasn't been staffed yet (see assignWorkersToShift), so there
+        // is no real shift, start/end time, or assigned worker to show.
+        rosterShifts.push({
+            id: `${plan._id}_unassigned`,
+            shiftId: null,
+            planId,
+            planTitle,
+            workerName: 'Unassigned Specialist',
+            workerId: '',
+            workerRole: 'Specialist',
+            location: locationName,
+            locationAddress,
+            date: dateStr,
+            startTime: null,
+            endTime: null,
+            durationMinutes,
+            status: 'unstaffed',
+            isStaffed: false,
+            roomsCount: planRooms.length,
+            tasksCount: planTasksCount,
+            assignedWorkers: [],
+        });
+        teamMembersSet.add('Unassigned Specialist');
     }
 
     const teamMembers = Array.from(teamMembersSet);
-    const distinctShiftIds = new Set(rosterShifts.map((s) => s.shiftId));
+    // Unstaffed rows have shiftId: null (no Shift document exists yet) but
+    // are still exactly one row per due occurrence — fall back to planId so
+    // they aren't all collapsed into a single "null" entry here.
+    const distinctShiftIds = new Set(
+        rosterShifts.map((s) => s.shiftId ?? `plan:${s.planId}`)
+    );
     const totalShifts = distinctShiftIds.size;
     const totalHours = Number(
         (
@@ -1055,19 +1024,6 @@ const getClientTotalsFromDB = async (clientId: string) => {
     };
 };
 
-interface ClientRosterShiftEntry {
-    date: string;
-    shift_id: string | null;
-    is_virtual: boolean;
-    status: string;
-    start_time: Date;
-    end_time: Date;
-    duration_minutes: number;
-    rooms: { total: number; completed: number };
-    tasks: { total: number; completed: number };
-    assigned_workers: Array<{ worker_id: string; name: string; role: string }>;
-}
-
 interface ClientRosterParams {
     view: TRosterView;
     date?: string;
@@ -1079,178 +1035,19 @@ interface ClientRosterParams {
 
 // Client-facing counterpart to shift.services' getShiftRosterFromDB, but
 // grouped by CLEANING PLAN instead of by worker: for each of the client's
-// plans (paginated), every shift in the selected day/week/month window —
-// merging materialized Shift documents with not-yet-materialized virtual
-// occurrences, same universe as getClientScheduleRosterFromDB and the
-// manager roster. Reuses getRosterDateRange so 'week'/'month' boundaries
-// stay identical to the manager-facing roster.
+// plans (paginated), every due date in the selected day/week/month window —
+// the real, staffed Shift where one exists, otherwise an unstaffed
+// placeholder. Thin wrapper around the shared getPlanGroupedRosterFromDB
+// (see shift.services.ts), scoped to just this client's plans — the manager-
+// facing GET /shift/plan-roster is the system-wide equivalent.
 const getClientPlanRosterFromDB = async (clientId: string, params: ClientRosterParams) => {
     const client = await Client.findById(clientId);
     if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
 
-    const { view, date, year, month } = params;
-    const { start, end } = getRosterDateRange(view, date, year, month);
-
-    const page = Math.max(1, Math.trunc(params.page ?? 1) || 1);
-    const limit = Math.min(50, Math.max(1, Math.trunc(params.limit ?? 10) || 10));
-
-    const planFilter = { client: clientId, isDeleted: { $ne: true } };
-
-    const [totalPlans, plans] = await Promise.all([
-        CleaningPlan.countDocuments(planFilter),
-        CleaningPlan.find(planFilter)
-            .select('title location rooms date_time end_date assigned_workers')
-            .sort({ title: 1, _id: 1 })
-            .skip((page - 1) * limit)
-            .limit(limit)
-            .populate('assigned_workers.worker', 'name')
-            .lean(),
-    ]);
-
-    const totalPage = totalPlans ? Math.ceil(totalPlans / limit) : 0;
-
-    if (!plans.length) {
-        return {
-            view,
-            start_date: start,
-            end_date: end,
-            meta: { page, limit, total: totalPlans, totalPage, total_shifts: 0 },
-            cleaning_plans: [],
-        };
-    }
-
-    const planIds = plans.map(p => p._id);
-    const allRoomIds = [...new Set(plans.flatMap(p => (p.rooms ?? []).map(r => r.toString())))];
-    const allLocationIds = [...new Set(plans.map(p => p.location.toString()))];
-
-    const [tasks, locations, materializedShifts] = await Promise.all([
-        Task.find({ room: { $in: allRoomIds }, is_active: true })
-            .select('room frequency_type days_of_week days_of_month duration_minutes')
-            .lean(),
-        Location.find({ _id: { $in: allLocationIds } }).select('name').lean(),
-        Shift.find({
-            cleaning_plan: { $in: planIds },
-            date: { $gte: start, $lt: end },
-        }).lean(),
-    ]);
-
-    const tasksByRoom = new Map<string, typeof tasks>();
-    for (const t of tasks) {
-        const key = t.room.toString();
-        const list = tasksByRoom.get(key);
-        if (list) list.push(t);
-        else tasksByRoom.set(key, [t]);
-    }
-    const locationNameById = new Map(locations.map(l => [l._id.toString(), l.name]));
-    const materializedByPlanDate = new Map(
-        materializedShifts.map(s => [`${s.cleaning_plan.toString()}|${s.date.toISOString()}`, s])
+    return getPlanGroupedRosterFromDB(
+        { client: clientId, isDeleted: { $ne: true } },
+        params
     );
-
-    let totalShifts = 0;
-
-    const cleaning_plans = plans.map(plan => {
-        const planIdStr = plan._id.toString();
-        const planRoomIds = (plan.rooms ?? []).map(r => r.toString());
-        const planTasks = planRoomIds.flatMap(r => tasksByRoom.get(r) ?? []);
-        const patterns = planTasks.map(t => taskToPattern(t, plan.date_time, plan.end_date ?? null));
-        const locationName = locationNameById.get(plan.location.toString()) ?? '';
-
-        const shifts: ClientRosterShiftEntry[] = [];
-        let totalMinutes = 0;
-
-        for (
-            let cursor = new Date(start);
-            cursor < end;
-            cursor.setUTCDate(cursor.getUTCDate() + 1)
-        ) {
-            const day = new Date(cursor);
-            const dateKey = day.toISOString().slice(0, 10);
-            const materialized = materializedByPlanDate.get(`${planIdStr}|${day.toISOString()}`);
-
-            if (materialized) {
-                const planTasksInShift = (materialized.tasks || []).filter(
-                    t => t.source === 'plan_task' && t.room
-                );
-                const roomIds = (materialized.rooms || []).map(r => r.room.toString());
-                let completedRooms = 0;
-                for (const roomId of roomIds) {
-                    const tasksInRoom = planTasksInShift.filter(t => t.room?.toString() === roomId);
-                    if (tasksInRoom.length > 0 && tasksInRoom.every(t => t.is_completed)) {
-                        completedRooms += 1;
-                    }
-                }
-                const totalTasksInShift = (materialized.tasks || []).length;
-                const completedTasksInShift = (materialized.tasks || []).filter(t => t.is_completed).length;
-
-                shifts.push({
-                    date: dateKey,
-                    shift_id: materialized._id.toString(),
-                    is_virtual: false,
-                    status: materialized.status,
-                    start_time: materialized.date_time,
-                    end_time: new Date(
-                        materialized.date_time.getTime() + materialized.duration_minutes * 60_000
-                    ),
-                    duration_minutes: materialized.duration_minutes,
-                    rooms: { total: roomIds.length, completed: completedRooms },
-                    tasks: { total: totalTasksInShift, completed: completedTasksInShift },
-                    assigned_workers: (materialized.assigned_workers || []).map(w => ({
-                        worker_id: w.worker?.toString() || '',
-                        name: w.name,
-                        role: w.role,
-                    })),
-                });
-                totalMinutes += materialized.duration_minutes;
-                totalShifts += 1;
-                continue;
-            }
-
-            if (!planTasks.length) continue;
-            if (!anyPatternOccursOnDate(patterns, day)) continue;
-
-            const virtualDurationMinutes = planTasks.reduce(
-                (sum, t) => sum + (t.duration_minutes || 0),
-                0
-            );
-            const startTime = combineDateWithTimeOfDay(day, plan.date_time);
-
-            shifts.push({
-                date: dateKey,
-                shift_id: null,
-                is_virtual: true,
-                status: 'upcoming',
-                start_time: startTime,
-                end_time: new Date(startTime.getTime() + virtualDurationMinutes * 60_000),
-                duration_minutes: virtualDurationMinutes,
-                rooms: { total: planRoomIds.length, completed: 0 },
-                tasks: { total: planTasks.length, completed: 0 },
-                assigned_workers: (plan.assigned_workers || []).map(w => ({
-                    worker_id: (w.worker as any)?._id?.toString() || w.worker?.toString() || '',
-                    name: (w.worker as any)?.name || 'Specialist',
-                    role: w.role,
-                })),
-            });
-            totalMinutes += virtualDurationMinutes;
-            totalShifts += 1;
-        }
-
-        return {
-            plan_id: planIdStr,
-            plan_title: plan.title,
-            location_name: locationName,
-            total_shifts_in_range: shifts.length,
-            total_hours_in_range: parseFloat((totalMinutes / 60).toFixed(2)),
-            shifts,
-        };
-    });
-
-    return {
-        view,
-        start_date: start,
-        end_date: end,
-        meta: { page, limit, total: totalPlans, totalPage, total_shifts: totalShifts },
-        cleaning_plans,
-    };
 };
 
 const clientServices = {

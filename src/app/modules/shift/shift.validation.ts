@@ -8,10 +8,17 @@ const assignedWorkerSchema = z.object({
 });
 
 const assignWorkersValidationSchema = z.object({
-    body: z.object({
-        assigned_workers: z.array(assignedWorkerSchema),
-        force: z.coerce.boolean().optional(),
-    }),
+    body: z
+        .object({
+            assigned_workers: z.array(assignedWorkerSchema),
+            start_time: z.coerce.date({ required_error: 'start_time is required' }),
+            end_time: z.coerce.date({ required_error: 'end_time is required' }),
+            force: z.coerce.boolean().optional(),
+        })
+        .refine((data) => data.end_time > data.start_time, {
+            message: 'end_time must be after start_time',
+            path: ['end_time'],
+        }),
 });
 
 const updateStatusValidationSchema = z.object({
