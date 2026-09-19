@@ -459,7 +459,14 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
             $addFields: {
                 total_rooms: { $size: { $ifNull: ['$rooms', []] } },
                 total_tasks: { $sum: '$rooms.total_task' },
-                total_duration: { $sum: '$rooms.total_duration' },
+                // Sum of the recurring room tasks' duration_minutes only —
+                // the plan's regular checklist, excluding ad-hoc work.
+                total_task_duration: { $sum: '$rooms.total_duration' },
+                // Sum across every AdditionalTask regardless of status —
+                // same "unfiltered" convention as total_additional_tasks_pending below.
+                total_additional_task_duration: {
+                    $sum: { $ifNull: ['$additional_tasks.duration_minutes', []] },
+                },
                 total_additional_tasks_pending: {
                     $size: {
                         $filter: {
@@ -468,6 +475,16 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
                             cond: { $eq: ['$$task.is_completed', false] },
                         },
                     },
+                },
+            },
+        },
+        {
+            // Grand total: regular checklist time + ad-hoc task time
+            // combined — split into its own stage so it can reference the
+            // two fields computed just above.
+            $addFields: {
+                total_duration: {
+                    $add: ['$total_task_duration', '$total_additional_task_duration'],
                 },
             },
         },
