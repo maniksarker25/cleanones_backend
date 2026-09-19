@@ -55,6 +55,16 @@ These no longer exist. Remove any calls to them.
 
 Any UI that showed "assigned crew" or "start date" directly on the Cleaning Plan card must be removed or replaced — that information now lives on individual Shifts (see below).
 
+**Duration fields on `GET /cleaning-plan/single-cleaning-plan/{id}` were also split out** (previously `total_duration` silently only counted regular room tasks, ignoring additional tasks):
+
+| Field | Meaning |
+|---|---|
+| `total_task_duration` | Sum of the plan's regular room-task `duration_minutes` only. |
+| `total_additional_task_duration` | **New.** Sum of every AdditionalTask's `duration_minutes` (any status). |
+| `total_duration` | **Now the true grand total** — `total_task_duration + total_additional_task_duration`. |
+
+If your UI showed `total_duration` as "total time for this plan," it will now be a bigger (correct) number once a plan has any additional tasks — update any hardcoded assumptions accordingly.
+
 ### 3.3 `PATCH /shift/{planId}/{date}/assign-workers` — now requires a schedule, and is the only way a Shift is created
 
 **New required body fields:**
