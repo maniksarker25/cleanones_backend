@@ -93,6 +93,8 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
             : [];
         const photoRequirements = selected.map((pr) => ({
             title: pr.title,
+            description: pr.description ?? null,
+            reference_image_url: pr.reference_image_url ?? null,
             photo_url: null,
             is_uploaded: false,
         }));
@@ -161,7 +163,11 @@ export const toShiftTaskFromAdditionalTask = (additionalTask: {
     name: string;
     duration_minutes: number;
     is_photo_required: boolean;
-    photo_requirements: { title: string }[];
+    photo_requirements: {
+        title: string;
+        description?: string | null;
+        reference_image_url?: string | null;
+    }[];
 }): IShiftTask => ({
     task: additionalTask._id,
     // Not scoped to any one room — see IShiftTask.room.
@@ -174,6 +180,8 @@ export const toShiftTaskFromAdditionalTask = (additionalTask: {
     // configured — every one of them is required, copied as-is.
     photo_requirements: (additionalTask.photo_requirements ?? []).map((pr) => ({
         title: pr.title,
+        description: pr.description ?? null,
+        reference_image_url: pr.reference_image_url ?? null,
         photo_url: null,
         is_uploaded: false,
     })),

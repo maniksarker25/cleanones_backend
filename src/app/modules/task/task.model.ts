@@ -5,6 +5,8 @@ import { TTask } from './task.interface';
 const photoRequirementSchema = new Schema(
     {
         title: { type: String, required: true, trim: true },
+        description: { type: String, default: null, trim: true },
+        reference_image_url: { type: String, default: null, trim: true },
     },
     { _id: false }
 );

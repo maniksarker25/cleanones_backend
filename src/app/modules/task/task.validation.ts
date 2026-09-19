@@ -38,6 +38,8 @@ const frequencyFieldsRefinement = (
 // Shift's own task-instance snapshot instead.
 const photoRequirementSchema = z.object({
     title: z.string().min(1, 'Photo title is required').trim(),
+    description: z.string().trim().optional(),
+    reference_image_url: z.string().trim().optional(),
 });
 
 const photoFieldsRefinement = (
