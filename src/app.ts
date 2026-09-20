@@ -41,6 +41,7 @@ app.use(
             "http://10.10.28.194:3001",
             "https://cleanones.vercel.app",
             "https://cleanones-client-portal.vercel.app",
+            "https://cleanones-admin-testing.vercel.app",
             "https://cleanones-client-testing.vercel.app"
         ],
         credentials: true,

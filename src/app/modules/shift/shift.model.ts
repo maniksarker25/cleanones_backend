@@ -8,6 +8,65 @@ const photoRequirementSchema = new Schema(
         reference_image_url: { type: String, default: null, trim: true },
         photo_url: { type: String, default: null },
         is_uploaded: { type: Boolean, default: false },
+
+        // Photo verification. All optional so existing documents stay valid.
+        gate_status: { type: String, enum: ['ok', 'rejected'], default: null },
+        gate_reason: { type: String, default: null },
+        gate_metrics: {
+            type: {
+                sharpness: Number,
+                brightness: Number,
+                width: Number,
+                height: Number,
+            },
+            default: null,
+            _id: false,
+        },
+        phash: { type: String, default: null },
+
+        ai_status: {
+            type: String,
+            enum: ['pending', 'passed', 'failed', 'review', 'error', 'skipped'],
+            default: null,
+        },
+        ai_score: { type: Number, default: null },
+        ai_confidence: { type: Number, default: null },
+        ai_reason: { type: String, default: null },
+        ai_checks: {
+            type: [
+                {
+                    item: String,
+                    passed: { type: Boolean, default: null },
+                    note: String,
+                },
+            ],
+            default: undefined,
+            _id: false,
+        },
+        ai_subject_matches: { type: Boolean, default: null },
+        ai_requirement_met: { type: Boolean, default: null },
+        ai_model: { type: String, default: null },
+        ai_evaluated_at: { type: Date, default: null },
+        ai_error: { type: String, default: null },
+
+        attempt_count: { type: Number, default: 0 },
+        forced_accept: { type: Boolean, default: false },
+        audit_sampled: { type: Boolean, default: false },
+
+        manager_verdict: {
+            type: String,
+            enum: ['approved', 'rejected'],
+            default: null,
+        },
+        manager_verdict_by: {
+            type: Schema.Types.ObjectId,
+            ref: 'Manager',
+            default: null,
+        },
+        manager_verdict_at: { type: Date, default: null },
+        manager_note: { type: String, default: null },
+        escalated_at: { type: Date, default: null },
+        auto_accepted: { type: Boolean, default: false },
     },
     { _id: false }
 );

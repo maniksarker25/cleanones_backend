@@ -1,3 +1,10 @@
+import { Types } from 'mongoose';
+
+/**
+ * Photo AI verification types. All added fields are optional so existing
+ * shifts stay valid without a migration, and `is_completed` keeps its
+ * current meaning.
+ */
 
 /** Result of the pre-upload gate. */
 export type GateStatus = 'ok' | 'rejected';
@@ -99,4 +106,13 @@ export interface IPhotoAiFields {
     forced_accept?: boolean;
     /** Pulled into review by the audit sampler despite auto-approving. */
     audit_sampled?: boolean;
+
+    manager_verdict?: 'approved' | 'rejected';
+    manager_verdict_by?: Types.ObjectId;
+    manager_verdict_at?: Date;
+    manager_note?: string;
+    /** Set when the 48-hour escalation fired. */
+    escalated_at?: Date;
+    /** Accepted by the 7-day sweep because nobody reviewed it. */
+    auto_accepted?: boolean;
 }
