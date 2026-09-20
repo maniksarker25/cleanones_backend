@@ -2519,32 +2519,55 @@ export const updateShiftStatus = async (
  * worker resubmitting an earlier photo. Scoped to the room and limited to the
  * last 60 days so the comparison stays cheap.
  */
+/**
+ * Hashes to compare a new photo against, split by how strict the comparison
+ * should be.
+ *
+ * A room cleaned to the same standard photographs almost identically every
+ * day, so a near-match across days is the expected result, not evidence of
+ * anything. Measured distances: an identical file scores 0, the same room
+ * under different lighting scores 2, and a slightly moved camera scores 20+.
+ * Only an exact match across days means a file was reused, whereas within one
+ * shift a near-match means the same photo was submitted for two requirements.
+ */
 const collectRoomPhotoHashes = async (
     roomId: Types.ObjectId | null | undefined,
-    excludeShiftId: Types.ObjectId
-): Promise<string[]> => {
-    if (!roomId) return [];
+    shiftId: Types.ObjectId
+): Promise<{ sameShift: string[]; otherShifts: string[] }> => {
+    const sameShift: string[] = [];
+    const otherShifts: string[] = [];
+
+    const current = await Shift.findById(shiftId)
+        .select('tasks.photo_requirements.phash')
+        .lean();
+    for (const task of current?.tasks ?? []) {
+        for (const requirement of task.photo_requirements ?? []) {
+            if (requirement.phash) sameShift.push(requirement.phash);
+        }
+    }
+
+    if (!roomId) return { sameShift, otherShifts };
+
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - 60);
 
     const shifts = await Shift.find({
-        _id: { $ne: excludeShiftId },
+        _id: { $ne: shiftId },
         date: { $gte: since },
         'tasks.room': roomId,
     })
         .select('tasks.room tasks.photo_requirements.phash')
         .lean();
 
-    const hashes: string[] = [];
     for (const shift of shifts) {
         for (const task of shift.tasks ?? []) {
             if (task.room?.toString() !== roomId.toString()) continue;
             for (const requirement of task.photo_requirements ?? []) {
-                if (requirement.phash) hashes.push(requirement.phash);
+                if (requirement.phash) otherShifts.push(requirement.phash);
             }
         }
     }
-    return hashes;
+    return { sameShift, otherShifts };
 };
 
 /**
@@ -2624,12 +2647,12 @@ export const uploadShiftTaskPhoto = async (
     const attempts = (requirement?.attempt_count ?? 0) + 1;
 
     // Photos already accepted for this room, so a resubmitted one is caught.
-    const previousHashes = await collectRoomPhotoHashes(
+    const reuseCandidates = await collectRoomPhotoHashes(
         shift.tasks[taskIndex].room,
         shift._id
     );
 
-    const gate = await PhotoAiService.checkPhotoByUrl(photoUrl, previousHashes);
+    const gate = await PhotoAiService.checkPhotoByUrl(photoUrl, reuseCandidates);
 
     // After max_attempts the photo is taken anyway and flagged, so a worker is
     // never stranded on site. The rejected attempts stay on the record.
