@@ -1,16 +1,7 @@
-/**
- * Pre-upload checks. Pure measurement over the image pixels, no model and no
- * network call, so the result is repeatable. Runs in ~150ms on a 1024px image.
- */
 import sharp, { Sharp } from 'sharp';
 import { photoAiConfig } from './photo_ai.config';
 import { IGateMetrics, IGateResult } from './photo_ai.interface';
 
-/**
- * Laplacian variance. Sharp images have strong second derivatives at edges;
- * blur smears them and the variance collapses. Note the value is scale
- * dependent, so the 512px resize below and the threshold go together.
- */
 const laplacianVariance = async (image: Sharp): Promise<number> => {
     const { data, info } = await image
         .clone()
@@ -24,7 +15,6 @@ const laplacianVariance = async (image: Sharp): Promise<number> => {
     let sumSq = 0;
     let count = 0;
 
-    // 4-neighbour Laplacian kernel, interior pixels only.
     for (let y = 1; y < height - 1; y++) {
         for (let x = 1; x < width - 1; x++) {
             const i = y * width + x;
@@ -45,10 +35,6 @@ const laplacianVariance = async (image: Sharp): Promise<number> => {
     return sumSq / count - mean * mean;
 };
 
-/**
- * 64-bit dHash. Survives resizing and recompression but changes with the
- * scene, so it catches a resubmitted photo.
- */
 const dHash = async (image: Sharp): Promise<string> => {
     const { data } = await image
         .clone()
@@ -57,7 +43,6 @@ const dHash = async (image: Sharp): Promise<string> => {
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-    // Built as hex rather than a BigInt: the project targets below ES2020.
     let hash = '';
     let nibble = 0;
     let bits = 0;
@@ -78,7 +63,6 @@ const dHash = async (image: Sharp): Promise<string> => {
 
 const NIBBLE_BITS = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
 
-/** Hamming distance between two dHash hex strings. Lower means more alike. */
 export const hashDistance = (a: string, b: string): number => {
     if (!a || !b || a.length !== b.length) return 64;
     let distance = 0;
@@ -91,10 +75,6 @@ export const hashDistance = (a: string, b: string): number => {
     return distance;
 };
 
-/**
- * `previousHashes` are the dHashes already stored for this room and title.
- * Omit to skip the reuse check.
- */
 export const runGate = async (
     buffer: Buffer,
     previousHashes: string[] = []
@@ -129,7 +109,6 @@ export const runGate = async (
         phash,
     });
 
-    // Most actionable problem first, so the worker is told one thing to fix.
     if (longEdge < gate.min_long_edge) {
         return reject('Photo resolution is too low. Please retake.');
     }
@@ -153,14 +132,10 @@ export const runGate = async (
     return { status: 'ok', metrics, phash };
 };
 
-/**
- * Downscale and re-encode for the model. Gemini bills 258 tokens per 768px
- * tile, so 1024px costs about a third of 2048px with no useful loss here.
- */
 export const prepareForModel = async (buffer: Buffer): Promise<string> => {
     const { image } = photoAiConfig;
     const out = await sharp(buffer, { failOn: 'none' })
-        .rotate() // apply EXIF orientation before it is dropped
+        .rotate()
         .resize(image.max_long_edge, image.max_long_edge, {
             fit: 'inside',
             withoutEnlargement: true,
