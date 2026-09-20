@@ -244,6 +244,43 @@ const getAllAdditionalTasksByPlanFromDB = async (
                 { $sort: { [sortField]: sortOrder } },
                 { $skip: skip },
                 { $limit: limit },
+                // Adds `cleaning_plan` (title + its location's name/address)
+                // alongside the existing `cleaning_plan_id` — that field stays
+                // a plain id so nothing already reading it as a string breaks.
+                {
+                    $lookup: {
+                        from: 'cleaning_plans',
+                        localField: 'cleaning_plan_id',
+                        foreignField: '_id',
+                        as: 'cleaning_plan',
+                        pipeline: [
+                            {
+                                $lookup: {
+                                    from: 'locations',
+                                    localField: 'location',
+                                    foreignField: '_id',
+                                    as: 'location',
+                                    pipeline: [
+                                        { $project: { name: 1, address: 1 } },
+                                    ],
+                                },
+                            },
+                            {
+                                $unwind: {
+                                    path: '$location',
+                                    preserveNullAndEmptyArrays: true,
+                                },
+                            },
+                            { $project: { title: 1, location: 1 } },
+                        ],
+                    },
+                },
+                {
+                    $unwind: {
+                        path: '$cleaning_plan',
+                        preserveNullAndEmptyArrays: true,
+                    },
+                },
             ],
         },
     });

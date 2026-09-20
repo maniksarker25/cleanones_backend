@@ -10,12 +10,7 @@ type TMinimalPlan = Pick<ICleaningPlan, 'title' | 'client'> & {
     _id: Types.ObjectId | string;
 };
 
-// ─── Group chat lifecycle hooks (called from cleaning_plan.services.ts) ───────
 
-// A Cleaning Plan carries no crew of its own (see cleaning_plan.interface.ts)
-// — the group chat starts with just the client and gains workers one at a
-// time via syncChatGroupWorkers as they're staffed onto specific shifts (see
-// assignWorkersToShift in shift.services.ts).
 const createChatGroupForPlan = async (plan: TMinimalPlan) => {
     return Chat.create({
         type: 'group',
@@ -88,13 +83,7 @@ const deactivateChatGroupForPlan = async (
     );
 };
 
-/**
- * Same as deactivateChatGroupForPlan, but for many plans in one round trip —
- * used when a whole location is deleted and every plan under it goes down
- * at once (see deleteLocationFromDB). N individual findOneAndUpdate calls
- * would each open their own round trip for no benefit here, since none of
- * the callers need the updated documents back.
- */
+
 const deactivateChatGroupsForPlans = async (
     planIds: (Types.ObjectId | string)[],
     session?: ClientSession
@@ -107,13 +96,7 @@ const deactivateChatGroupsForPlans = async (
     );
 };
 
-// ─── Worker<->managers chat lifecycle hooks (called from worker.services.ts) ──
 
-// One per worker, created right after the worker profile — that worker plus
-// every manager (implicitly, the same way a manager is implicitly in every
-// 'group' chat — see ensureChatAccessOrThrow). Idempotent via the unique
-// partial index on { workers: 1 } for type: 'worker', so calling this twice
-// for the same worker is a harmless no-op rather than a duplicate chat.
 const createWorkerManagersChat = async (workerId: Types.ObjectId | string) => {
     const chat = await Chat.findOneAndUpdate(
         { type: 'worker', workers: workerId },
@@ -128,7 +111,6 @@ const createWorkerManagersChat = async (workerId: Types.ObjectId | string) => {
             worker: workerId,
         });
     } catch {
-        // best-effort realtime nudge, see note above createChatGroupForPlan
     }
 
     return chat;
@@ -144,11 +126,6 @@ const deactivateWorkerManagersChat = async (
     );
 };
 
-// ─── Client<->managers chat lifecycle hooks (called from client.services.ts) ──
-//
-// Exact mirror of the worker<->managers chat above, other than which side is
-// singular: one per client, that client plus every manager implicitly a
-// member, no workers involved.
 
 const createClientManagersChat = async (clientId: Types.ObjectId | string) => {
     const chat = await Chat.findOneAndUpdate(
@@ -213,10 +190,7 @@ const ensureChatAccessOrThrow = async (
         throw new AppError(httpStatus.NOT_FOUND, 'Chat not found');
     }
 
-    // Managers get blanket access to every group, worker<->managers, and
-    // client<->managers chat (by design — "all managers" are implicitly
-    // members of all three). Direct 1:1 chats are private between a client
-    // and a worker; managers are not automatically part of those.
+
     if (
         role === USER_ROLE.manager &&
         (chat.type === 'group' ||
@@ -286,11 +260,7 @@ const renameChatIntoDB = async (
     return result;
 };
 
-// Neither a 'worker' nor a 'client' chat has a single stored name — each is
-// named from the other party's point of view: "Managers"/"Manager" for the
-// worker/client themselves, and the other party's own name for a manager.
-// Computed here rather than stored, so it can never go stale and there is
-// nothing to keep in sync when a worker or client renames themselves.
+
 const WORKER_CHAT_NAME_FOR_WORKER = 'Managers';
 const CLIENT_CHAT_NAME_FOR_CLIENT = 'Manager';
 
@@ -316,18 +286,7 @@ const toDisplayName = (
     return chat.name ?? null;
 };
 
-// ─── REST: unified chat list (all four types, one query, one sort) ─────────
-//
-// Chat already stores all four types in one collection with shared
-// client/workers fields, so a single filter naturally covers whichever types
-// apply to the caller without a separate query per type or an app-level
-// merge: a client's chats are simply every active Chat with client = them
-// (group, direct, or their one client-chat — all three share that field); a
-// worker's are every active Chat with them in workers (group, direct, or
-// their one worker-chat). A manager's are every active group, worker-chat and
-// client-chat — never direct chats, which are private between a client and a
-// worker and managers are deliberately not implicit members of those (see
-// ensureChatAccessOrThrow).
+
 
 const getMyChatsFromDB = async (
     profileId: string,

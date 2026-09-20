@@ -68,11 +68,6 @@ const updateLocationIntoDB = async (
         }
     );
 
-    // Keep today's already-materialized (but not yet started) shifts in
-    // sync with the edited name/coordinates — otherwise the check-in
-    // geofence would keep validating against stale coordinates until the
-    // next midnight cron re-materializes them. Every plan using this
-    // location, not just one — a location can be shared across plans.
     const affectedPlans = await CleaningPlan.find({
         location: id,
         is_active: true,
@@ -93,13 +88,6 @@ const deleteLocationFromDB = async (managerId: string, id: string) => {
         throw new AppError(httpStatus.NOT_FOUND, 'Location not found');
     }
 
-    // The location flip, every plan at that location, their chat groups, and
-    // cancelling their future shifts must land together or not at all — a
-    // crash mid-cascade must never leave a "deactivated" location with a
-    // plan (or a shift under it) still active and staffable. The event is
-    // fired AFTER the transaction commits, never inside it: it's an external
-    // side effect (notifications), not data that needs to roll back, and
-    // must never fire for a write that didn't actually land.
     const session = await mongoose.startSession();
     let result;
     let planCount: number;
@@ -112,13 +100,7 @@ const deleteLocationFromDB = async (managerId: string, id: string) => {
                 { new: true, session }
             );
 
-            // Every active plan at this location goes down with it — same
-            // cascade as a direct plan delete (deactivate + cancel its
-            // future shifts), just batched across every plan at once so a
-            // worker staffed across several of them is only ever counted/
-            // notified once (see cancelUpcomingShiftsAcrossPlans). Plans
-            // already inactive are left alone so this stays idempotent if a
-            // location is deleted twice.
+      
             const affectedPlans = await CleaningPlan.find({
                 location: id,
                 is_active: true,
@@ -471,11 +453,6 @@ const getClientLocationsFromDB = async (
     };
 };
 
-/**
- * Every location a worker is currently working: derived from the distinct
- * `location` of the worker's active, non-completed cleaning plans — not a
- * direct relation on Location/Worker itself.
- */
 const getWorkerLocationsFromDB = async (
     workerId: string,
     query: Record<string, unknown>

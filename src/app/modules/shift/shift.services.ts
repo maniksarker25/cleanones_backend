@@ -959,7 +959,11 @@ export const getActiveShiftForWorker = async (workerId: string) => {
 
     if (!shift) return {};
     const { tasks, rooms, assigned_workers, ...rest } = attachProgress(shift);
-    return rest;
+    // The full roster is stripped above (other workers' data isn't this
+    // caller's business), but their own check-in time is worth keeping —
+    // it's the one field off that array the worker's own dashboard needs.
+    const own = assigned_workers.find((aw) => aw.worker.toString() === workerId);
+    return { ...rest, check_in_at: own?.check_in_at ?? null };
 };
 
 /**
