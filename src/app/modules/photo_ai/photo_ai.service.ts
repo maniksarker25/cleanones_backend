@@ -1,12 +1,3 @@
-/**
- * The only file the rest of the app imports.
- *
- *   checkPhoto()     ~150ms, measurement only, may refuse an upload
- *   evaluatePhoto()  2-3s, calls the model, never refuses
- *
- * Neither throws; failures come back as a status so an outage cannot break a
- * photo upload or change task completion.
- */
 import axios from 'axios';
 import { photoAiConfig, isPhotoAiReady } from './photo_ai.config';
 import { prepareForModel, runGate } from './photo_ai.gate';
@@ -26,10 +17,6 @@ import {
     IPhotoAiFields,
 } from './photo_ai.interface';
 
-/**
- * Gate a photo before it is stored. Returns `ok` on internal error so a bug
- * here cannot stop a worker submitting completed work.
- */
 export const checkPhoto = async (
     buffer: Buffer,
     previousHashes: string[] = []
@@ -45,11 +32,6 @@ export const checkPhoto = async (
     }
 };
 
-/**
- * Gate a photo already in S3. Uploads go straight to S3 via multer-s3 and the
- * shift endpoint receives only a URL, so the bytes are fetched back here.
- * Budget 150-400ms for the CDN on top of the measurement. Fails open.
- */
 export const checkPhotoByUrl = async (
     photoUrl: string,
     previousHashes: string[] = []
@@ -87,11 +69,6 @@ const fail = (
     error,
 });
 
-/**
- * Evaluate a stored photo against its requirement. Runs after the photo is
- * saved and the task has completed. Safe to call fire-and-forget, from a
- * background job or from a cron sweep.
- */
 export const evaluatePhoto = async (
     input: IEvaluationInput,
     photoBuffer?: Buffer
@@ -102,7 +79,6 @@ export const evaluatePhoto = async (
         return fail('skipped', 'AI verification is not enabled.', started);
     }
 
-    // Use the caller's bytes when available, otherwise fetch.
     let buffer = photoBuffer;
     if (!buffer) {
         try {
@@ -128,7 +104,6 @@ export const evaluatePhoto = async (
         return fail('error', 'Photo could not be processed.', started, 'resize failed');
     }
 
-    // Repeat runs measure how stable the judgement is on this photo.
     const samples = Math.max(1, photoAiConfig.gemini.samples);
     const outcomes = await Promise.all(
         Array.from({ length: samples }, () => evaluateWithRetry(input, photoBase64))
@@ -151,7 +126,6 @@ export const evaluatePhoto = async (
         );
     }
 
-    // First run supplies the checks and wording; the rest measure spread.
     const primary = successful[0].data;
     const checks = toChecks(primary);
     const score = computeScore(checks);
@@ -186,7 +160,6 @@ export const evaluatePhoto = async (
     };
 };
 
-/** Fields to persist on the photo requirement. */
 export const gateResultToFields = (result: IGateResult): IPhotoAiFields => ({
     gate_status: result.status,
     gate_reason: result.reason,
@@ -194,17 +167,30 @@ export const gateResultToFields = (result: IGateResult): IPhotoAiFields => ({
     phash: result.phash,
 });
 
-/**
- * In shadow mode a passed/failed verdict is recorded but downgraded to
- * `review`, so it can be compared against manager decisions later without
- * influencing anything meanwhile.
- */
-export const aiResultToFields = (result: IAiResult): IPhotoAiFields => ({
-    ai_status: photoAiConfig.shadow_mode
-        ? result.status === 'passed' || result.status === 'failed'
+const resolveStatus = (result: IAiResult): IAiResult['status'] => {
+    if (photoAiConfig.shadow_mode) {
+        return result.status === 'passed' || result.status === 'failed'
             ? 'review'
-            : result.status
-        : result.status,
+            : result.status;
+    }
+    if (photoAiConfig.auto_only && result.status !== 'failed') {
+        return 'passed';
+    }
+    return result.status;
+};
+
+export const aiResultToFields = (result: IAiResult): IPhotoAiFields => ({
+    ai_status: resolveStatus(result),
+
+    ...(photoAiConfig.auto_only && !photoAiConfig.shadow_mode
+        ? {
+              manager_verdict: (result.status === 'failed'
+                  ? 'rejected'
+                  : 'approved') as 'approved' | 'rejected',
+              manager_verdict_at: new Date(),
+              auto_accepted: result.status !== 'passed',
+          }
+        : {}),
     ai_score: result.score,
     ai_confidence: result.confidence,
     ai_reason: result.reason,
