@@ -341,11 +341,20 @@ const getPhotoReviewList = catchAsync(async (req, res) => {
         throw new AppError(httpStatus.BAD_REQUEST, 'Invalid locationId');
     }
 
+    const status = req.query.status ? String(req.query.status) : undefined;
+    if (status && !['pending', 'decided', 'all'].includes(status)) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'status must be pending, decided or all'
+        );
+    }
+
     const result = await shiftServices.getPhotoReviewListFromDB({
         from: fromDate,
         to: toDate,
         planId: planId !== undefined ? String(planId) : undefined,
         locationId: locationId !== undefined ? String(locationId) : undefined,
+        status: status as 'pending' | 'decided' | 'all' | undefined,
     });
     sendResponse(res, {
         statusCode: httpStatus.OK,
@@ -505,6 +514,25 @@ const uploadTaskPhoto = catchAsync(async (req, res) => {
     });
 });
 
+const setPhotoVerdict = catchAsync(async (req, res) => {
+    const date = parseDateParam(req.params.date);
+    const result = await shiftServices.setPhotoVerdict(
+        req.user.profileId as string,
+        req.params.planId,
+        date,
+        req.params.taskId,
+        req.body.title,
+        req.body.verdict,
+        req.body.note
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Photo verdict recorded successfully',
+        data: result,
+    });
+});
+
 const markTaskComplete = catchAsync(async (req, res) => {
     const date = parseDateParam(req.params.date);
     const result = await shiftServices.markShiftTaskComplete(
@@ -570,6 +598,7 @@ const shiftController = {
     getShiftRoster,
     getManagerPlanRoster,
     getPhotoReviewList,
+    setPhotoVerdict,
     listShifts,
     getShift,
     getEligibleWorkers,

@@ -135,6 +135,13 @@ router.patch(
 );
 
 router.patch(
+    '/:planId/:date/tasks/:taskId/photo-verdict',
+    auth(USER_ROLE.manager),
+    validateRequest(shiftValidations.photoVerdictValidationSchema),
+    shiftController.setPhotoVerdict
+);
+
+router.patch(
     '/:planId/:date/tasks/:taskId/complete',
     auth(USER_ROLE.worker),
     shiftController.markTaskComplete
