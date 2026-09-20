@@ -2648,7 +2648,11 @@ export const uploadShiftTaskPhoto = async (
             description: requirement?.description,
             reference_image_url: requirement?.reference_image_url,
         },
-        context: { room_name: room?.name, room_type: room?.room_type },
+        context: {
+            room_name: room?.name,
+            room_type: room?.room_type,
+            task_name: shift.tasks[taskIndex].name,
+        },
     })
         .then((result) => saveAiFields(shift._id, taskId, title, result))
         .catch(() => undefined);
@@ -2960,23 +2964,143 @@ export const checkOutFromShift = async (
     }
 };
 
+/**
+ * Records a manager's decision on one uploaded photo.
+ *
+ * Deliberately does NOT reopen the task or change is_completed: the work is
+ * already finished and the worker has left. The verdict is a quality record,
+ * used for reporting and to decide what to bill, and it is what the AI's
+ * thresholds are tuned against.
+ */
+export const setPhotoVerdict = async (
+    managerId: string,
+    planId: string,
+    date: Date,
+    taskId: string,
+    title: string,
+    verdict: 'approved' | 'rejected',
+    note?: string
+) => {
+    const shift = await getShiftOrThrow(planId, date);
+
+    const task = shift.tasks.find((t) => t.task.toString() === taskId);
+    if (!task) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Task not found on this shift');
+    }
+    const requirement = task.photo_requirements.find((p) => p.title === title);
+    if (!requirement) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            `Unknown photo requirement "${title}" for this task`
+        );
+    }
+    if (!requirement.is_uploaded) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'No photo has been uploaded for this requirement yet'
+        );
+    }
+
+    await Shift.updateOne(
+        { _id: shift._id },
+        {
+            $set: {
+                'tasks.$[t].photo_requirements.$[p].manager_verdict': verdict,
+                'tasks.$[t].photo_requirements.$[p].manager_verdict_by':
+                    new Types.ObjectId(managerId),
+                'tasks.$[t].photo_requirements.$[p].manager_verdict_at': new Date(),
+                'tasks.$[t].photo_requirements.$[p].manager_note': note ?? null,
+                // A decided photo leaves the queue, so it must not also be
+                // picked up later by the auto-accept sweep.
+                'tasks.$[t].photo_requirements.$[p].auto_accepted': false,
+            },
+        },
+        {
+            arrayFilters: [
+                { 't.task': new Types.ObjectId(taskId) },
+                { 'p.title': title },
+            ],
+        }
+    );
+
+    return Shift.findById(shift._id);
+};
+
 export interface PhotoReviewQueryParams {
     from?: Date;
     to?: Date;
     planId?: string;
     locationId?: string;
+    /** 'pending' keeps only rows a manager has not decided on yet. */
+    status?: 'pending' | 'decided' | 'all';
+}
+
+export interface PhotoReviewPhoto {
+    title: string;
+    photo_url: string;
+    description: string | null;
+    reference_image_url: string | null;
+
+    ai_status: string | null;
+    ai_score: number | null;
+    ai_confidence: number | null;
+    ai_reason: string | null;
+    ai_checks: { item: string; passed: boolean | null; note?: string }[];
+    ai_subject_matches: boolean | null;
+    ai_requirement_met: boolean | null;
+    ai_evaluated_at: Date | null;
+
+    gate_status: string | null;
+    gate_reason: string | null;
+    attempt_count: number;
+    forced_accept: boolean;
+    audit_sampled: boolean;
+
+    manager_verdict: 'approved' | 'rejected' | null;
+    manager_verdict_at: Date | null;
+    manager_note: string | null;
+    escalated_at: Date | null;
+    auto_accepted: boolean;
 }
 
 export interface PhotoReviewRow {
+    /** Identifiers the manager UI needs to submit a verdict. */
+    shift_id: string;
+    plan_id: string;
+    task_id: string;
+    shift_date: Date;
+
     cleaning_name: string;
     room_name: string;
     task_name: string;
     duration_minutes: number;
-    shift_date: Date;
     location_name: string;
     address: string | null;
-    uploaded_photos: { title: string; photo_url: string }[];
+
+    /** Lower sorts first. Drives the default queue order. */
+    review_priority: number;
+    /** True while at least one photo still needs a manager decision. */
+    needs_review: boolean;
+
+    uploaded_photos: PhotoReviewPhoto[];
 }
+
+/**
+ * Queue position for one photo. The order is deliberate: a worker who could
+ * not produce a usable photo after three tries, or a photo of the wrong place,
+ * is more likely to be a real problem than a borderline score.
+ */
+const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
+    if (photo.manager_verdict) return 90;
+    if (photo.forced_accept) return 1;
+    if (photo.ai_subject_matches === false) return 2;
+    if (photo.ai_status === 'failed') return 3;
+    if (photo.ai_status === 'review') return 4;
+    if (photo.audit_sampled) return 5;
+    if (photo.ai_status === 'error' || photo.ai_status === 'pending') return 6;
+    if (!photo.ai_status) return 7;
+    return 8;
+};
 
 /**
  * Manager-facing photo review list: one row per shift task instance that has
@@ -3035,23 +3159,74 @@ export const getPhotoReviewListFromDB = async (
 
         for (const task of shift.tasks) {
             if (!task.is_photo_required) continue;
-            const uploadedPhotos = task.photo_requirements
+            const uploadedPhotos: PhotoReviewPhoto[] = task.photo_requirements
                 .filter((p) => p.is_uploaded)
-                .map((p) => ({ title: p.title, photo_url: p.photo_url as string }));
+                .map((p) => ({
+                    title: p.title,
+                    photo_url: p.photo_url as string,
+                    description: p.description ?? null,
+                    reference_image_url: p.reference_image_url ?? null,
+
+                    ai_status: p.ai_status ?? null,
+                    ai_score: p.ai_score ?? null,
+                    ai_confidence: p.ai_confidence ?? null,
+                    ai_reason: p.ai_reason ?? null,
+                    ai_checks: p.ai_checks ?? [],
+                    ai_subject_matches: p.ai_subject_matches ?? null,
+                    ai_requirement_met: p.ai_requirement_met ?? null,
+                    ai_evaluated_at: p.ai_evaluated_at ?? null,
+
+                    gate_status: p.gate_status ?? null,
+                    gate_reason: p.gate_reason ?? null,
+                    attempt_count: p.attempt_count ?? 0,
+                    forced_accept: p.forced_accept ?? false,
+                    audit_sampled: p.audit_sampled ?? false,
+
+                    manager_verdict: p.manager_verdict ?? null,
+                    manager_verdict_at: p.manager_verdict_at ?? null,
+                    manager_note: p.manager_note ?? null,
+                    escalated_at: p.escalated_at ?? null,
+                    auto_accepted: p.auto_accepted ?? false,
+                }));
             if (!uploadedPhotos.length) continue;
 
+            const priority = Math.min(
+                ...uploadedPhotos.map((p) => photoReviewPriority(p))
+            );
+            const needsReview = uploadedPhotos.some(
+                (p) => !p.manager_verdict && !p.auto_accepted
+            );
+
+            if (params.status === 'pending' && !needsReview) continue;
+            if (params.status === 'decided' && needsReview) continue;
+
             rows.push({
+                shift_id: shift._id.toString(),
+                plan_id: shift.cleaning_plan.toString(),
+                task_id: task.task.toString(),
+                shift_date: shift.date,
+
                 cleaning_name: cleaningName,
                 room_name: task.room ? roomNameByRoomId.get(task.room.toString()) ?? '' : '',
                 task_name: task.name,
                 duration_minutes: task.duration_minutes,
-                shift_date: shift.date,
                 location_name: shift.location.name,
                 address,
+
+                review_priority: priority,
+                needs_review: needsReview,
                 uploaded_photos: uploadedPhotos,
             });
         }
     }
+
+    // Most urgent first, then newest. A flat list sorted only by date buries
+    // the rows that actually need attention.
+    rows.sort(
+        (a, b) =>
+            a.review_priority - b.review_priority ||
+            b.shift_date.getTime() - a.shift_date.getTime()
+    );
 
     return rows;
 };
@@ -3080,6 +3255,7 @@ const shiftServices = {
     getShiftRosterFromDB,
     getManagerPlanRosterFromDB,
     getPhotoReviewListFromDB,
+    setPhotoVerdict,
     assignWorkersToShift,
     listEligibleWorkersForShift,
     updateShiftStatus,
