@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { IPhotoAiFields } from '../photo_ai/photo_ai.interface';
 
 export type ShiftStatus =
     | 'upcoming'
@@ -19,7 +20,7 @@ export interface IWorkerConflict {
     reason: ConflictReason;
 }
 
-export interface IShiftPhotoRequirement {
+export interface IShiftPhotoRequirement extends IPhotoAiFields {
     title: string;
     // Copied from the source Task's photo requirement at selection time (see
     // shift.snapshot.util.ts) — guidance shown to the worker, and reserved
