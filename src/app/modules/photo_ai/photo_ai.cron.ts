@@ -1,12 +1,3 @@
-/**
- * Scheduled sweeps that keep the review queue finite.
- *
- * Without these the queue only grows: there is no other way for a flagged
- * photo to leave it, and a queue nobody can reach the bottom of stops being
- * read within a couple of months.
- *
- * Scheduling happens on import, matching device.service.ts.
- */
 import cron from 'node-cron';
 import { Types } from 'mongoose';
 import { Shift } from '../shift/shift.model';
@@ -15,9 +6,8 @@ import { PhotoAiService } from './photo_ai.service';
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/** Hours a flagged photo may sit unreviewed before it is escalated. */
 const ESCALATE_AFTER_HOURS = Number(process.env.PHOTO_AI_ESCALATE_HOURS ?? 48);
-/** Days after which an unreviewed photo is accepted and leaves the queue. */
+
 const AUTO_ACCEPT_AFTER_DAYS = Number(process.env.PHOTO_AI_AUTO_ACCEPT_DAYS ?? 7);
 
 type RequirementHit = {
@@ -26,12 +16,6 @@ type RequirementHit = {
     title: string;
 };
 
-/**
- * Photos still awaiting a manager decision whose evaluation is older than
- * `cutoff`. The Mongo query is a coarse filter over the shift; the per-photo
- * test runs in the loop because the array filters cannot be combined reliably
- * across sibling fields.
- */
 const findUnreviewed = async (
     cutoff: Date,
     test: (requirement: Record<string, unknown>) => boolean
@@ -81,7 +65,6 @@ const setOnRequirement = async (
     );
 };
 
-/** D — flag anything a manager has left sitting, so it can be chased. */
 export const runEscalationSweep = async (): Promise<number> => {
     const cutoff = new Date(Date.now() - ESCALATE_AFTER_HOURS * HOUR_MS);
     const hits = await findUnreviewed(cutoff, (r) => !r.escalated_at);
@@ -91,12 +74,6 @@ export const runEscalationSweep = async (): Promise<number> => {
     return hits.length;
 };
 
-/**
- * B — accept what nobody reviewed, and record that nobody did.
- *
- * `auto_accepted` is what makes this honest: three months from now it shows
- * how much of the queue was actually read rather than quietly expiring.
- */
 export const runAutoAcceptSweep = async (): Promise<number> => {
     const cutoff = new Date(
         Date.now() - AUTO_ACCEPT_AFTER_DAYS * 24 * HOUR_MS
@@ -108,11 +85,6 @@ export const runAutoAcceptSweep = async (): Promise<number> => {
     return hits.length;
 };
 
-/**
- * Retries evaluations left pending by an outage. Past the ceiling they are
- * marked skipped: a verdict that arrives after the shift is closed and
- * invoiced helps nobody, and retrying forever just burns quota.
- */
 export const runPendingRetrySweep = async (): Promise<number> => {
     const ceiling = new Date(
         Date.now() - photoAiConfig.retry.ceiling_hours * HOUR_MS
@@ -140,8 +112,6 @@ export const runPendingRetrySweep = async (): Promise<number> => {
                     title: requirement.title,
                 };
 
-                // Age is taken from the shift date because a pending photo has
-                // no ai_evaluated_at yet.
                 if (new Date(shift.date) < ceiling) {
                     await setOnRequirement(hit, {
                         ai_status: 'skipped',
@@ -165,7 +135,6 @@ export const runPendingRetrySweep = async (): Promise<number> => {
                     },
                 });
 
-                // Still unreachable — leave it pending for the next sweep.
                 if (result.status === 'pending') continue;
 
                 await setOnRequirement(
@@ -191,13 +160,10 @@ const guard = async (name: string, run: () => Promise<number>) => {
     }
 };
 
-// Hourly: escalation is time-sensitive but not urgent to the minute.
 cron.schedule('7 * * * *', () => guard('escalation', runEscalationSweep));
 
-// Daily at 03:10, away from the shift materialisation window.
 cron.schedule('10 3 * * *', () => guard('auto-accept', runAutoAcceptSweep));
 
-// Every 20 minutes, so a short Gemini outage clears on its own.
 cron.schedule('*/20 * * * *', () => guard('pending-retry', runPendingRetrySweep));
 
 export const photoAiCrons = {

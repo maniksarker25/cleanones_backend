@@ -3092,6 +3092,11 @@ export interface PhotoReviewRow {
  */
 const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
     if (photo.manager_verdict) return 90;
+    // A clean verdict settles it, however many attempts it took to get a
+    // usable photo. Retries usually mean poor light or a shaky hand, not poor
+    // work, and a manager should not be asked to re-check a photo the model
+    // scored highly.
+    if (photo.ai_status === 'passed') return 80;
     if (photo.forced_accept) return 1;
     if (photo.ai_subject_matches === false) return 2;
     if (photo.ai_status === 'failed') return 3;
@@ -3100,6 +3105,19 @@ const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
     if (photo.ai_status === 'error' || photo.ai_status === 'pending') return 6;
     if (!photo.ai_status) return 7;
     return 8;
+};
+
+/**
+ * Whether a photo still wants a human eye.
+ *
+ * A manager decision settles it, and so does a clean AI verdict — except when
+ * the audit sampler pulled it, which is the whole point of that sample.
+ */
+const photoNeedsReview = (photo: PhotoReviewPhoto): boolean => {
+    if (photo.manager_verdict) return false;
+    if (photo.auto_accepted) return false;
+    if (photo.ai_status === 'passed') return photo.audit_sampled;
+    return true;
 };
 
 /**
@@ -3193,9 +3211,7 @@ export const getPhotoReviewListFromDB = async (
             const priority = Math.min(
                 ...uploadedPhotos.map((p) => photoReviewPriority(p))
             );
-            const needsReview = uploadedPhotos.some(
-                (p) => !p.manager_verdict && !p.auto_accepted
-            );
+            const needsReview = uploadedPhotos.some(photoNeedsReview);
 
             if (params.status === 'pending' && !needsReview) continue;
             if (params.status === 'decided' && needsReview) continue;
