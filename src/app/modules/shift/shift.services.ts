@@ -1817,6 +1817,7 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
     const materializedShifts = await Shift.find({
         'assigned_workers.worker': { $in: workerIds },
         date: { $gte: start, $lt: end },
+        status: { $ne: 'cancelled' },
     }).lean();
 
     // workerId -> dateKey -> entries
