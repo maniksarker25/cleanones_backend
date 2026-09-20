@@ -1,9 +1,14 @@
 import httpStatus from 'http-status';
-import { PipelineStage, Types } from 'mongoose';
+import mongoose, { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { emitAppEvent } from '../../events/eventEmitter';
+import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
-import { resyncTodayShiftLocationIfDue } from '../shift/shift.services';
+import {
+    cancelUpcomingShiftsAcrossPlans,
+    resyncTodayShiftLocationIfDue,
+} from '../shift/shift.services';
 import { Worker } from '../worker/worker.model';
 import { TLocation } from './location.interface';
 import { Location } from './location.model';
@@ -88,11 +93,76 @@ const deleteLocationFromDB = async (managerId: string, id: string) => {
         throw new AppError(httpStatus.NOT_FOUND, 'Location not found');
     }
 
-    const result = await Location.findByIdAndUpdate(
-        id,
-        { is_active: false, last_updated_by: managerId },
-        { new: true }
-    );
+    // The location flip, every plan at that location, their chat groups, and
+    // cancelling their future shifts must land together or not at all — a
+    // crash mid-cascade must never leave a "deactivated" location with a
+    // plan (or a shift under it) still active and staffable. The event is
+    // fired AFTER the transaction commits, never inside it: it's an external
+    // side effect (notifications), not data that needs to roll back, and
+    // must never fire for a write that didn't actually land.
+    const session = await mongoose.startSession();
+    let result;
+    let planCount: number;
+    let workerIds: string[];
+    try {
+        const output = await session.withTransaction(async () => {
+            const updatedLocation = await Location.findByIdAndUpdate(
+                id,
+                { is_active: false, last_updated_by: managerId },
+                { new: true, session }
+            );
+
+            // Every active plan at this location goes down with it — same
+            // cascade as a direct plan delete (deactivate + cancel its
+            // future shifts), just batched across every plan at once so a
+            // worker staffed across several of them is only ever counted/
+            // notified once (see cancelUpcomingShiftsAcrossPlans). Plans
+            // already inactive are left alone so this stays idempotent if a
+            // location is deleted twice.
+            const affectedPlans = await CleaningPlan.find({
+                location: id,
+                is_active: true,
+            })
+                .select('_id')
+                .session(session)
+                .lean();
+            const planIds = affectedPlans.map((p) => p._id);
+
+            if (planIds.length) {
+                await CleaningPlan.updateMany(
+                    { _id: { $in: planIds } },
+                    { is_active: false, last_updated_by: managerId },
+                    { session }
+                );
+                await chatServices.deactivateChatGroupsForPlans(planIds, session);
+            }
+
+            const cancelledWorkerIds = await cancelUpcomingShiftsAcrossPlans(
+                planIds,
+                managerId,
+                session
+            );
+
+            return {
+                updatedLocation,
+                planCount: planIds.length,
+                cancelledWorkerIds,
+            };
+        });
+        result = output.updatedLocation;
+        planCount = output.planCount;
+        workerIds = output.cancelledWorkerIds;
+    } finally {
+        await session.endSession();
+    }
+
+    emitAppEvent('location.deactivated', {
+        locationId: id,
+        locationName: location.name,
+        clientId: location.client.toString(),
+        planCount,
+        workerIds,
+    });
 
     return result;
 };

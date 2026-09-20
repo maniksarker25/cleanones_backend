@@ -524,6 +524,75 @@ export const reconcileFutureShiftsForTaskChange = async (
 };
 
 /**
+ * Cancels every not-yet-started ('upcoming') Shift across one or more plans
+ * in a single pass — the shared mutation core behind both a single plan's
+ * delete cascade (deleteCleaningPlanFromDB) and the location-delete cascade
+ * (every plan at that location at once, so a worker staffed across several
+ * of them still gets counted once). Pure DB mutation, no notification/event
+ * side effects — callers own deciding what single, consolidated notice(s) to
+ * send for whatever scope they're operating at, and own the transaction: pass
+ * the same `session` the caller's other writes (plan/chat updates) run under
+ * so the whole cascade commits or rolls back atomically together.
+ *
+ * An unstaffed shift only ever exists as a real document when a manager
+ * scheduled a date's time slot ahead of staffing it (assigned_workers: []) —
+ * the far more common "unstaffed" case (nobody has touched this due date at
+ * all yet) is a virtual, never-persisted preview computed live from the
+ * plan's recurrence (see getShiftForDate) and needs no cleanup here at all.
+ * Either way, nobody is assigned, so a real unstaffed document is simply
+ * deleted — no notification, no one to tell.
+ *
+ * A staffed shift is marked 'cancelled' (kept as history, never hard-deleted).
+ * 'in_progress'/'completed'/'cancelled' shifts are never touched — work
+ * already underway or finished must never be retroactively altered.
+ *
+ * Returns the deduplicated set of worker ids who had at least one shift
+ * cancelled, across every plan passed in.
+ */
+export const cancelUpcomingShiftsAcrossPlans = async (
+    planIds: (Types.ObjectId | string)[],
+    managerId: string,
+    session?: mongoose.ClientSession
+): Promise<string[]> => {
+    if (!planIds.length) return [];
+
+    // Only _id/assigned_workers are ever read below — .lean() skips Mongoose
+    // hydration and .select() skips pulling each shift's full tasks/rooms
+    // payload over the wire just to inspect its crew.
+    const shifts = await Shift.find({
+        cleaning_plan: { $in: planIds },
+        status: 'upcoming',
+    })
+        .select('assigned_workers')
+        .session(session ?? null)
+        .lean();
+    if (!shifts.length) return [];
+
+    const unstaffed = shifts.filter((s) => !s.assigned_workers.length);
+    const staffed = shifts.filter((s) => s.assigned_workers.length);
+
+    if (unstaffed.length) {
+        await Shift.deleteMany(
+            { _id: { $in: unstaffed.map((s) => s._id) } },
+            { session }
+        );
+    }
+    if (!staffed.length) return [];
+
+    await Shift.updateMany(
+        { _id: { $in: staffed.map((s) => s._id) }, status: 'upcoming' },
+        { status: 'cancelled', last_updated_by: managerId },
+        { session }
+    );
+
+    return [
+        ...new Set(
+            staffed.flatMap((s) => s.assigned_workers.map((aw) => aw.worker.toString()))
+        ),
+    ];
+};
+
+/**
  * Keeps every already-materialized future ('upcoming', dated after today)
  * Shift's tasks[]/duration_minutes in sync with the rooms' current active
  * Tasks — the forward-looking counterpart to
@@ -2931,6 +3000,7 @@ const shiftServices = {
     resyncTodayShiftAdditionalTaskIfDue,
     reconcileFutureShiftsForTaskChange,
     resyncFutureShiftTasksForRoomsIfDue,
+    cancelUpcomingShiftsAcrossPlans,
     getShiftForDate,
     listShiftsInRange,
     getClientLiveShiftsFromDB,

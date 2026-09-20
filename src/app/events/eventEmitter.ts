@@ -91,7 +91,9 @@ export interface ShiftWorkerRemovedPayload {
 // A future, already-staffed shift was cancelled because a room task edit
 // (frequency/days changed, or the task was deleted/deactivated) took its
 // date out of the plan's recurrence pattern — see
-// shift.services.ts's reconcileFutureShiftsForTaskChange.
+// shift.services.ts's reconcileFutureShiftsForTaskChange. (A whole-plan
+// deletion uses the separate cleaning_plan.shifts_cancelled event instead —
+// see deleteCleaningPlanFromDB in cleaning_plan.services.ts.)
 export interface ShiftCancelledPayload {
     shiftId: string;
     planId: string;
@@ -100,6 +102,41 @@ export interface ShiftCancelledPayload {
     date: Date;
     /** The crew that was assigned before this shift got cancelled. */
     cancelledWorkerIds: string[];
+}
+
+// The whole plan was deleted/deactivated, taking every one of its staffed
+// future shifts down with it — see cleaning_plan.services.ts's
+// deleteCleaningPlanFromDB (which cancels them via shift.services.ts's
+// cancelUpcomingShiftsAcrossPlans). One consolidated notice per affected
+// worker (not one per shift): from a worker's side, "this plan got
+// cancelled" is a single event even if they were staffed on several of its
+// future dates. The client is deliberately not part of this payload — they
+// already got one plan-level notice from cleaning_plan.deleted.
+export interface CleaningPlanShiftsCancelledPayload {
+    planId: string;
+    title: string;
+    /** Every worker who had at least one shift under this plan cancelled. */
+    workerIds: string[];
+}
+
+// ─── Location ───────────────────────────────────────────────────────────────
+
+// A Location was deleted/deactivated, taking every CleaningPlan at that
+// location — and every one of their staffed future shifts — down with it.
+// See location.services.ts's deleteLocationFromDB. One consolidated notice
+// to the client and one consolidated notice per affected worker, covering
+// every plan at the location at once — a worker staffed across 2 of the
+// location's 3 plans still gets exactly one notification, not two, and the
+// client gets one "this location was deactivated" notice rather than one per
+// plan under it.
+export interface LocationDeactivatedPayload {
+    locationId: string;
+    locationName: string;
+    clientId: string;
+    /** How many active CleaningPlans at this location got deactivated. */
+    planCount: number;
+    /** Every worker who had at least one shift cancelled across any of those plans. */
+    workerIds: string[];
 }
 
 // ─── Chat (offline push only — realtime delivery is already handled by ────
@@ -119,6 +156,8 @@ export interface ChatMessageReceivedPayload {
 export interface AppEventPayloadMap {
     'cleaning_plan.created': CleaningPlanCreatedPayload;
     'cleaning_plan.deleted': CleaningPlanDeletedPayload;
+    'cleaning_plan.shifts_cancelled': CleaningPlanShiftsCancelledPayload;
+    'location.deactivated': LocationDeactivatedPayload;
     'additional_task.created': AdditionalTaskCreatedPayload;
     'additional_task.approved': AdditionalTaskApprovedPayload;
     'additional_task.rejected': AdditionalTaskRejectedPayload;

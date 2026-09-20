@@ -1,12 +1,15 @@
 import httpStatus from 'http-status';
-import { PipelineStage, Types } from 'mongoose';
+import mongoose, { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
 import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
 import { Location } from '../location/location.model';
 import { Task } from '../task/task.model';
-import { resyncTodayShiftRoomsIfDue } from '../shift/shift.services';
+import {
+    cancelUpcomingShiftsAcrossPlans,
+    resyncTodayShiftRoomsIfDue,
+} from '../shift/shift.services';
 import { ICleaningPlan } from './cleaning_plan.interface';
 import { CleaningPlan } from './cleaning_plan.model';
 
@@ -127,19 +130,48 @@ const deleteCleaningPlanFromDB = async (managerId: string, id: string) => {
     if (!plan)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
 
-    const result = await CleaningPlan.findByIdAndUpdate(
-        id,
-        { is_active: false, last_updated_by: managerId },
-        { new: true }
-    );
-
-    await chatServices.deactivateChatGroupForPlan(id);
+    // The plan flip, its chat group, and cancelling its future shifts must
+    // land together or not at all — a crash mid-cascade must never leave a
+    // "deleted" plan with a shift still 'upcoming' and staffable. Events are
+    // deliberately fired AFTER the transaction commits, never inside it:
+    // they're external side effects (notifications), not data that needs to
+    // roll back, and must never fire for a write that didn't actually land.
+    const session = await mongoose.startSession();
+    let result;
+    let workerIds: string[];
+    try {
+        const output = await session.withTransaction(async () => {
+            const updated = await CleaningPlan.findByIdAndUpdate(
+                id,
+                { is_active: false, last_updated_by: managerId },
+                { new: true, session }
+            );
+            await chatServices.deactivateChatGroupForPlan(id, session);
+            const cancelledWorkerIds = await cancelUpcomingShiftsAcrossPlans(
+                [id],
+                managerId,
+                session
+            );
+            return { updated, cancelledWorkerIds };
+        });
+        result = output.updated;
+        workerIds = output.cancelledWorkerIds;
+    } finally {
+        await session.endSession();
+    }
 
     emitAppEvent('cleaning_plan.deleted', {
         planId: id,
         title: plan.title,
         clientId: plan.client.toString(),
     });
+    if (workerIds.length) {
+        emitAppEvent('cleaning_plan.shifts_cancelled', {
+            planId: id,
+            title: plan.title,
+            workerIds,
+        });
+    }
 
     return result;
 };

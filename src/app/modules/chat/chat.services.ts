@@ -1,5 +1,5 @@
 import httpStatus from 'http-status';
-import { Types } from 'mongoose';
+import { ClientSession, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { getIO } from '../../socket/socket';
 import { USER_ROLE } from '../user/user.constant';
@@ -77,11 +77,33 @@ const syncChatGroupWorkers = async (
     return group;
 };
 
-const deactivateChatGroupForPlan = async (planId: Types.ObjectId | string) => {
+const deactivateChatGroupForPlan = async (
+    planId: Types.ObjectId | string,
+    session?: ClientSession
+) => {
     return Chat.findOneAndUpdate(
         { cleaning_plan: planId, type: 'group' },
         { is_active: false },
-        { new: true }
+        { new: true, session }
+    );
+};
+
+/**
+ * Same as deactivateChatGroupForPlan, but for many plans in one round trip —
+ * used when a whole location is deleted and every plan under it goes down
+ * at once (see deleteLocationFromDB). N individual findOneAndUpdate calls
+ * would each open their own round trip for no benefit here, since none of
+ * the callers need the updated documents back.
+ */
+const deactivateChatGroupsForPlans = async (
+    planIds: (Types.ObjectId | string)[],
+    session?: ClientSession
+) => {
+    if (!planIds.length) return;
+    await Chat.updateMany(
+        { cleaning_plan: { $in: planIds }, type: 'group' },
+        { is_active: false },
+        { session }
     );
 };
 
@@ -407,6 +429,7 @@ const chatServices = {
     getChatGroupWorkerIds,
     syncChatGroupWorkers,
     deactivateChatGroupForPlan,
+    deactivateChatGroupsForPlans,
     createWorkerManagersChat,
     deactivateWorkerManagersChat,
     createClientManagersChat,

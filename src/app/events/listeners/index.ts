@@ -5,3 +5,4 @@ import './cleaning_plan.listener';
 import './additional_task.listener';
 import './shift.listener';
 import './chat.listener';
+import './location.listener';
