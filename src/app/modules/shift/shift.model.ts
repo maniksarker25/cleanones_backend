@@ -65,6 +65,13 @@ const photoRequirementSchema = new Schema(
         },
         manager_verdict_at: { type: Date, default: null },
         manager_note: { type: String, default: null },
+        auto_decided: { type: Boolean, default: false },
+        auto_decision: {
+            type: String,
+            enum: ['approved', 'rejected'],
+            default: null,
+        },
+        auto_decided_at: { type: Date, default: null },
         escalated_at: { type: Date, default: null },
         auto_accepted: { type: Boolean, default: false },
     },

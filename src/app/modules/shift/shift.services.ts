@@ -26,7 +26,12 @@ import { IssueReport } from '../issue_report/issue_report.model';
 import chatServices from '../chat/chat.services';
 import { haversineDistanceMeters } from './geo.util';
 import { findWorkerConflictOnDate } from './shift.availability.services';
-import { ConflictReason, IAssignedWorker, IShift } from './shift.interface';
+import {
+    ConflictReason,
+    IAssignedWorker,
+    IShift,
+    IShiftTask,
+} from './shift.interface';
 import { photoAiConfig } from '../photo_ai/photo_ai.config';
 import { PhotoAiService } from '../photo_ai/photo_ai.service';
 import { Shift } from './shift.model';
@@ -1402,6 +1407,8 @@ export const getWorkerPerformanceFromDB = async (
         }
     }
 
+    const photo_quality = summarisePhotoQuality(materialized);
+
     return {
         month: targetMonth,
         year: targetYear,
@@ -1412,6 +1419,71 @@ export const getWorkerPerformanceFromDB = async (
         total_late_on_this_month: late,
         total_absent_on_this_month: absent,
         total_work_on_this_month: roundToTwoDecimals(workedMs / 3_600_000),
+        photo_quality,
+    };
+};
+
+export interface IWorkerPhotoQuality {
+    total_photos: number;
+    approved: number;
+    rejected: number;
+    /** Share of decided photos that were approved, or null if none were. */
+    approval_rate: number | null;
+    /** Decided by a person rather than automatically. */
+    reviewed_by_manager: number;
+    /** Gate rejections the worker had to retake past, across all photos. */
+    retakes: number;
+    /** Accepted only because the retake limit was reached. */
+    forced_accepts: number;
+}
+
+/**
+ * Photo quality for one worker's shifts.
+ *
+ * Counts a manager's verdict where there is one and the automatic decision
+ * otherwise, but reports them separately as well: a high approval rate made
+ * entirely of machine decisions means something different from one a person
+ * signed off.
+ */
+const summarisePhotoQuality = (
+    shifts: { tasks?: IShiftTask[] }[]
+): IWorkerPhotoQuality => {
+    let total = 0;
+    let approved = 0;
+    let rejected = 0;
+    let reviewedByManager = 0;
+    let retakes = 0;
+    let forcedAccepts = 0;
+
+    for (const shift of shifts) {
+        for (const task of shift.tasks ?? []) {
+            for (const requirement of task.photo_requirements ?? []) {
+                if (!requirement.is_uploaded) continue;
+                total += 1;
+
+                if (requirement.attempt_count && requirement.attempt_count > 1) {
+                    retakes += requirement.attempt_count - 1;
+                }
+                if (requirement.forced_accept) forcedAccepts += 1;
+
+                const verdict =
+                    requirement.manager_verdict ?? requirement.auto_decision;
+                if (requirement.manager_verdict) reviewedByManager += 1;
+                if (verdict === 'approved') approved += 1;
+                if (verdict === 'rejected') rejected += 1;
+            }
+        }
+    }
+
+    const decided = approved + rejected;
+    return {
+        total_photos: total,
+        approved,
+        rejected,
+        approval_rate: decided ? roundToTwoDecimals((approved / decided) * 100) : null,
+        reviewed_by_manager: reviewedByManager,
+        retakes,
+        forced_accepts: forcedAccepts,
     };
 };
 
@@ -2966,6 +3038,33 @@ export const checkOutFromShift = async (
  * used for reporting and to decide what to bill, and it is what the AI's
  * thresholds are tuned against.
  */
+/**
+ * Makes an approved photo the reference for that requirement from now on.
+ *
+ * Showing the model a real approved photo is stronger than any written
+ * description, and it is the only way a directional requirement like "left
+ * photo" becomes checkable at all. Each client's own standard builds up this
+ * way without anyone configuring it.
+ *
+ * Writes to the source Task so it carries into future shifts. The current
+ * shift is left alone: its snapshot should stay as it was on the day.
+ */
+const promoteApprovedPhotoToReference = async (
+    taskId: string,
+    title: string,
+    photoUrl: string
+) => {
+    try {
+        await Task.updateOne(
+            { _id: new Types.ObjectId(taskId) },
+            { $set: { 'photo_requirements.$[p].reference_image_url': photoUrl } },
+            { arrayFilters: [{ 'p.title': title }] }
+        );
+    } catch {
+        // A verdict must still be recorded if this fails.
+    }
+};
+
 export const setPhotoVerdict = async (
     managerId: string,
     planId: string,
@@ -3017,6 +3116,14 @@ export const setPhotoVerdict = async (
         }
     );
 
+    if (verdict === 'approved' && requirement.photo_url) {
+        await promoteApprovedPhotoToReference(
+            taskId,
+            title,
+            requirement.photo_url
+        );
+    }
+
     return Shift.findById(shift._id);
 };
 
@@ -3053,6 +3160,8 @@ export interface PhotoReviewPhoto {
     manager_verdict: 'approved' | 'rejected' | null;
     manager_verdict_at: Date | null;
     manager_note: string | null;
+    auto_decided: boolean;
+    auto_decision: 'approved' | 'rejected' | null;
     escalated_at: Date | null;
     auto_accepted: boolean;
 }
@@ -3086,6 +3195,7 @@ export interface PhotoReviewRow {
  */
 const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
     if (photo.manager_verdict) return 90;
+    if (photo.auto_decided) return 85;
     // A clean verdict settles it, however many attempts it took to get a
     // usable photo. Retries usually mean poor light or a shaky hand, not poor
     // work, and a manager should not be asked to re-check a photo the model
@@ -3109,6 +3219,7 @@ const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
  */
 const photoNeedsReview = (photo: PhotoReviewPhoto): boolean => {
     if (photo.manager_verdict) return false;
+    if (photo.auto_decided) return photo.audit_sampled;
     if (photo.auto_accepted) return false;
     if (photo.ai_status === 'passed') return photo.audit_sampled;
     return true;
@@ -3197,6 +3308,8 @@ export const getPhotoReviewListFromDB = async (
                     manager_verdict: p.manager_verdict ?? null,
                     manager_verdict_at: p.manager_verdict_at ?? null,
                     manager_note: p.manager_note ?? null,
+                    auto_decided: p.auto_decided ?? false,
+                    auto_decision: p.auto_decision ?? null,
                     escalated_at: p.escalated_at ?? null,
                     auto_accepted: p.auto_accepted ?? false,
                 }));
