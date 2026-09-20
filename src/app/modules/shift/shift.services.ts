@@ -683,25 +683,38 @@ export const resyncTodayShiftLocationIfDue = async (
     );
 };
 
-/**
- * If the shift for this additional task's own date is already materialized
- * AND still 'upcoming', folds a newly-approved AdditionalTask into its
- * tasks[] and bumps duration_minutes. getOrCreateShift alone can't do this:
- * it only folds approved additional tasks in at first materialization, so an
- * approval that happens AFTER that day's shift already exists would
- * otherwise never show up on it — same gap resyncTodayShiftRoomsIfDue closes
- * for room/task edits. Called from approveAdditionalTaskIntoDB whenever
- * status flips to 'Approved'.
- *
- * Idempotent: a no-op if this additional task is already present on the
- * shift (dedupes by its own _id) — safe to call more than once for the same
- * approval.
- *
- * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts, same
- * reasoning as the other resync entry points — and for a shift that was
- * never materialized at all (nothing to update; it'll pick this up at
- * materialization time via buildAdditionalTaskEntriesForDay instead).
- */
+
+// export const resyncTodayShiftLocationIfDue = async (
+//     planId: Types.ObjectId | string
+// ) => {
+//     const today = normalizeToUTCDateOnly(new Date());
+//     const shift = await Shift.findOne({
+//         cleaning_plan: planId,
+//         date: today,
+//         status: 'upcoming',
+//     });
+//     if (!shift) return;
+
+//     const plan = await CleaningPlan.findById(planId).select('location').lean();
+//     if (!plan) return;
+
+//     const location = await Location.findById(plan.location)
+//         .select('name location')
+//         .lean();
+//     if (!location) return;
+
+//     await Shift.updateOne(
+//         { _id: shift._id, status: 'upcoming' },
+//         {
+//             $set: {
+//                 'location.name': location.name,
+//                 'location.coordinates': location.location ?? null,
+//             },
+//         }
+//     );
+// };
+
+
 export const resyncTodayShiftAdditionalTaskIfDue = async (additionalTask: {
     _id: Types.ObjectId;
     cleaning_plan_id: Types.ObjectId;
@@ -741,18 +754,7 @@ export const resyncTodayShiftAdditionalTaskIfDue = async (additionalTask: {
     return null;
 };
 
-/**
- * Read-only preview for a single date: returns the materialized (staffed)
- * Shift if one exists, otherwise — when the date is genuinely due per the
- * plan's current tasks — an unstaffed placeholder (`is_virtual: true`, no
- * crew, no time) rather than 404, so a manager can see "this date needs
- * staffing" before anyone's been assigned. No DB write happens here.
- *
- * `requestingWorkerId` is an ownership gate: when provided (the caller is a
- * worker, not a manager), the shift is only returned if that worker is
- * actually in `assigned_workers` — otherwise 403. An unstaffed placeholder
- * always fails this gate (nobody is assigned to it yet), which is correct.
- */
+
 export const getShiftForDate = async (
     planId: string,
     date: Date,
@@ -959,9 +961,6 @@ export const getActiveShiftForWorker = async (workerId: string) => {
 
     if (!shift) return {};
     const { tasks, rooms, assigned_workers, ...rest } = attachProgress(shift);
-    // The full roster is stripped above (other workers' data isn't this
-    // caller's business), but their own check-in time is worth keeping —
-    // it's the one field off that array the worker's own dashboard needs.
     const own = assigned_workers.find((aw) => aw.worker.toString() === workerId);
     return { ...rest, check_in_at: own?.check_in_at ?? null };
 };
