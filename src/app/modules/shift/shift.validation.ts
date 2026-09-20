@@ -39,6 +39,16 @@ const uploadTaskPhotoValidationSchema = z.object({
     }),
 });
 
+const photoVerdictValidationSchema = z.object({
+    body: z.object({
+        title: z.string({ required_error: 'title is required' }).min(1).trim(),
+        verdict: z.enum(['approved', 'rejected'], {
+            required_error: 'verdict is required',
+        }),
+        note: z.string().trim().optional(),
+    }),
+});
+
 const checkInOutValidationSchema = z.object({
     body: z.object({
         latitude: z.coerce.number({ required_error: 'latitude is required' }).min(-90).max(90),
@@ -68,6 +78,7 @@ const shiftValidations = {
     assignWorkersValidationSchema,
     updateStatusValidationSchema,
     uploadTaskPhotoValidationSchema,
+    photoVerdictValidationSchema,
     checkInOutValidationSchema,
 };
 

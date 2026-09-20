@@ -73,6 +73,7 @@ export interface IEvaluationInput {
         room_type?: string;
         cleaning_type?: string;
         room_name?: string;
+        task_name?: string;
     };
     /** Past approved examples for this room and title. Two or three is enough. */
     examples?: {
