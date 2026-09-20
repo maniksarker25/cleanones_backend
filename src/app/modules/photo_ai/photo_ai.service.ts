@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { photoAiConfig, isPhotoAiReady } from './photo_ai.config';
-import { prepareForModel, runGate } from './photo_ai.gate';
+import { IReuseCandidates, prepareForModel, runGate } from './photo_ai.gate';
 import { GeminiOutcome, evaluateWithRetry } from './photo_ai.gemini';
 import {
     computeAgreement,
@@ -19,10 +19,10 @@ import {
 
 export const checkPhoto = async (
     buffer: Buffer,
-    previousHashes: string[] = []
+    previous: string[] | IReuseCandidates = []
 ): Promise<IGateResult> => {
     try {
-        return await runGate(buffer, previousHashes);
+        return await runGate(buffer, previous);
     } catch {
         return {
             status: 'ok',
@@ -34,14 +34,14 @@ export const checkPhoto = async (
 
 export const checkPhotoByUrl = async (
     photoUrl: string,
-    previousHashes: string[] = []
+    previous: string[] | IReuseCandidates = []
 ): Promise<IGateResult> => {
     try {
         const response = await axios.get<ArrayBuffer>(photoUrl, {
             responseType: 'arraybuffer',
             timeout: 10000,
         });
-        return await checkPhoto(Buffer.from(response.data), previousHashes);
+        return await checkPhoto(Buffer.from(response.data), previous);
     } catch {
         return {
             status: 'ok',
