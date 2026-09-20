@@ -1,8 +1,3 @@
-/**
- * Gemini client. The only file that knows which provider is in use, so
- * swapping providers means rewriting this file alone. Model problems come
- * back as a typed failure rather than a throw.
- */
 import axios from 'axios';
 import { z } from 'zod';
 import { photoAiConfig } from './photo_ai.config';
@@ -26,7 +21,6 @@ const modelResponseSchema = z.object({
 
 export type ModelResponse = z.infer<typeof modelResponseSchema>;
 
-/** Declared locally so this compiles against any axios version. */
 interface HttpErrorShape {
     response?: { status?: number };
     code?: string;
@@ -35,7 +29,6 @@ interface HttpErrorShape {
 const asHttpError = (error: unknown): HttpErrorShape =>
     (error && typeof error === 'object' ? error : {}) as HttpErrorShape;
 
-/** Only the part of the response we read. */
 interface GeminiApiResponse {
     candidates?: {
         content?: { parts?: { text?: string }[] };
@@ -58,11 +51,6 @@ const fetchImageAsBase64 = async (url: string): Promise<string | null> => {
     }
 };
 
-/**
- * `photoBase64` is the already-downscaled submitted photo. Reference images
- * are attached before it so the submitted photo is always the last one the
- * model sees, which the prompt relies on.
- */
 export const evaluateOnce = async (
     input: IEvaluationInput,
     photoBase64: string
@@ -85,7 +73,6 @@ export const evaluateOnce = async (
                 inline_data: { mime_type: 'image/jpeg', data: reference },
             });
         }
-        // A missing reference is not fatal; carry on without it.
     }
 
     parts.push({ text: 'SUBMITTED PHOTO:' });
@@ -116,8 +103,6 @@ export const evaluateOnce = async (
             return { ok: false, retryable: true, error: 'empty model response' };
         }
 
-        // responseSchema should guarantee valid JSON, but treat a malformed
-        // body as a transport problem rather than a verdict.
         let parsed: unknown;
         try {
             parsed = JSON.parse(text);
@@ -139,7 +124,6 @@ export const evaluateOnce = async (
         const httpError = asHttpError(error);
         const status = httpError.response?.status;
 
-        // 4xx will not be fixed by retrying, except 429.
         const retryable =
             status === undefined || status === 429 || status >= 500;
 
@@ -155,7 +139,6 @@ export const evaluateOnce = async (
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Exponential backoff. Non-retryable failures return immediately. */
 export const evaluateWithRetry = async (
     input: IEvaluationInput,
     photoBase64: string
