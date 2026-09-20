@@ -940,13 +940,7 @@ export const getClientLiveShiftsFromDB = async (clientId: string) => {
     });
 };
 
-/**
- * Worker's own current shift: status in_progress AND this specific worker is
- * still personally checked in (their own check_in_at set, check_out_at
- * null) — not just "assigned to some in-progress shift", since other
- * workers on the same shift may still be working after this one left.
- * Returns {} when there isn't one, per the dashboard's "no active shift" state.
- */
+
 export const getActiveShiftForWorker = async (workerId: string) => {
     const shift = await Shift.findOne({
         status: 'in_progress',
@@ -965,11 +959,7 @@ export const getActiveShiftForWorker = async (workerId: string) => {
     return { ...rest, check_in_at: own?.check_in_at ?? null };
 };
 
-/**
- * Today's shift counters for the worker's dashboard: total (saved + virtual
- * occurrences, same as /shift/my-shifts), completed, and pending (today's
- * total minus completed — includes upcoming/in_progress/cancelled alike).
- */
+
 export const getWorkerTodayMetaFromDB = async (workerId: string) => {
     const shifts = await listWorkerShiftsForDate(workerId, new Date());
     const total = shifts.length;
@@ -981,12 +971,7 @@ export const getWorkerTodayMetaFromDB = async (workerId: string) => {
     };
 };
 
-/**
- * The worker's next upcoming shift, strictly after now. A worker only ever
- * appears on a real, staffed Shift (see assignWorkersToShift) — there is no
- * plan-level default roster to project forward through — so this is a plain
- * query. Returns {} when there is genuinely nothing scheduled.
- */
+
 export const getNextShiftForWorker = async (workerId: string) => {
     const now = new Date();
 
@@ -2510,14 +2495,7 @@ export const updateShiftStatus = async (
     return result;
 };
 
-/**
- * Records a worker's photo submission for one task instance within one
- * shift, materializing the shift first if needed. `is_completed` on that
- * task entry is recomputed automatically from its photo requirements — for
- * a photo-required task there is no manual complete/approve step (see
- * docs/SHIFT_MANAGEMENT_DESIGN.md). Tasks with no photo requirement are
- * NOT completed by this function — see markShiftTaskComplete.
- */
+
 export const uploadShiftTaskPhoto = async (
     workerId: string,
     planId: string,
@@ -2596,13 +2574,7 @@ export const uploadShiftTaskPhoto = async (
     return Shift.findById(shift._id);
 };
 
-/**
- * Worker-initiated completion for one task instance that has NO photo
- * requirement (is_photo_required: false) — these are no longer completed
- * automatically at shift creation, so the assigned worker must explicitly
- * mark them done. Rejects tasks that DO require a photo — those complete
- * only via uploadShiftTaskPhoto once every requirement is uploaded.
- */
+
 export const markShiftTaskComplete = async (
     workerId: string,
     planId: string,
