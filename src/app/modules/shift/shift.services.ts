@@ -27,6 +27,8 @@ import chatServices from '../chat/chat.services';
 import { haversineDistanceMeters } from './geo.util';
 import { findWorkerConflictOnDate } from './shift.availability.services';
 import { ConflictReason, IAssignedWorker, IShift } from './shift.interface';
+import { photoAiConfig } from '../photo_ai/photo_ai.config';
+import { PhotoAiService } from '../photo_ai/photo_ai.service';
 import { Shift } from './shift.model';
 import {
     buildAdditionalTaskEntriesForDay,
@@ -614,51 +616,7 @@ export const resyncTodayShiftLocationIfDue = async (
     );
 };
 
-/**
- * If today's shift for this plan is already materialized AND still
- * 'upcoming', re-copies the plan's current Location (name + coordinates)
- * into the shift's frozen `location` snapshot. Without this, a manager
- * editing a Location's address/GPS point from the dashboard would leave
- * today's already-materialized shift silently pointing at stale
- * coordinates — including the ones the 50m check-in geofence validates
- * against (see assertWithinGeofence) — until the next midnight cron
- * re-materializes it fresh. Called from location.services.ts whenever a
- * Location's coordinates or name change.
- *
- * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts,
- * same reasoning as the other resync entry points: a worker already
- * checked in against the old point must not have the ground shift under
- * their feet mid-shift.
- */
-export const resyncTodayShiftLocationIfDue = async (
-    planId: Types.ObjectId | string
-) => {
-    const today = normalizeToUTCDateOnly(new Date());
-    const shift = await Shift.findOne({
-        cleaning_plan: planId,
-        date: today,
-        status: 'upcoming',
-    });
-    if (!shift) return;
 
-    const plan = await CleaningPlan.findById(planId).select('location').lean();
-    if (!plan) return;
-
-    const location = await Location.findById(plan.location)
-        .select('name location')
-        .lean();
-    if (!location) return;
-
-    await Shift.updateOne(
-        { _id: shift._id, status: 'upcoming' },
-        {
-            $set: {
-                'location.name': location.name,
-                'location.coordinates': location.location ?? null,
-            },
-        }
-    );
-};
 
 /**
  * If the shift for this additional task's own date is already materialized
@@ -2485,6 +2443,68 @@ export const updateShiftStatus = async (
 };
 
 /**
+ * Perceptual hashes of photos already accepted for this room, used to spot a
+ * worker resubmitting an earlier photo. Scoped to the room and limited to the
+ * last 60 days so the comparison stays cheap.
+ */
+const collectRoomPhotoHashes = async (
+    roomId: Types.ObjectId | null | undefined,
+    excludeShiftId: Types.ObjectId
+): Promise<string[]> => {
+    if (!roomId) return [];
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - 60);
+
+    const shifts = await Shift.find({
+        _id: { $ne: excludeShiftId },
+        date: { $gte: since },
+        'tasks.room': roomId,
+    })
+        .select('tasks.room tasks.photo_requirements.phash')
+        .lean();
+
+    const hashes: string[] = [];
+    for (const shift of shifts) {
+        for (const task of shift.tasks ?? []) {
+            if (task.room?.toString() !== roomId.toString()) continue;
+            for (const requirement of task.photo_requirements ?? []) {
+                if (requirement.phash) hashes.push(requirement.phash);
+            }
+        }
+    }
+    return hashes;
+};
+
+/**
+ * Writes an evaluation result onto one photo requirement. Runs after the
+ * response has been sent, so a failure here is logged and dropped rather than
+ * surfaced — the task is already complete either way.
+ */
+const saveAiFields = async (
+    shiftId: Types.ObjectId,
+    taskId: string,
+    title: string,
+    result: Awaited<ReturnType<typeof PhotoAiService.evaluatePhoto>>
+) => {
+    const fields = PhotoAiService.aiResultToFields(result);
+    const update: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(fields)) {
+        update[`tasks.$[t].photo_requirements.$[p].${key}`] = value;
+    }
+
+    await Shift.updateOne(
+        { _id: shiftId },
+        { $set: update },
+        {
+            arrayFilters: [
+                { 't.task': new Types.ObjectId(taskId) },
+                { 'p.title': title },
+            ],
+        }
+    );
+};
+
+/**
  * Records a worker's photo submission for one task instance within one
  * shift, materializing the shift first if needed. `is_completed` on that
  * task entry is recomputed automatically from its photo requirements — for
@@ -2526,6 +2546,49 @@ export const uploadShiftTaskPhoto = async (
         );
     }
 
+    const requirement = shift.tasks[taskIndex].photo_requirements.find(
+        (p) => p.title === title
+    );
+    const attempts = (requirement?.attempt_count ?? 0) + 1;
+
+    // Photos already accepted for this room, so a resubmitted one is caught.
+    const previousHashes = await collectRoomPhotoHashes(
+        shift.tasks[taskIndex].room,
+        shift._id
+    );
+
+    const gate = await PhotoAiService.checkPhotoByUrl(photoUrl, previousHashes);
+
+    // After max_attempts the photo is taken anyway and flagged, so a worker is
+    // never stranded on site. The rejected attempts stay on the record.
+    const forced =
+        gate.status === 'rejected' &&
+        attempts >= photoAiConfig.gate.max_attempts;
+
+    if (gate.status === 'rejected' && !forced) {
+        await Shift.updateOne(
+            { _id: shift._id },
+            {
+                $set: {
+                    'tasks.$[t].photo_requirements.$[p].attempt_count': attempts,
+                    'tasks.$[t].photo_requirements.$[p].gate_status': 'rejected',
+                    'tasks.$[t].photo_requirements.$[p].gate_reason': gate.reason,
+                    'tasks.$[t].photo_requirements.$[p].gate_metrics': gate.metrics,
+                },
+            },
+            {
+                arrayFilters: [
+                    { 't.task': new Types.ObjectId(taskId) },
+                    { 'p.title': title },
+                ],
+            }
+        );
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            gate.reason ?? 'Photo could not be accepted. Please retake.'
+        );
+    }
+
     // Atomic, targeted write for the actual photo field — safe under
     // concurrent uploads to different requirements/tasks on the same shift.
     await Shift.updateOne(
@@ -2534,6 +2597,13 @@ export const uploadShiftTaskPhoto = async (
             $set: {
                 'tasks.$[t].photo_requirements.$[p].photo_url': photoUrl,
                 'tasks.$[t].photo_requirements.$[p].is_uploaded': true,
+                'tasks.$[t].photo_requirements.$[p].attempt_count': attempts,
+                'tasks.$[t].photo_requirements.$[p].forced_accept': forced,
+                'tasks.$[t].photo_requirements.$[p].gate_status': gate.status,
+                'tasks.$[t].photo_requirements.$[p].gate_reason': gate.reason ?? null,
+                'tasks.$[t].photo_requirements.$[p].gate_metrics': gate.metrics,
+                'tasks.$[t].photo_requirements.$[p].phash': gate.phash,
+                'tasks.$[t].photo_requirements.$[p].ai_status': 'pending',
             },
         },
         {
@@ -2566,6 +2636,22 @@ export const uploadShiftTaskPhoto = async (
     }
 
     await maybeAutoCompleteShift(shift._id);
+
+    // Not awaited. The task is already complete and the response is on its way;
+    // this only adds flags for the manager's review queue.
+    const roomId = shift.tasks[taskIndex].room?.toString();
+    const room = shift.rooms.find((r) => r.room.toString() === roomId);
+    void PhotoAiService.evaluatePhoto({
+        photo_url: photoUrl,
+        requirement: {
+            title,
+            description: requirement?.description,
+            reference_image_url: requirement?.reference_image_url,
+        },
+        context: { room_name: room?.name, room_type: room?.room_type },
+    })
+        .then((result) => saveAiFields(shift._id, taskId, title, result))
+        .catch(() => undefined);
 
     return Shift.findById(shift._id);
 };
