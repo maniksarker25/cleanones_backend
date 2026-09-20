@@ -26,10 +26,10 @@ onAppEvent('cleaning_plan.created', async (payload) => {
     );
 });
 
-// A plan was cancelled — tell the client. Workers who were staffed on any of
-// its shifts are not tracked here (the plan itself never held a roster); a
-// cancelled plan's future shifts are handled separately if/when that cascade
-// is added.
+// A plan was cancelled — tell the client. The workers affected are notified
+// separately (see cleaning_plan.shifts_cancelled below), one consolidated
+// notice each rather than folded into this one, since they need a
+// worker-specific "your shift" message, not the client-facing plan notice.
 onAppEvent('cleaning_plan.deleted', async (payload) => {
     await NotificationService.sendNotification({
         receiver: payload.clientId,
@@ -42,5 +42,32 @@ onAppEvent('cleaning_plan.deleted', async (payload) => {
         meta: { planId: payload.planId },
     }).catch((err) =>
         errorLogger.error('cleaning_plan.deleted notification failed', err)
+    );
+});
+
+// Every future ('upcoming') shift under a deleted/deactivated plan was just
+// cancelled (see deleteCleaningPlanFromDB in cleaning_plan.services.ts) — one
+// consolidated notice per affected worker, not one per shift, since from
+// their side "this plan got cancelled" is a single event even if they were
+// staffed on several of its future dates.
+onAppEvent('cleaning_plan.shifts_cancelled', async (payload) => {
+    await Promise.all(
+        payload.workerIds.map((workerId) =>
+            NotificationService.sendNotification({
+                receiver: workerId,
+                title: 'Shifts cancelled',
+                message: `All of your shifts under "${payload.title}" have been cancelled — the cleaning plan was cancelled.`,
+                type: ENUM_NOTIFICATION_TYPE.SHIFT_CANCELLED,
+                entity: NOTIFICATION_ENTITY.CLEANING_PLAN,
+                action: NOTIFICATION_ACTION.VIEW,
+                entityId: payload.planId,
+                meta: { planId: payload.planId },
+            }).catch((err) =>
+                errorLogger.error(
+                    'cleaning_plan.shifts_cancelled notification failed',
+                    err
+                )
+            )
+        )
     );
 });
