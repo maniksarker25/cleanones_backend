@@ -75,9 +75,14 @@ export const hashDistance = (a: string, b: string): number => {
     return distance;
 };
 
+export interface IReuseCandidates {
+    sameShift?: string[];
+    otherShifts?: string[];
+}
+
 export const runGate = async (
     buffer: Buffer,
-    previousHashes: string[] = []
+    previous: string[] | IReuseCandidates = []
 ): Promise<IGateResult> => {
     const { gate } = photoAiConfig;
     const image = sharp(buffer, { failOn: 'none' });
@@ -121,12 +126,24 @@ export const runGate = async (
     if (sharpness < gate.min_sharpness) {
         return reject('Photo is blurry. Hold the camera steady and retake.');
     }
+    const candidates: IReuseCandidates = Array.isArray(previous)
+        ? { sameShift: previous }
+        : previous;
+
     if (
-        previousHashes.some(
-            (previous) => hashDistance(phash, previous) <= gate.phash_match_distance
+        (candidates.sameShift ?? []).some(
+            (h) => hashDistance(phash, h) <= gate.phash_match_distance
         )
     ) {
-        return reject('This photo has been submitted before. Take a new one.');
+        return reject('This photo was already used for another item. Take a new one.');
+    }
+
+    if (
+        (candidates.otherShifts ?? []).some(
+            (h) => hashDistance(phash, h) <= gate.phash_strict_distance
+        )
+    ) {
+        return reject('This photo was submitted on an earlier day. Take a new one.');
     }
 
     return { status: 'ok', metrics, phash };

@@ -1,119 +1,40 @@
 # photo_ai
 
-Verification for worker-submitted photos. Self-contained — nothing here is
-wired into the app yet and importing it changes no behaviour.
+Automated checking of worker-submitted proof photos.
 
-## Entry points
+**Full documentation: [`docs/PHOTO_AI_VERIFICATION.md`](../../../../docs/PHOTO_AI_VERIFICATION.md)**
 
-| Call | When | Duration | Can refuse? |
-|---|---|---|---|
-| `checkPhotoByUrl()` | before the photo is recorded | ~300–550 ms | yes |
-| `evaluatePhoto()` | after the task has completed | 2–3 s | no |
+## Quick reference
 
-`checkPhotoByUrl()` measures blur, exposure, size and reuse. No model call, no
-cost, and the result is repeatable, so refusing an upload on it is safe.
-
-`evaluatePhoto()` calls Gemini. It runs after the photo is saved and the task
-has completed, so a wrong verdict costs a manager one review rather than a
-worker a return trip. It never throws; failures come back as a status.
-
-## Install
-
-```bash
-npm install sharp
+```ts
+PhotoAiService.checkPhotoByUrl(url, { sameShift, otherShifts })  // gate, may refuse
+PhotoAiService.evaluatePhoto(input, buffer?)                     // model, never refuses
 ```
 
-`axios` and `zod` are already in the project.
-
-## Environment
+Neither throws. Failures come back as a status.
 
 ```bash
-PHOTO_AI_ENABLED=false           # default; uploads behave as before
-PHOTO_AI_SHADOW_MODE=true        # record verdicts, act on none
+npm install sharp        # the only new dependency
+```
+
+```bash
+PHOTO_AI_ENABLED=false   # default; nothing runs
+PHOTO_AI_SHADOW_MODE=true
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.5-flash-lite
 ```
 
-In shadow mode `passed`/`failed` is downgraded to `review` before being
-stored, so verdicts can be compared against manager decisions without
-influencing anything.
+## Two rules
 
-Remaining thresholds are in `photo_ai.config.ts`, all overridable by env var.
-`PHOTO_AI_MIN_CONFIDENCE` is currently an estimate and should be re-derived
-from real data before anything auto-approves on it.
+**The gate may refuse an upload; the model may not.** Blur and exposure are
+measurements. A model's judgement is not, so it runs after the fact and only
+writes flags.
 
-## Wiring
+**`is_completed` never depends on the AI.** A task completes when every
+required photo is uploaded, exactly as before this feature existed.
 
-### 1. Schema
+## Before you refactor
 
-```ts
-import { IPhotoAiFields } from '../photo_ai/photo_ai.interface';
-
-export interface IShiftPhotoRequirement extends IPhotoAiFields {
-    title: string;
-    description?: string | null;
-    reference_image_url?: string | null;
-    photo_url: string | null;
-    is_uploaded: boolean;
-}
-```
-
-All added fields are optional, so existing documents need no migration.
-
-### 2. Gate, in `uploadShiftTaskPhoto()` before the write
-
-```ts
-const gate = await PhotoAiService.checkPhotoByUrl(photoUrl, previousHashes);
-if (gate.status === 'rejected') {
-    throw new AppError(httpStatus.BAD_REQUEST, gate.reason!);
-}
-```
-
-`previousHashes` are the `phash` values already stored for this room and
-title. Pass an empty array to skip the reuse check.
-
-### 3. Evaluation, after `maybeAutoCompleteShift()`
-
-```ts
-void PhotoAiService.evaluatePhoto({
-    photo_url: photoUrl,
-    requirement: { title, description, reference_image_url },
-    context: { room_type, cleaning_type, room_name },
-})
-    .then((result) => saveAiFields(shiftId, taskId, title, result))
-    .catch(() => undefined);
-```
-
-Do not await it.
-
-## Do not gate completion on the AI
-
-`is_completed` must keep its current meaning — every required photo uploaded.
-The evaluation is asynchronous, so at upload time its status is always
-`pending`; gating completion on it either completes tasks that later fail, or
-leaves tasks permanently incomplete whenever Gemini is unreachable.
-
-Manager rejection belongs in the `/photo-review` flow.
-
-## Failure behaviour
-
-| Failure | Status stored | Worker sees |
-|---|---|---|
-| Gemini unreachable | `pending` | nothing |
-| Invalid JSON after 3 retries | `pending` | nothing |
-| HTTP 4xx other than 429 | `error` | nothing |
-| Confidence below threshold | `review` | nothing |
-| Disabled or no API key | `skipped` | nothing |
-| Gate rejects | — | retake message |
-
-An AI problem never blocks a worker. In the worst case the system behaves as
-it did before this module.
-
-## Not built yet
-
-- Persisting the AI fields back onto the shift (`saveAiFields` above)
-- Query for `previousHashes`
-- Retry sweep for `pending` evaluations
-- `attempt_count` / `forced_accept` tracking
-- AI fields on `PhotoReviewRow`
-- Manager approve/reject endpoint
+Read §19 of the full documentation. Several things here look like mistakes and
+are not — the hand-rolled hex dHash, the empty catch blocks, and the image
+ordering in the Gemini request all have reasons.
