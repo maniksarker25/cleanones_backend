@@ -33,6 +33,7 @@ export const photoAiConfig = {
         min_long_edge: num(process.env.PHOTO_AI_MIN_LONG_EDGE, 640),
 
         phash_match_distance: num(process.env.PHOTO_AI_PHASH_DISTANCE, 5),
+        phash_strict_distance: num(process.env.PHOTO_AI_PHASH_STRICT_DISTANCE, 1),
 
         max_attempts: num(process.env.PHOTO_AI_MAX_ATTEMPTS, 3),
     },
