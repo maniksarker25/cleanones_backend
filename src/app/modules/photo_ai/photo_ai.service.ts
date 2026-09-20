@@ -184,11 +184,11 @@ export const aiResultToFields = (result: IAiResult): IPhotoAiFields => ({
 
     ...(photoAiConfig.auto_only && !photoAiConfig.shadow_mode
         ? {
-              manager_verdict: (result.status === 'failed'
+              auto_decided: true,
+              auto_decision: (result.status === 'failed'
                   ? 'rejected'
                   : 'approved') as 'approved' | 'rejected',
-              manager_verdict_at: new Date(),
-              auto_accepted: result.status !== 'passed',
+              auto_decided_at: new Date(),
           }
         : {}),
     ai_score: result.score,

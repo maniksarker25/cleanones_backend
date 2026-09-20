@@ -100,6 +100,10 @@ export interface IPhotoAiFields {
     manager_verdict_at?: Date;
     manager_note?: string;
 
+    auto_decided?: boolean;
+    auto_decision?: 'approved' | 'rejected';
+    auto_decided_at?: Date;
+
     escalated_at?: Date;
 
     auto_accepted?: boolean;

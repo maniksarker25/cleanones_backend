@@ -3059,6 +3059,8 @@ export interface PhotoReviewPhoto {
     manager_verdict: 'approved' | 'rejected' | null;
     manager_verdict_at: Date | null;
     manager_note: string | null;
+    auto_decided: boolean;
+    auto_decision: 'approved' | 'rejected' | null;
     escalated_at: Date | null;
     auto_accepted: boolean;
 }
@@ -3092,6 +3094,7 @@ export interface PhotoReviewRow {
  */
 const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
     if (photo.manager_verdict) return 90;
+    if (photo.auto_decided) return 85;
     // A clean verdict settles it, however many attempts it took to get a
     // usable photo. Retries usually mean poor light or a shaky hand, not poor
     // work, and a manager should not be asked to re-check a photo the model
@@ -3115,6 +3118,7 @@ const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
  */
 const photoNeedsReview = (photo: PhotoReviewPhoto): boolean => {
     if (photo.manager_verdict) return false;
+    if (photo.auto_decided) return photo.audit_sampled;
     if (photo.auto_accepted) return false;
     if (photo.ai_status === 'passed') return photo.audit_sampled;
     return true;
@@ -3203,6 +3207,8 @@ export const getPhotoReviewListFromDB = async (
                     manager_verdict: p.manager_verdict ?? null,
                     manager_verdict_at: p.manager_verdict_at ?? null,
                     manager_note: p.manager_note ?? null,
+                    auto_decided: p.auto_decided ?? false,
+                    auto_decision: p.auto_decision ?? null,
                     escalated_at: p.escalated_at ?? null,
                     auto_accepted: p.auto_accepted ?? false,
                 }));
