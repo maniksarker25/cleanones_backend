@@ -45,10 +45,25 @@ const renameChatGroup = catchAsync(async (req, res) => {
     });
 });
 
+const removeGroupMember = catchAsync(async (req, res) => {
+    const result = await chatServices.removeGroupMemberFromDB(
+        req.user.profileId as string,
+        req.params.id,
+        req.params.workerId
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Worker removed from chat group successfully',
+        data: result,
+    });
+});
+
 const chatController = {
     getMyChats,
     getGroupMembers,
     renameChatGroup,
+    removeGroupMember,
 };
 
 export default chatController;

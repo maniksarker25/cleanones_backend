@@ -6,7 +6,8 @@ const createClientValidationSchema = z.object({
         name: z.string({ required_error: 'Name is required' }).min(1),
         email: z
             .string({ required_error: 'Email is required' })
-            .email('Invalid email format'),
+            .email('Invalid email format')
+            .toLowerCase(),
         phone: z.string({ required_error: 'Phone number is required' }),
         company_name: z.string().optional(),
         profile_image: z.string().optional(),
@@ -27,7 +28,7 @@ const updateClientValidationSchema = z.object({
     body: z
         .object({
             name: z.string().min(1, 'Name cannot be empty').optional(),
-            email: z.string().email('Invalid email format').optional(),
+            email: z.string().email('Invalid email format').toLowerCase().optional(),
             phone: z.string().optional(),
             company_name: z.string().optional(),
             profile_image: z.string().optional(),

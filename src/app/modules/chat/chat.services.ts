@@ -262,6 +262,69 @@ const renameChatIntoDB = async (
 };
 
 
+// ─── REST: remove a worker from a group (manager only) ─────────────────────────
+
+const removeGroupMemberFromDB = async (
+    managerId: string,
+    chatId: string,
+    workerId: string
+) => {
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Chat not found');
+    }
+    if (chat.type !== 'group') {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'Only group chats support removing a member'
+        );
+    }
+    const wasMember = chat.workers.some((w) => w.toString() === workerId);
+    if (!wasMember) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'Worker is not a member of this chat group'
+        );
+    }
+
+    const result = await Chat.findByIdAndUpdate(
+        chatId,
+        { $pull: { workers: workerId }, last_updated_by: managerId },
+        { new: true, runValidators: true }
+    );
+
+    try {
+        const io = getIO();
+        const groupSummary = { _id: chatId, cleaning_plan: chat.cleaning_plan };
+        // The removed worker: same shape/event syncChatGroupWorkers already
+        // uses when a shift reassignment drops them, so the client only
+        // needs one handler for "I lost access to this group" either way.
+        io.to(workerId).emit('group:removed', groupSummary);
+        // Everyone still in the group: member-list refresh, not a full
+        // group:removed (they haven't lost access, just the roster changed).
+        const memberChangedPayload = { _id: chatId, worker: workerId };
+        io.to(`group:${chatId}`).emit('group:member-removed', memberChangedPayload);
+        io.to('role:manager').emit('group:member-removed', memberChangedPayload);
+        if (chat.client) {
+            io.to(chat.client.toString()).emit(
+                'group:member-removed',
+                memberChangedPayload
+            );
+        }
+        chat.workers.forEach((remainingWorkerId) => {
+            if (remainingWorkerId.toString() === workerId) return;
+            io.to(remainingWorkerId.toString()).emit(
+                'group:member-removed',
+                memberChangedPayload
+            );
+        });
+    } catch {
+        // best-effort realtime nudge, see note above createChatGroupForPlan
+    }
+
+    return result;
+};
+
 const WORKER_CHAT_NAME_FOR_WORKER = 'Managers';
 const CLIENT_CHAT_NAME_FOR_CLIENT = 'Manager';
 
@@ -397,6 +460,7 @@ const chatServices = {
     findOrCreateDirectChat,
     ensureChatAccessOrThrow,
     renameChatIntoDB,
+    removeGroupMemberFromDB,
     getMyChatsFromDB,
     getGroupMembersFromDB,
 };

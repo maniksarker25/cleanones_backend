@@ -26,4 +26,10 @@ router.patch(
     chatController.renameChatGroup
 );
 
+router.delete(
+    '/:id/members/:workerId',
+    auth(USER_ROLE.manager),
+    chatController.removeGroupMember
+);
+
 export const chatRoutes = router;

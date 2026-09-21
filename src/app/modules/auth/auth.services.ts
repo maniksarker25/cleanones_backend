@@ -25,7 +25,12 @@ const generateVerifyCode = (): number => {
  * only if none exists, check for a deleted one purely to keep the specific
  * "already deleted" message instead of a generic "not found".
  */
-const findActiveUserByEmail = async (email: string) => {
+const findActiveUserByEmail = async (rawEmail: string) => {
+    // Email is stored lowercase (see User.email's schema-level `lowercase:
+    // true`), but plenty of callers into this function are raw user input —
+    // normalize here so "Test@X.com" and "test@x.com" are always treated as
+    // the same account, regardless of how the caller typed it.
+    const email = rawEmail.trim().toLowerCase();
     const user = await User.findOne({ email, isDeleted: { $ne: true } });
     if (user) return user;
 

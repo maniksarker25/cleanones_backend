@@ -22,9 +22,6 @@ export interface IWorkerConflict {
 
 export interface IShiftPhotoRequirement extends IPhotoAiFields {
     title: string;
-    // Copied from the source Task's photo requirement at selection time (see
-    // shift.snapshot.util.ts) — guidance shown to the worker, and reserved
-    // for future AI-assisted photo verification.
     description?: string | null;
     reference_image_url?: string | null;
     photo_url: string | null;

@@ -47,6 +47,13 @@ export const registerUser = async (
         ...profileData
     } = payload;
 
+    // Normalize once, up front — every downstream read of profileData.email
+    // (the lookup below, User.create, and the profile record itself) then
+    // sees the same lowercase value regardless of how the client typed it.
+    if (typeof profileData.email === 'string') {
+        profileData.email = profileData.email.trim().toLowerCase();
+    }
+
     if (role === 'worker') {
         profileData.name = workerValidations.updateWorkerBody.parse({
             name: profileData.name ?? [profileData.userData?.firstName, profileData.userData?.lastName]
@@ -178,7 +185,8 @@ export const registerUser = async (
     }
 };
 
-const verifyCode = async (email: string, verifyCode: number) => {
+const verifyCode = async (rawEmail: string, verifyCode: number) => {
+    const email = rawEmail.trim().toLowerCase();
     const user = await User.findOne({ email, isDeleted: { $ne: true } });
     if (!user) {
         throw new AppError(httpStatus.NOT_FOUND, 'User not found');
@@ -235,7 +243,8 @@ const verifyCode = async (email: string, verifyCode: number) => {
     };
 };
 
-const resendVerifyCode = async (email: string) => {
+const resendVerifyCode = async (rawEmail: string) => {
+    const email = rawEmail.trim().toLowerCase();
     const user = await User.findOne({ email, isDeleted: { $ne: true } });
     if (!user) {
         throw new AppError(httpStatus.NOT_FOUND, 'User not found');

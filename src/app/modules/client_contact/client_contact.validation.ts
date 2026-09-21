@@ -6,7 +6,11 @@ const contactBody = z
         name: z.string().trim().min(1, 'Name is required'),
         role: z.string().trim().min(1, 'Role is required'),
         phone: z.string().trim().min(1, 'Phone is required'),
-        email: z.string({ required_error: 'Email is required' }).trim().email('Invalid email address'),
+        email: z
+            .string({ required_error: 'Email is required' })
+            .trim()
+            .email('Invalid email address')
+            .toLowerCase(),
     })
     .strict();
 

@@ -9,7 +9,8 @@ export const registerUserValidationSchema = z.object({
             lastName: z.string().min(1, 'Name is required').max(100),
             email: z
                 .string({ invalid_type_error: 'Please add a valid email' })
-                .email('Invalid email format'),
+                .email('Invalid email format')
+                .toLowerCase(),
         }),
         password: z.string().min(6, 'Password must be at least 6 characters'),
         confirmPassword: z.string().min(6, 'Confirm password is required'),
