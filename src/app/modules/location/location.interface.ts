@@ -1,8 +1,8 @@
 import { Types } from 'mongoose';
 // add office also
-export const LOCATION_TYPE = ['Hotel', 'School', 'Hospital', 'Office', 'Other'] as const;
+// export const LOCATION_TYPE = ['Hotel', 'School', 'Hospital', 'Office', 'Other'] as const;
 
-export type TLocationType = (typeof LOCATION_TYPE)[number];
+// export type TLocationType = (typeof LOCATION_TYPE)[number];
 
 export interface TLocation {
     _id?: string;
@@ -11,7 +11,8 @@ export interface TLocation {
     name: string;
     address: string;
     description?: string;
-    type: TLocationType;
+    // type: TLocationType;
+    type: string;
     is_active: boolean;
     location?: {
         type: 'Point';
