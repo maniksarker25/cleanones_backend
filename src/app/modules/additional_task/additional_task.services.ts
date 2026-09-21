@@ -110,7 +110,7 @@ const approveAdditionalTaskIntoDB = async (
     // the manager correct the client's proposed values as part of the same
     // approval call instead of a separate update-additional-task request.
     overrides?: {
-        duration_minutes?: number;
+        duration_minutes?: number | null;
         photo_requirements?: IAdditionalTask['photo_requirements'];
     }
 ) => {

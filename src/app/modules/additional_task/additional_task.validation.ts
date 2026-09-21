@@ -36,9 +36,7 @@ const createAdditionalTaskValidationSchema = z.object({
             .min(1)
             .trim(),
         description: z.string().trim().optional(),
-        duration_minutes: z.number({
-            required_error: 'Duration is required',
-        }).min(0),
+        duration_minutes: z.number().min(0).nullable().optional(),
         is_photo_required: z.boolean().optional(),
         photo_requirements: z.array(photoRequirementSchema).optional(),
         date_time: z.coerce.date({
@@ -52,7 +50,7 @@ const updateAdditionalTaskValidationSchema = z.object({
         .object({
             name: z.string().min(1).trim().optional(),
             description: z.string().trim().optional(),
-            duration_minutes: z.number().min(0).optional(),
+            duration_minutes: z.number().min(0).nullable().optional(),
             is_photo_required: z.boolean().optional(),
             photo_requirements: z.array(photoRequirementSchema).optional(),
             date_time: z.coerce.date().optional(),
@@ -73,7 +71,7 @@ const approveAdditionalTaskValidationSchema = z.object({
             // proposed duration needs correcting, or the manager wants to
             // set/change which photos are required — without a separate
             // update-additional-task call first. Ignored when rejecting.
-            duration_minutes: z.number().min(0).optional(),
+            duration_minutes: z.number().min(0).nullable().optional(),
             photo_requirements: z.array(photoRequirementSchema).optional(),
         })
         .refine(

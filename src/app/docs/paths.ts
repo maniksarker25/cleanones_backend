@@ -2542,6 +2542,7 @@ const paths = {
                                     },
                                     duration_minutes: {
                                         type: 'number',
+                                        nullable: true,
                                         minimum: 0,
                                         description: "Only applied when status is 'Approved'.",
                                     },

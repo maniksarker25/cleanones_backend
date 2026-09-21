@@ -18,7 +18,7 @@ export interface IAdditionalTask {
     cleaning_plan_id: Types.ObjectId;
     name: string;
     description?:string;
-    duration_minutes: number;
+    duration_minutes?: number | null;
     is_photo_required: boolean;
     photo_requirements: IPhotoRequirement[]; // required photos with titles
     is_completed: boolean;
