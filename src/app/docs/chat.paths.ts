@@ -530,6 +530,119 @@ const chatPaths = {
             },
         },
     },
+    '/chat/{id}/members/{workerId}': {
+        delete: {
+            tags: ['Chat'],
+            summary: 'Remove a worker from a group chat',
+            operationId: 'deletechatidmembersworkerId',
+            description:
+                'Manager only. Group chats only — returns 400 for direct/worker/client chats. Returns 400 if the worker is not currently a member. Pulls the worker from the workers array, updates last_updated_by, and emits group:removed to the removed worker (same event/shape as a shift reassignment dropping them) and group:member-removed to the group room, remaining workers, the client and role:manager. Membership only changes here — the worker keeps access to any due/completed work already on their record.',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            'x-roles': ['manager'],
+            parameters: [
+                {
+                    name: 'id',
+                    in: 'path',
+                    required: true,
+                    schema: {
+                        $ref: '#/components/schemas/ObjectId',
+                    },
+                    description: 'The group chat id.',
+                },
+                {
+                    name: 'workerId',
+                    in: 'path',
+                    required: true,
+                    schema: {
+                        $ref: '#/components/schemas/ObjectId',
+                    },
+                    description: 'The worker to remove from the group.',
+                },
+            ],
+            responses: {
+                '200': {
+                    description: 'Successful request.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: {
+                                        type: 'boolean',
+                                        enum: [true],
+                                    },
+                                    message: {
+                                        type: 'string',
+                                    },
+                                    data: {
+                                        $ref: '#/components/schemas/ChatRecord',
+                                    },
+                                },
+                                required: ['success', 'message', 'data'],
+                            },
+                        },
+                    },
+                },
+                '400': {
+                    description:
+                        'Invalid ID, not a group chat, or worker is not a member.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '401': {
+                    description:
+                        'Missing or invalid token, or role not allowed.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '404': {
+                    description: 'Chat not found.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '429': {
+                    description: 'Rate limit exceeded.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+                '500': {
+                    description:
+                        'Server error; request validation may return 500.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/Error',
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/chat-message/{chatId}': {
         get: {
             tags: ['Chat'],

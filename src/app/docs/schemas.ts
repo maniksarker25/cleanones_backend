@@ -1664,6 +1664,30 @@ const schemas = {
                 description:
                     "Included by the all-workers list endpoint only. All-time sum of (check_out_at - check_in_at) across this worker's completed shift check-ins, in hours, rounded to 2 decimals.",
             },
+            total_shift: {
+                type: 'integer',
+                readOnly: true,
+                description:
+                    'Included by the all-workers list endpoint only. All-time count of shifts (excluding cancelled) this worker was ever assigned to.',
+            },
+            total_late_check_ins: {
+                type: 'integer',
+                readOnly: true,
+                description:
+                    "Included by the all-workers list endpoint only. Of this worker's shifts, how many they checked into after the shift's scheduled date_time.",
+            },
+            total_on_time_check_ins: {
+                type: 'integer',
+                readOnly: true,
+                description:
+                    "Included by the all-workers list endpoint only. Of this worker's shifts, how many they checked into at or before the shift's scheduled date_time.",
+            },
+            total_absent: {
+                type: 'integer',
+                readOnly: true,
+                description:
+                    'Included by the all-workers list endpoint only. Past shifts (date before today, excluding cancelled) this worker was assigned to but never checked into at all.',
+            },
         },
     },
     CleaningPlan: {
@@ -3323,10 +3347,27 @@ const schemas = {
                 description:
                     "Count of today's shifts with status 'upcoming' (not yet checked into).",
             },
-            today_total_worker_late: {
+            total_absent: {
                 type: 'integer',
                 description:
-                    "Distinct workers (not shift-assignment rows) whose shift's scheduled date_time has already passed but who still haven't checked in, excluding cancelled shifts. No grace period beyond the exact scheduled start time.",
+                    "Distinct workers (not shift-assignment rows) whose shift's scheduled date_time has already passed but who still have not checked in at all, excluding cancelled shifts. No grace period beyond the exact scheduled start time.",
+            },
+            total_late: {
+                type: 'integer',
+                description:
+                    "Distinct workers who DID check in today, but after their shift's scheduled date_time — same definition as GET /shift/attendance-summary's late_check_ins, scoped to today. A worker who never checked in is never counted here (see total_absent instead) — the two are mutually exclusive.",
+            },
+            absent_worker_ids: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                    'Worker _ids backing total_absent — the same distinct-worker set, so a caller does not need a second request to know who.',
+            },
+            late_worker_ids: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                    'Worker _ids backing total_late — the same distinct-worker set, so a caller does not need a second request to know who.',
             },
         },
         required: [
@@ -3334,7 +3375,10 @@ const schemas = {
             'today_total_completed_shift',
             'today_total_in_progress_shift',
             'today_total_pending_shift',
-            'today_total_worker_late',
+            'total_absent',
+            'total_late',
+            'absent_worker_ids',
+            'late_worker_ids',
         ],
     },
     ManagerReportTrendPoint: {

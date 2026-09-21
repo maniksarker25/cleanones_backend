@@ -25,6 +25,7 @@ const createAdminProfileValidationSchema = z.object({
             email: z
                 .string()
                 .email({ message: 'Invalid email address' })
+                .toLowerCase()
                 .optional(),
             address: z.string().optional(),
             website: z.string().optional(),
@@ -42,6 +43,7 @@ const updateAdminProfileValidationSchema = z.object({
             email: z
                 .string()
                 .email({ message: 'Invalid email address' })
+                .toLowerCase()
                 .optional(),
             address: z.string().optional(),
             website: z.string().optional(),

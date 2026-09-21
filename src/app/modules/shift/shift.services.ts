@@ -954,10 +954,17 @@ export const getNextShiftForWorker = async (workerId: string) => {
  * today_total_pending_shift. today_total_pending_shift maps to status
  * 'upcoming' (not yet checked into).
  *
- * today_total_worker_late counts DISTINCT workers (not shift-assignment
- * rows) whose shift's scheduled date_time has already passed but who still
- * haven't checked in (check_in_at is null), excluding cancelled shifts — no
- * grace period beyond the exact scheduled start time.
+ * total_absent counts DISTINCT workers (not shift-assignment rows) whose
+ * shift's scheduled date_time has already passed but who still haven't
+ * checked in at all (check_in_at is null), excluding cancelled shifts — no
+ * grace period beyond the exact scheduled start time. total_late counts
+ * DISTINCT workers who DID check in today, but after their shift's
+ * date_time — same definition as getWorkersAttendanceSummaryFromDB's
+ * late_check_ins, scoped to today. A worker who never checked in counts
+ * toward total_absent but never total_late — the two are mutually exclusive.
+ * absent_worker_ids/late_worker_ids carry the same two distinct-worker sets
+ * the two counts are derived from, so a caller doesn't have to re-derive
+ * "who" from "how many" via a second request.
  */
 export const getTodayLiveShiftMetaFromDB = async () => {
     const today = normalizeToUTCDateOnly(new Date());
@@ -968,11 +975,15 @@ export const getTodayLiveShiftMetaFromDB = async () => {
         .lean();
     const shifts = allShifts.filter((s) => s.status !== 'cancelled');
 
+    const absentWorkerIds = new Set<string>();
     const lateWorkerIds = new Set<string>();
     shifts.forEach((shift) => {
-        if (shift.date_time > now) return;
         shift.assigned_workers.forEach((aw) => {
-            if (!aw.check_in_at) lateWorkerIds.add(aw.worker.toString());
+            if (!aw.check_in_at) {
+                if (shift.date_time <= now) absentWorkerIds.add(aw.worker.toString());
+            } else if (aw.check_in_at > shift.date_time) {
+                lateWorkerIds.add(aw.worker.toString());
+            }
         });
     });
 
@@ -987,7 +998,10 @@ export const getTodayLiveShiftMetaFromDB = async () => {
         today_total_pending_shift: shifts.filter(
             (s) => s.status === 'upcoming'
         ).length,
-        today_total_worker_late: lateWorkerIds.size,
+        total_absent: absentWorkerIds.size,
+        total_late: lateWorkerIds.size,
+        absent_worker_ids: Array.from(absentWorkerIds),
+        late_worker_ids: Array.from(lateWorkerIds),
     };
 };
 
@@ -1108,8 +1122,8 @@ const buildShiftTrendBuckets = (
  * selected period, a shift-count trend chart bucketed per
  * buildShiftTrendBuckets, and an issue-report status breakdown (PENDING /
  * IN_PROGRESS / RESOLVED) — all scoped to the same [from, to] range, unlike
- * getTodayLiveShiftMetaFromDB's today_total_worker_late/total_issue_report
- * which are point-in-time, not period-scoped.
+ * getTodayLiveShiftMetaFromDB's total_absent/total_late, which are
+ * point-in-time, not period-scoped.
  */
 export const getManagerReportFromDB = async (period: TReportPeriod) => {
     const now = new Date();

@@ -4,7 +4,7 @@ import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
 import chatServices from '../chat/chat.services';
-import adminCredentialsEmailBody from '../../mailTemplate/adminCredentialsEmailBody';
+import clientCredentialsEmailBody from '../../mailTemplate/clientCredentialsEmailBody';
 import sendEmail from '../../utilities/sendEmail';
 import { USER_ROLE } from '../user/user.constant';
 import { TUser } from '../user/user.interface';
@@ -37,6 +37,10 @@ const createClientIntoDB = async (
             "Password and confirm password doesn't match"
         );
     }
+
+    // Normalize once, up front — the duplicate check, User.create and the
+    // Client profile record itself all read clientData.email below.
+    clientData.email = clientData.email.trim().toLowerCase();
 
     const emailExist = await User.findOne({
         email: clientData.email,
@@ -76,8 +80,8 @@ const createClientIntoDB = async (
 
         await sendEmail({
             email: clientData.email,
-            subject: 'Your Account Login Credentials',
-            html: adminCredentialsEmailBody(
+            subject: 'Your Cleanones Account Login Credentials',
+            html: clientCredentialsEmailBody(
                 clientData.name || 'Client',
                 clientData.email,
                 password
@@ -109,6 +113,10 @@ const updateClientIntoDB = async (
     const client = await Client.findOne({ _id: id, isDeleted: false });
     if (!client) {
         throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+    }
+
+    if (payload.email) {
+        payload.email = payload.email.trim().toLowerCase();
     }
 
     if (payload.email && payload.email !== client.email) {

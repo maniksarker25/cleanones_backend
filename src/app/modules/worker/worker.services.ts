@@ -234,6 +234,111 @@ const getTotalCompletedWorkHoursByWorker = async (
     return hoursByWorker;
 };
 
+interface WorkerShiftStats {
+    total_completed_work_hours: number;
+    total_shift: number;
+    total_late_check_ins: number;
+    total_on_time_check_ins: number;
+    total_absent: number;
+}
+
+/**
+ * All-time shift stats for a batch of workers, in ONE query total — not one
+ * per worker — so a 100-row page (the list's max limit) costs the same
+ * single round trip as a 1-row page. Mirrors
+ * getTotalCompletedWorkHoursByWorker/getWorkerAttendanceStatsFromDB's
+ * definitions but computes every field in a single pass over the same
+ * shift/assigned_workers data instead of running separate queries for hours
+ * vs. late/on-time/absent:
+ * - total_shift: shifts (excluding cancelled) this worker was ever assigned to.
+ * - total_late_check_ins / total_on_time_check_ins: of the shifts they
+ *   actually checked into, whether check_in_at was after/at-or-before the
+ *   shift's scheduled date_time. Mutually exclusive with each other.
+ * - total_absent: past shifts (date before today) they were assigned to but
+ *   never checked into at all — mutually exclusive with the two above (a
+ *   worker who checked in, even late, was not absent).
+ * - total_completed_work_hours: sum of (check_out_at - check_in_at) across
+ *   every completed check-in, in hours.
+ */
+const getWorkerShiftStatsByWorker = async (
+    workerIds: mongoose.Types.ObjectId[]
+): Promise<Map<string, WorkerShiftStats>> => {
+    const statsByWorker = new Map<string, WorkerShiftStats>();
+    if (!workerIds.length) return statsByWorker;
+
+    const idSet = new Set(workerIds.map((id) => id.toString()));
+    const today = new Date(
+        Date.UTC(
+            new Date().getUTCFullYear(),
+            new Date().getUTCMonth(),
+            new Date().getUTCDate()
+        )
+    );
+
+    const shifts = await Shift.find({
+        'assigned_workers.worker': { $in: workerIds },
+        status: { $ne: 'cancelled' },
+    })
+        .select(
+            'date date_time assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at'
+        )
+        .lean();
+
+    const msByWorker = new Map<string, number>();
+    for (const shift of shifts) {
+        for (const aw of shift.assigned_workers) {
+            const workerId = aw.worker.toString();
+            if (!idSet.has(workerId)) continue;
+
+            const stats =
+                statsByWorker.get(workerId) ??
+                ({
+                    total_completed_work_hours: 0,
+                    total_shift: 0,
+                    total_late_check_ins: 0,
+                    total_on_time_check_ins: 0,
+                    total_absent: 0,
+                } satisfies WorkerShiftStats);
+            statsByWorker.set(workerId, stats);
+
+            stats.total_shift += 1;
+
+            if (aw.check_in_at && aw.check_out_at) {
+                msByWorker.set(
+                    workerId,
+                    (msByWorker.get(workerId) ?? 0) +
+                        (aw.check_out_at.getTime() - aw.check_in_at.getTime())
+                );
+            }
+
+            if (aw.check_in_at) {
+                if (aw.check_in_at > shift.date_time) {
+                    stats.total_late_check_ins += 1;
+                } else {
+                    stats.total_on_time_check_ins += 1;
+                }
+            } else if (shift.date < today) {
+                stats.total_absent += 1;
+            }
+        }
+    }
+
+    for (const [workerId, ms] of msByWorker) {
+        const stats = statsByWorker.get(workerId);
+        if (stats) stats.total_completed_work_hours = roundToTwoDecimals(ms / 3_600_000);
+    }
+
+    return statsByWorker;
+};
+
+const EMPTY_WORKER_SHIFT_STATS: WorkerShiftStats = {
+    total_completed_work_hours: 0,
+    total_shift: 0,
+    total_late_check_ins: 0,
+    total_on_time_check_ins: 0,
+    total_absent: 0,
+};
+
 const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
     const parsed = workerValidations.workerListQuery.parse(query);
     const safeQuery = {
@@ -258,12 +363,12 @@ const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
         }
     >;
 
-    const hoursByWorker = await getTotalCompletedWorkHoursByWorker(
+    const statsByWorker = await getWorkerShiftStatsByWorker(
         workers.map((worker) => worker._id)
     );
     const result = workers.map((worker) => ({
         ...worker.toObject(),
-        total_completed_work_hours: hoursByWorker.get(worker._id.toString()) ?? 0,
+        ...(statsByWorker.get(worker._id.toString()) ?? EMPTY_WORKER_SHIFT_STATS),
     }));
 
     return { meta, result };

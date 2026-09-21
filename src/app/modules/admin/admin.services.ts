@@ -31,6 +31,10 @@ const createAdminIntoDB = async (
         );
     }
 
+    // Normalize once, up front — the duplicate check, User.create,
+    // Admin.create and the confirmation email all read userData.email below.
+    userData.email = userData.email.trim().toLowerCase();
+
     const emailExist = await User.findOne({
         email: userData.email,
         isDeleted: { $ne: true },
