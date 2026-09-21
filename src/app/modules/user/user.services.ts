@@ -76,6 +76,7 @@ export const registerUser = async (
 
             user = await User.findOne({
                 email: profileData.email,
+                isDeleted: { $ne: true },
             }).session(session);
 
             if (user?.isVerified) {
@@ -178,7 +179,7 @@ export const registerUser = async (
 };
 
 const verifyCode = async (email: string, verifyCode: number) => {
-    const user = await User.findOne({ email: email });
+    const user = await User.findOne({ email, isDeleted: { $ne: true } });
     if (!user) {
         throw new AppError(httpStatus.NOT_FOUND, 'User not found');
     }
@@ -188,8 +189,8 @@ const verifyCode = async (email: string, verifyCode: number) => {
     if (verifyCode !== user.verifyCode) {
         throw new AppError(httpStatus.BAD_REQUEST, "Code doesn't match");
     }
-    const result = await User.findOneAndUpdate(
-        { email: email },
+    const result = await User.findByIdAndUpdate(
+        user._id,
         { isVerified: true },
         { new: true, runValidators: true }
     );
@@ -235,13 +236,13 @@ const verifyCode = async (email: string, verifyCode: number) => {
 };
 
 const resendVerifyCode = async (email: string) => {
-    const user = await User.findOne({ email: email });
+    const user = await User.findOne({ email, isDeleted: { $ne: true } });
     if (!user) {
         throw new AppError(httpStatus.NOT_FOUND, 'User not found');
     }
     const verifyCode = generateVerifyCode();
-    const updateUser = await User.findOneAndUpdate(
-        { email: email },
+    const updateUser = await User.findByIdAndUpdate(
+        user._id,
         {
             verifyCode: verifyCode,
             codeExpireIn: new Date(Date.now() + 5 * 60000),

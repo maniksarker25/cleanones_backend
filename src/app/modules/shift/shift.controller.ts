@@ -259,6 +259,9 @@ const getShiftRoster = catchAsync(async (req, res) => {
         throw new AppError(httpStatus.BAD_REQUEST, 'limit must be between 1 and 100');
     }
 
+    const client = (req.query.client as string | undefined) || undefined;
+    const location = (req.query.location as string | undefined) || undefined;
+
     const result = await shiftServices.getShiftRosterFromDB({
         view: view as (typeof ROSTER_VIEWS)[number],
         date,
@@ -266,6 +269,8 @@ const getShiftRoster = catchAsync(async (req, res) => {
         month,
         searchTerm,
         workerType,
+        client,
+        location,
         page,
         limit,
     });

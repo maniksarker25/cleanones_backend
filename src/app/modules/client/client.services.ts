@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
+import { emitAppEvent } from '../../events/eventEmitter';
 import chatServices from '../chat/chat.services';
 import adminCredentialsEmailBody from '../../mailTemplate/adminCredentialsEmailBody';
 import sendEmail from '../../utilities/sendEmail';
@@ -13,6 +14,7 @@ import { Client } from './client.model';
 import { Shift } from '../shift/shift.model';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Location } from '../location/location.model';
+import { cascadeCancelPlansForLocations } from '../location/location.services';
 import { Room } from '../room/room.model';
 import { Task } from '../task/task.model';
 import { AdditionalTask } from '../additional_task/additional_task.model';
@@ -36,7 +38,10 @@ const createClientIntoDB = async (
         );
     }
 
-    const emailExist = await User.findOne({ email: clientData.email });
+    const emailExist = await User.findOne({
+        email: clientData.email,
+        isDeleted: { $ne: true },
+    });
     if (emailExist) {
         throw new AppError(httpStatus.BAD_REQUEST, 'This email already exists');
     }
@@ -107,7 +112,10 @@ const updateClientIntoDB = async (
     }
 
     if (payload.email && payload.email !== client.email) {
-        const emailExist = await User.findOne({ email: payload.email });
+        const emailExist = await User.findOne({
+            email: payload.email,
+            isDeleted: { $ne: true },
+        });
         if (emailExist) {
             throw new AppError(
                 httpStatus.BAD_REQUEST,
@@ -141,32 +149,73 @@ const deleteClientFromDB = async (managerId: string, id: string) => {
         throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
     }
 
+    // Deleting a client cascades exactly like deleting each of their
+    // Locations would (see deleteLocationFromDB in location.services.ts) —
+    // every active Location under them, every CleaningPlan at those
+    // locations, those plans' chat groups, and their upcoming shifts, all in
+    // one transaction so a crash mid-cascade can never leave a "deleted"
+    // client with a location/plan/shift still live and staffable.
     const session = await mongoose.startSession();
-    session.startTransaction();
-
+    let locationCount: number;
+    let planCount: number;
+    let workerIds: string[];
     try {
-        await Client.findByIdAndUpdate(
-            id,
-            { isDeleted: true, last_updated_by: managerId },
-            { session }
-        );
-        await User.findByIdAndUpdate(
-            client.user,
-            { isDeleted: true, isBlocked: true },
-            { session }
-        );
+        const output = await session.withTransaction(async () => {
+            await Client.findByIdAndUpdate(
+                id,
+                { isDeleted: true, last_updated_by: managerId },
+                { session }
+            );
+            await User.findByIdAndUpdate(
+                client.user,
+                { isDeleted: true, isBlocked: true },
+                { session }
+            );
 
-        await session.commitTransaction();
-        session.endSession();
+            const affectedLocations = await Location.find({
+                client: id,
+                is_active: true,
+            })
+                .select('_id')
+                .session(session)
+                .lean();
+            const locationIds = affectedLocations.map((l) => l._id);
 
-        await chatServices.deactivateClientManagersChat(id);
+            if (locationIds.length) {
+                await Location.updateMany(
+                    { _id: { $in: locationIds } },
+                    { is_active: false, last_updated_by: managerId },
+                    { session }
+                );
+            }
 
-        return null;
-    } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        throw error;
+            const { planCount, cancelledWorkerIds } =
+                await cascadeCancelPlansForLocations(locationIds, managerId, session);
+
+            await chatServices.deactivateClientManagersChat(id, session);
+
+            return {
+                locationCount: locationIds.length,
+                planCount,
+                cancelledWorkerIds,
+            };
+        });
+        locationCount = output.locationCount;
+        planCount = output.planCount;
+        workerIds = output.cancelledWorkerIds;
+    } finally {
+        await session.endSession();
     }
+
+    emitAppEvent('client.deleted', {
+        clientId: id,
+        clientName: client.name,
+        locationCount,
+        planCount,
+        workerIds,
+    });
+
+    return null;
 };
 
 const getAllClientsFromDB = async (query: Record<string, unknown>) => {

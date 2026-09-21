@@ -10,4 +10,7 @@ export interface IIssueReport {
     location: Types.ObjectId;
     description: string;
     status: (typeof ISSUE_STATUS)[number];
+    // Set by the manager alongside (or after) marking the report RESOLVED —
+    // what was actually done, surfaced back to the reporting worker.
+    resolution_note?: string | null;
 }

@@ -121,6 +121,16 @@ const userSchema = new Schema<TUser>(
     }
 );
 
+// Email is only unique among active accounts — a deleted user's old email
+// must never block a brand new account from taking it. Every app-level
+// findOne({ email }) lookup across auth/admin/client/worker/user services is
+// expected to scope by isDeleted the same way; this index is the DB-level
+// backstop against a race two of those checks can't catch on their own.
+userSchema.index(
+    { email: 1 },
+    { unique: true, partialFilterExpression: { isDeleted: false } }
+);
+
 userSchema.pre('save', async function (next) {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const user = this;

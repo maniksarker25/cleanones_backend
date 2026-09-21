@@ -945,37 +945,32 @@ export const getNextShiftForWorker = async (workerId: string) => {
  * already-materialized Shift documents for today — the nightly cron (plus
  * this system's same-day auto-materialization on plan create/update/assign)
  * means today's occurrences are expected to already exist by the time
- * anyone looks at this.
+ * anyone looks at this. Purely shift data — no issue-report count here (see
+ * /issue-report for that).
  *
- * today_total_pending_shift maps to status 'upcoming' (not yet checked
- * into); a cancelled shift still counts toward today_total_shift but isn't
- * reflected in today_total_completed_shift/today_total_in_progress_shift/
- * today_total_pending_shift.
+ * today_total_shift excludes cancelled shifts, same as
+ * getTodayLiveShiftsFromDB (the list this meta summarizes) — so it always
+ * equals today_total_completed_shift + today_total_in_progress_shift +
+ * today_total_pending_shift. today_total_pending_shift maps to status
+ * 'upcoming' (not yet checked into).
  *
  * today_total_worker_late counts DISTINCT workers (not shift-assignment
  * rows) whose shift's scheduled date_time has already passed but who still
  * haven't checked in (check_in_at is null), excluding cancelled shifts — no
  * grace period beyond the exact scheduled start time.
- *
- * total_issue_report is NOT date-scoped like the others — it's the current,
- * system-wide count of issue reports still open (status PENDING or
- * IN_PROGRESS), i.e. everything not yet RESOLVED, regardless of when it was
- * filed.
  */
 export const getTodayLiveShiftMetaFromDB = async () => {
     const today = normalizeToUTCDateOnly(new Date());
     const now = new Date();
 
-    const [shifts, totalIssueReport] = await Promise.all([
-        Shift.find({ date: today })
-            .select('status date_time assigned_workers')
-            .lean(),
-        IssueReport.countDocuments({ status: { $ne: 'RESOLVED' } }),
-    ]);
+    const allShifts = await Shift.find({ date: today })
+        .select('status date_time assigned_workers')
+        .lean();
+    const shifts = allShifts.filter((s) => s.status !== 'cancelled');
 
     const lateWorkerIds = new Set<string>();
     shifts.forEach((shift) => {
-        if (shift.status === 'cancelled' || shift.date_time > now) return;
+        if (shift.date_time > now) return;
         shift.assigned_workers.forEach((aw) => {
             if (!aw.check_in_at) lateWorkerIds.add(aw.worker.toString());
         });
@@ -993,7 +988,6 @@ export const getTodayLiveShiftMetaFromDB = async () => {
             (s) => s.status === 'upcoming'
         ).length,
         today_total_worker_late: lateWorkerIds.size,
-        total_issue_report: totalIssueReport,
     };
 };
 
@@ -1228,11 +1222,15 @@ const TODAY_LIVE_SHIFTS_SORTABLE_FIELDS = new Set([
     'updatedAt',
 ]);
 
+// Cancelled shifts are never surfaced by getTodayLiveShiftsFromDB — 'today's
+// live shifts' means what's actually happening/scheduled today, not what got
+// called off. 'cancelled' is intentionally excluded so a ?status=cancelled
+// query is rejected the same way any other invalid value would be, rather
+// than silently overriding the base filter below.
 const SHIFT_STATUSES = new Set<IShift['status']>([
     'upcoming',
     'in_progress',
     'completed',
-    'cancelled',
 ]);
 
 /**
@@ -1260,7 +1258,7 @@ export const getTodayLiveShiftsFromDB = async (
         );
     }
 
-    const match: Record<string, unknown> = { date: today };
+    const match: Record<string, unknown> = { date: today, status: { $ne: 'cancelled' } };
 
     const locationId = parseObjectIdQueryParam(query.location, 'location');
     if (locationId) {
@@ -1754,6 +1752,8 @@ interface RosterQueryParams {
     month?: number; // 1-12 — anchors 'month'
     searchTerm?: string;
     workerType?: WorkerType;
+    client?: string;
+    location?: string;
     page?: number;
     limit?: number;
 }
@@ -1821,23 +1821,58 @@ export const getRosterDateRange = (
  * appears on a real, staffed Shift (see assignWorkersToShift) — there is no
  * plan-level default roster to merge in, so every entry here is real.
  *
+ * client/location narrow this to workers who have at least one shift for
+ * that client/location in the range — AND their calendar cells only show
+ * shifts matching the filter too, not their unrelated shifts elsewhere (same
+ * "filtered means filtered end to end" behavior as getManagerPlanRosterFromDB).
+ *
  * Pagination happens FIRST, on the Worker query itself (via a single
  * `$facet` aggregation that returns the page and the total count in one
  * round trip) — the materialized-Shift query is then scoped to only this
- * page's workers, not the whole roster.
+ * page's workers, not the whole roster. When client/location is supplied, an
+ * extra up-front query resolves the matching worker ids so the Worker
+ * `$facet` can be scoped to them too (empty $in yields zero results, never
+ * "filter ignored" — same convention as getTodayLiveShiftsFromDB's client filter).
  */
 export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
-    const { view, date, year, month, searchTerm, workerType } = params;
+    const { view, date, year, month, searchTerm, workerType, client, location } = params;
     const { start, end } = getRosterDateRange(view, date, year, month);
 
     const page = Math.max(1, Math.trunc(params.page ?? 1) || 1);
     const limit = Math.min(100, Math.max(1, Math.trunc(params.limit ?? 20) || 20));
+
+    const shiftFilter: Record<string, unknown> = {
+        date: { $gte: start, $lt: end },
+        status: { $ne: 'cancelled' },
+    };
+    if (location !== undefined) {
+        if (!mongoose.isValidObjectId(location)) {
+            throw new AppError(httpStatus.BAD_REQUEST, 'Invalid location ID');
+        }
+        shiftFilter['location.location'] = new Types.ObjectId(location);
+    }
+    if (client !== undefined) {
+        if (!mongoose.isValidObjectId(client)) {
+            throw new AppError(httpStatus.BAD_REQUEST, 'Invalid client ID');
+        }
+        const planIds = await CleaningPlan.find({ client }).distinct('_id');
+        // An empty $in never matches — correctly yields zero results instead
+        // of accidentally falling through to "no client filter at all".
+        shiftFilter.cleaning_plan = { $in: planIds };
+    }
+    const filteringByClientOrLocation = location !== undefined || client !== undefined;
 
     const workerFilter: Record<string, unknown> = { isDeleted: { $ne: true } };
     if (workerType) workerFilter.worker_type = workerType;
     if (searchTerm) {
         const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         workerFilter.name = { $regex: escaped, $options: 'i' };
+    }
+    if (filteringByClientOrLocation) {
+        const matchingWorkerIds = await Shift.find(shiftFilter).distinct(
+            'assigned_workers.worker'
+        );
+        workerFilter._id = { $in: matchingWorkerIds };
     }
 
     // Single round trip for both the page and the total count, so pagination
@@ -1887,9 +1922,8 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
     const workerIdSet = new Set(workerIds.map((id) => id.toString()));
 
     const materializedShifts = await Shift.find({
+        ...shiftFilter,
         'assigned_workers.worker': { $in: workerIds },
-        date: { $gte: start, $lt: end },
-        status: { $ne: 'cancelled' },
     }).lean();
 
     // workerId -> dateKey -> entries
@@ -2421,10 +2455,9 @@ const FULL_WEEKDAY_NAMES = [
 export interface EligibleWorkerRow {
     worker: Record<string, unknown>;
     // Based on the worker's own declared working_days (see worker.model.ts)
-    // against this date's weekday. A worker who hasn't set any working_days
-    // at all (empty array — most workers today) is treated as available
-    // every day: this is an advisory preference, not a hard restriction, and
-    // failing closed for everyone who never filled it in would be wrong.
+    // against this date's weekday: available only if this weekday is in
+    // their working_days. An empty working_days array (never configured, or
+    // explicitly cleared) means unavailable every day — no special-casing.
     is_available: boolean;
     is_conflict: boolean;
     conflict_reason: ConflictReason | null;
@@ -2478,7 +2511,7 @@ export const listEligibleWorkersForShift = async (
     const results: EligibleWorkerRow[] = [];
     for (const worker of eligibleWorkers) {
         const workingDays = worker.working_days ?? [];
-        const isAvailable = workingDays.length === 0 || workingDays.includes(weekdayName);
+        const isAvailable = workingDays.includes(weekdayName);
 
         const conflict = await findWorkerConflictOnDate(
             worker._id,

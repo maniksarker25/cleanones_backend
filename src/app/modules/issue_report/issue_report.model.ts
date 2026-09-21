@@ -35,6 +35,11 @@ const issueReportSchema = new Schema<IIssueReport>(
             enum: ISSUE_STATUS,
             default: 'PENDING',
         },
+        resolution_note: {
+            type: String,
+            trim: true,
+            default: null,
+        },
     },
     {
         timestamps: true,

@@ -148,12 +148,13 @@ const createClientManagersChat = async (clientId: Types.ObjectId | string) => {
 };
 
 const deactivateClientManagersChat = async (
-    clientId: Types.ObjectId | string
+    clientId: Types.ObjectId | string,
+    session?: ClientSession
 ) => {
     return Chat.findOneAndUpdate(
         { type: 'client', client: clientId },
         { is_active: false },
-        { new: true }
+        { new: true, session }
     );
 };
 

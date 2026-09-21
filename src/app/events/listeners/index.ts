@@ -6,3 +6,5 @@ import './additional_task.listener';
 import './shift.listener';
 import './chat.listener';
 import './location.listener';
+import './client.listener';
+import './issue_report.listener';

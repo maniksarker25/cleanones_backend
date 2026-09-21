@@ -13,6 +13,7 @@ export const issueReportBody = z
 export const issueReportUpdateBody = issueReportBody
     .extend({
         status: z.enum(ISSUE_STATUS),
+        resolution_note: z.string().trim().min(1).nullable(),
     })
     .partial()
     .refine((body) => Object.keys(body).length > 0, {
