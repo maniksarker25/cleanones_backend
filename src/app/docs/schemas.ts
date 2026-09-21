@@ -67,6 +67,13 @@ const schemas = {
                     "IN_PROGRESS",
                     "RESOLVED"
                 ]
+            },
+            "resolution_note": {
+                "type": "string",
+                "minLength": 1,
+                "nullable": true,
+                "example": "Replaced the leaking hose and tested the scrubber.",
+                "description": "Set by the manager, typically alongside marking status RESOLVED. Surfaced back to the reporting worker."
             }
         }
     },
@@ -106,6 +113,12 @@ const schemas = {
                     "RESOLVED"
                 ],
                 "default": "PENDING"
+            },
+            "resolution_note": {
+                "type": "string",
+                "nullable": true,
+                "example": "Replaced the leaking hose and tested the scrubber.",
+                "description": "Set by the manager, typically alongside marking status RESOLVED. Null until then."
             },
             "createdAt": {
                 "type": "string",
@@ -3297,7 +3310,7 @@ const schemas = {
         properties: {
             today_total_shift: {
                 type: 'integer',
-                description: 'Materialized shifts today, system-wide — not scoped to the calling manager.',
+                description: "Materialized shifts today, system-wide — not scoped to the calling manager. Excludes cancelled shifts, so this always equals today_total_completed_shift + today_total_in_progress_shift + today_total_pending_shift.",
             },
             today_total_completed_shift: {
                 type: 'integer',
@@ -3308,17 +3321,12 @@ const schemas = {
             today_total_pending_shift: {
                 type: 'integer',
                 description:
-                    "Count of today's shifts with status 'upcoming' (not yet checked into). A cancelled shift counts toward today_total_shift but isn't reflected in today_total_completed_shift/today_total_in_progress_shift/today_total_pending_shift.",
+                    "Count of today's shifts with status 'upcoming' (not yet checked into).",
             },
             today_total_worker_late: {
                 type: 'integer',
                 description:
                     "Distinct workers (not shift-assignment rows) whose shift's scheduled date_time has already passed but who still haven't checked in, excluding cancelled shifts. No grace period beyond the exact scheduled start time.",
-            },
-            total_issue_report: {
-                type: 'integer',
-                description:
-                    "NOT date-scoped like the other fields — the current, system-wide count of issue reports still open (status PENDING or IN_PROGRESS), i.e. everything not yet RESOLVED, regardless of when it was filed.",
             },
         },
         required: [
@@ -3327,7 +3335,6 @@ const schemas = {
             'today_total_in_progress_shift',
             'today_total_pending_shift',
             'today_total_worker_late',
-            'total_issue_report',
         ],
     },
     ManagerReportTrendPoint: {
@@ -3378,7 +3385,7 @@ const schemas = {
                     },
                     total_issue_report: {
                         type: 'integer',
-                        description: 'Issue reports filed (any status) within the selected period — unlike TodayLiveShiftMeta.total_issue_report, this IS period-scoped.',
+                        description: 'Issue reports filed (any status) within the selected period.',
                     },
                 },
                 required: ['total_shift', 'total_issue_report'],

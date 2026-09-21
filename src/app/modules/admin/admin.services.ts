@@ -31,7 +31,10 @@ const createAdminIntoDB = async (
         );
     }
 
-    const emailExist = await User.findOne({ email: userData.email });
+    const emailExist = await User.findOne({
+        email: userData.email,
+        isDeleted: { $ne: true },
+    });
     if (emailExist) {
         throw new AppError(httpStatus.BAD_REQUEST, 'This email already exists');
     }

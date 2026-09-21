@@ -82,6 +82,51 @@ const updateLocationIntoDB = async (
     return result;
 };
 
+/**
+ * Shared cascade for "these locations just went inactive": deactivates every
+ * still-active CleaningPlan at any of them, deactivates those plans' chat
+ * groups, and cancels their upcoming shifts (see cancelUpcomingShiftsAcrossPlans
+ * for exactly which shifts that touches). Used by deleteLocationFromDB for a
+ * single location, and by client.services.ts's deleteClientFromDB across every
+ * location under a deleted client — one cascade, two callers, so a client
+ * delete can never drift out of sync with what a location delete already does.
+ * Caller owns flipping Location.is_active itself; this only handles what
+ * hangs off the location(s).
+ */
+export const cascadeCancelPlansForLocations = async (
+    locationIds: (Types.ObjectId | string)[],
+    managerId: string,
+    session: mongoose.ClientSession
+): Promise<{ planCount: number; cancelledWorkerIds: string[] }> => {
+    if (!locationIds.length) return { planCount: 0, cancelledWorkerIds: [] };
+
+    const affectedPlans = await CleaningPlan.find({
+        location: { $in: locationIds },
+        is_active: true,
+    })
+        .select('_id')
+        .session(session)
+        .lean();
+    const planIds = affectedPlans.map((p) => p._id);
+
+    if (planIds.length) {
+        await CleaningPlan.updateMany(
+            { _id: { $in: planIds } },
+            { is_active: false, last_updated_by: managerId },
+            { session }
+        );
+        await chatServices.deactivateChatGroupsForPlans(planIds, session);
+    }
+
+    const cancelledWorkerIds = await cancelUpcomingShiftsAcrossPlans(
+        planIds,
+        managerId,
+        session
+    );
+
+    return { planCount: planIds.length, cancelledWorkerIds };
+};
+
 const deleteLocationFromDB = async (managerId: string, id: string) => {
     const location = await Location.findById(id);
     if (!location) {
@@ -100,34 +145,12 @@ const deleteLocationFromDB = async (managerId: string, id: string) => {
                 { new: true, session }
             );
 
-      
-            const affectedPlans = await CleaningPlan.find({
-                location: id,
-                is_active: true,
-            })
-                .select('_id')
-                .session(session)
-                .lean();
-            const planIds = affectedPlans.map((p) => p._id);
-
-            if (planIds.length) {
-                await CleaningPlan.updateMany(
-                    { _id: { $in: planIds } },
-                    { is_active: false, last_updated_by: managerId },
-                    { session }
-                );
-                await chatServices.deactivateChatGroupsForPlans(planIds, session);
-            }
-
-            const cancelledWorkerIds = await cancelUpcomingShiftsAcrossPlans(
-                planIds,
-                managerId,
-                session
-            );
+            const { planCount, cancelledWorkerIds } =
+                await cascadeCancelPlansForLocations([id], managerId, session);
 
             return {
                 updatedLocation,
-                planCount: planIds.length,
+                planCount,
                 cancelledWorkerIds,
             };
         });

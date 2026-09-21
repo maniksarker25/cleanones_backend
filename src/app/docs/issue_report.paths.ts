@@ -118,7 +118,7 @@ const issueReportPaths = {
             summary: 'Update issue report',
             operationId: 'patchupdateissuereportid',
             description:
-                'Required role: manager. Supply at least one field. Managers may set status (PENDING | IN_PROGRESS | RESOLVED). A supplied location must exist and be active.',
+                'Required role: manager. Supply at least one field. Managers may set status (PENDING | IN_PROGRESS | RESOLVED) and resolution_note (typically set together when resolving — the note is surfaced back to the reporting worker via notification). A supplied location must exist and be active.',
             security: [
                 {
                     bearerAuth: [],

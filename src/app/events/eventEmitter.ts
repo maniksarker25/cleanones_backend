@@ -139,6 +139,49 @@ export interface LocationDeactivatedPayload {
     workerIds: string[];
 }
 
+// ─── Client ─────────────────────────────────────────────────────────────────
+
+// A Client was deleted/blocked, taking every active Location under them (and
+// every CleaningPlan at those locations, and every one of their staffed
+// future shifts) down with it — see client.services.ts's deleteClientFromDB,
+// which reuses location.services.ts's cascadeCancelPlansForLocations across
+// every location under the client. The client itself gets no notice here
+// (their account is being deactivated by this same action); only the
+// affected workers are notified, one consolidated notice each.
+export interface ClientDeletedPayload {
+    clientId: string;
+    clientName: string;
+    /** How many active Locations under this client got deactivated. */
+    locationCount: number;
+    /** How many active CleaningPlans across those locations got deactivated. */
+    planCount: number;
+    /** Every worker who had at least one shift cancelled across any of those plans. */
+    workerIds: string[];
+}
+
+// ─── Issue report ───────────────────────────────────────────────────────────
+
+// A worker filed a new issue report — every manager needs to see it (no
+// stored manager relationship exists to narrow this to one, same rationale
+// as additional_task.created; see events/listeners/issue_report.listener.ts).
+export interface IssueReportCreatedPayload {
+    issueId: string;
+    workerId: string;
+    issueType: string;
+    severity: string;
+}
+
+// A manager changed an issue report's status — tell the worker who filed it.
+// resolutionNote is whatever the manager attached alongside the status
+// change (see issue_report.services.ts's updateIssueReportIntoDB); null if
+// they didn't set one.
+export interface IssueReportStatusChangedPayload {
+    issueId: string;
+    workerId: string;
+    status: string;
+    resolutionNote: string | null;
+}
+
 // ─── Chat (offline push only — realtime delivery is already handled by ────
 // the Socket.IO layer in chat_message.services.ts; this event exists purely
 // so an offline recipient still gets a push/notification-center entry) ─────
@@ -158,6 +201,9 @@ export interface AppEventPayloadMap {
     'cleaning_plan.deleted': CleaningPlanDeletedPayload;
     'cleaning_plan.shifts_cancelled': CleaningPlanShiftsCancelledPayload;
     'location.deactivated': LocationDeactivatedPayload;
+    'client.deleted': ClientDeletedPayload;
+    'issue_report.created': IssueReportCreatedPayload;
+    'issue_report.status_changed': IssueReportStatusChangedPayload;
     'additional_task.created': AdditionalTaskCreatedPayload;
     'additional_task.approved': AdditionalTaskApprovedPayload;
     'additional_task.rejected': AdditionalTaskRejectedPayload;

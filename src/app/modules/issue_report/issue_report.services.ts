@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import { isObjectIdOrHexString } from 'mongoose';
 import AppError from '../../error/appError';
+import { emitAppEvent } from '../../events/eventEmitter';
 import { Location } from '../location/location.model';
 import { IssueReport } from './issue_report.model';
 import {
@@ -24,13 +25,33 @@ const ensureLocationExists = async (id: string) => {
 const createIssueReportIntoDB = async (payload: unknown, workerId: string) => {
     const body = issueReportBody.parse(payload);
     await ensureLocationExists(body.location);
-    return IssueReport.create({ ...body, worker: workerId, status: 'PENDING' });
+    const result = await IssueReport.create({
+        ...body,
+        worker: workerId,
+        status: 'PENDING',
+    });
+
+    emitAppEvent('issue_report.created', {
+        issueId: result._id.toString(),
+        workerId,
+        issueType: result.issueType,
+        severity: result.severity,
+    });
+
+    return result;
 };
 
 const updateIssueReportIntoDB = async (id: string, payload: unknown) => {
     validateId(id);
     const body = issueReportUpdateBody.parse(payload);
     if (body.location !== undefined) await ensureLocationExists(body.location);
+
+    const existing = await IssueReport.findById(id).select('status worker');
+    if (!existing)
+        throw new AppError(httpStatus.NOT_FOUND, 'Issue report not found');
+    const statusChanged =
+        body.status !== undefined && body.status !== existing.status;
+
     const result = await IssueReport.findByIdAndUpdate(
         id,
         { $set: body },
@@ -41,6 +62,16 @@ const updateIssueReportIntoDB = async (id: string, payload: unknown) => {
     );
     if (!result)
         throw new AppError(httpStatus.NOT_FOUND, 'Issue report not found');
+
+    if (statusChanged) {
+        emitAppEvent('issue_report.status_changed', {
+            issueId: result._id.toString(),
+            workerId: existing.worker.toString(),
+            status: result.status,
+            resolutionNote: result.resolution_note ?? null,
+        });
+    }
+
     return result;
 };
 

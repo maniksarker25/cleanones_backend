@@ -17,16 +17,32 @@ const generateVerifyCode = (): number => {
     return Math.floor(100000 + Math.random() * 900000);
 };
 
-const loginUserIntoDB = async (payload: TLoginUser) => {
-    const user = await User.findOne({ email: payload.email });
-    if (!user) {
-        throw new AppError(httpStatus.NOT_FOUND, 'Invalid credentials');
-    }
-    if (user.isDeleted) {
+/**
+ * Email is only unique among active accounts (see the partial index on
+ * User.email) — a deleted user's old email can already belong to a brand new
+ * account. A plain findOne({ email }) would be ambiguous between the two, so
+ * every lookup below goes through this: match the active account first, and
+ * only if none exists, check for a deleted one purely to keep the specific
+ * "already deleted" message instead of a generic "not found".
+ */
+const findActiveUserByEmail = async (email: string) => {
+    const user = await User.findOne({ email, isDeleted: { $ne: true } });
+    if (user) return user;
+
+    const deletedUser = await User.findOne({ email, isDeleted: true });
+    if (deletedUser) {
         throw new AppError(
             httpStatus.FORBIDDEN,
             'This user is already deleted'
         );
+    }
+    return null;
+};
+
+const loginUserIntoDB = async (payload: TLoginUser) => {
+    const user = await findActiveUserByEmail(payload.email);
+    if (!user) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Invalid credentials');
     }
     if (user.isBlocked) {
         throw new AppError(httpStatus.FORBIDDEN, 'This user is blocked');
@@ -177,29 +193,20 @@ const refreshToken = async (token: string) => {
 
 // forgot password
 const forgetPassword = async (email: string) => {
-    const user = await User.findOne({ email: email });
+    const user = await findActiveUserByEmail(email);
     if (!user) {
         throw new AppError(httpStatus.NOT_FOUND, 'This user does not exist');
-    }
-    if (user.isDeleted) {
-        throw new AppError(
-            httpStatus.FORBIDDEN,
-            'This user is already deleted'
-        );
     }
     if (user.isBlocked) {
         throw new AppError(httpStatus.FORBIDDEN, 'This user is blocked');
     }
 
     const resetCode = generateVerifyCode();
-    await User.findOneAndUpdate(
-        { email },
-        {
-            resetCode: resetCode,
-            isResetVerified: false,
-            codeExpireIn: new Date(Date.now() + 5 * 60000),
-        }
-    );
+    await User.findByIdAndUpdate(user._id, {
+        resetCode: resetCode,
+        isResetVerified: false,
+        codeExpireIn: new Date(Date.now() + 5 * 60000),
+    });
     sendEmail({
         email: user.email,
         subject: 'Reset password code',
@@ -212,15 +219,9 @@ const forgetPassword = async (email: string) => {
 // verify forgot otp
 
 const verifyResetOtp = async (email: string, resetCode: number) => {
-    const user = await User.findOne({ email: email });
+    const user = await findActiveUserByEmail(email);
     if (!user) {
         throw new AppError(httpStatus.NOT_FOUND, 'This user does not exist');
-    }
-    if (user.isDeleted) {
-        throw new AppError(
-            httpStatus.FORBIDDEN,
-            'This user is already deleted'
-        );
     }
     if (user.isBlocked) {
         throw new AppError(httpStatus.FORBIDDEN, 'This user is blocked');
@@ -232,8 +233,8 @@ const verifyResetOtp = async (email: string, resetCode: number) => {
     if (user.resetCode !== Number(resetCode)) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Reset code is invalid');
     }
-    await User.findOneAndUpdate(
-        { email },
+    await User.findByIdAndUpdate(
+        user._id,
         { isResetVerified: true },
         { new: true, runValidators: true }
     );
@@ -252,7 +253,7 @@ const resetPassword = async (payload: {
             "Password and confirm password doesn't match"
         );
     }
-    const user = await User.findOne({ email: payload.email });
+    const user = await findActiveUserByEmail(payload.email);
     if (!user) {
         throw new AppError(httpStatus.NOT_FOUND, 'This user does not exist');
     }
@@ -269,12 +270,6 @@ const resetPassword = async (payload: {
         );
     }
 
-    if (user.isDeleted) {
-        throw new AppError(
-            httpStatus.FORBIDDEN,
-            'This user is already deleted'
-        );
-    }
     if (user.isBlocked) {
         throw new AppError(httpStatus.FORBIDDEN, 'This user is blocked');
     }
@@ -282,18 +277,13 @@ const resetPassword = async (payload: {
         payload.password,
         Number(config.bcrypt_salt_rounds)
     );
-    await User.findOneAndUpdate(
-        {
-            email: payload.email,
-        },
-        {
-            password: newHashedPassword,
-            passwordChangedAt: new Date(),
-            isResetVerified: false,
-            resetCode: null,
-            codeExpireIn: null,
-        }
-    );
+    await User.findByIdAndUpdate(user._id, {
+        password: newHashedPassword,
+        passwordChangedAt: new Date(),
+        isResetVerified: false,
+        resetCode: null,
+        codeExpireIn: null,
+    });
     const jwtPayload = {
         id: user?._id,
         profileId: user?.profileId?.toString() as string,
@@ -315,29 +305,20 @@ const resetPassword = async (payload: {
 };
 
 const resendResetCode = async (email: string) => {
-    const user = await User.findOne({ email: email });
+    const user = await findActiveUserByEmail(email);
     if (!user) {
         throw new AppError(httpStatus.NOT_FOUND, 'This user does not exist');
-    }
-    if (user.isDeleted) {
-        throw new AppError(
-            httpStatus.FORBIDDEN,
-            'This user is already deleted'
-        );
     }
     if (user.isBlocked) {
         throw new AppError(httpStatus.FORBIDDEN, 'This user is blocked');
     }
 
     const resetCode = generateVerifyCode();
-    await User.findOneAndUpdate(
-        { email },
-        {
-            resetCode: resetCode,
-            isResetVerified: false,
-            codeExpireIn: new Date(Date.now() + 5 * 60000),
-        }
-    );
+    await User.findByIdAndUpdate(user._id, {
+        resetCode: resetCode,
+        isResetVerified: false,
+        codeExpireIn: new Date(Date.now() + 5 * 60000),
+    });
     sendEmail({
         email: user.email,
         subject: 'Reset password code',

@@ -6375,7 +6375,7 @@ const paths = {
             summary: 'Shift roster (day/week/month)',
             operationId: 'getShiftRoster',
             description:
-                "Manager-only. Powers the \"Shift Roster\" page. One row per active worker matching the filters, for the current page ONLY (including workers with zero shifts in the range), each with its STAFFED shifts grouped by ISO date across the requested range. A worker only ever appears on a real, staffed Shift (see PATCH /shift/{planId}/{date}/assign-workers) — there is no plan-level default roster to merge in, so every entry here is real. 'week' runs Sunday-Saturday (matching the roster UI), 'month' is the full calendar month. Pagination runs on the worker query itself (single $facet aggregation for the page + total count together), and the materialized-Shift query is scoped to only that page's workers — so a larger roster does not make a single page's request more expensive. meta.total_shifts counts distinct shift occurrences in range for THIS PAGE's workers only (not roster-wide); meta.total/meta.totalPage are the roster-wide worker count/page count.\n\nRequired role: manager.",
+                "Manager-only. Powers the \"Shift Roster\" page. One row per active worker matching the filters, for the current page ONLY (including workers with zero shifts in the range), each with its STAFFED shifts grouped by ISO date across the requested range. A worker only ever appears on a real, staffed Shift (see PATCH /shift/{planId}/{date}/assign-workers) — there is no plan-level default roster to merge in, so every entry here is real. 'week' runs Sunday-Saturday (matching the roster UI), 'month' is the full calendar month. Pagination runs on the worker query itself (single $facet aggregation for the page + total count together), and the materialized-Shift query is scoped to only that page's workers — so a larger roster does not make a single page's request more expensive. client/location narrow the roster end to end: only workers with at least one shift for that client/location in range are included, and their calendar cells only show shifts matching the filter (not their unrelated shifts elsewhere). meta.total_shifts counts distinct shift occurrences in range for THIS PAGE's workers only (not roster-wide); meta.total/meta.totalPage are the roster-wide worker count/page count.\n\nRequired role: manager.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [
@@ -6415,6 +6415,18 @@ const paths = {
                     in: 'query',
                     schema: { type: 'string', enum: ['all', 'Employee', 'Freelancer'], default: 'all' },
                     description: "Filter by worker type. 'all' (default) applies no filter.",
+                },
+                {
+                    name: 'client',
+                    in: 'query',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                    description: "Narrow to workers with at least one shift for this client in range; their calendar cells only show that client's shifts. Returns 400 if not a valid ObjectId.",
+                },
+                {
+                    name: 'location',
+                    in: 'query',
+                    schema: { $ref: '#/components/schemas/ObjectId' },
+                    description: "Narrow to workers with at least one shift at this location in range; their calendar cells only show that location's shifts. Returns 400 if not a valid ObjectId.",
                 },
                 {
                     name: 'page',
@@ -6543,7 +6555,7 @@ const paths = {
             summary: "Today's live shift metadata (system-wide)",
             operationId: 'getShiftTodayLiveShiftMeta',
             description:
-                "Manager-only, but NOT scoped to the calling manager — every manager sees the same system-wide numbers. Counters for today's shifts across all cleaning plans: today_total_shift, today_total_completed_shift, today_total_in_progress_shift, today_total_pending_shift (status 'upcoming'), and today_total_worker_late (distinct workers past their shift's scheduled start time who still haven't checked in). Also includes total_issue_report — NOT date-scoped, the current system-wide count of issue reports still open (status PENDING or IN_PROGRESS). Only counts already-staffed Shift documents (see PATCH /shift/{planId}/{date}/assign-workers) — a due date nobody has staffed today does not contribute to any of these counters.\n\nRequired role: manager.",
+                "Manager-only, but NOT scoped to the calling manager — every manager sees the same system-wide numbers. Purely shift data (no issue-report count — see GET /issue-report/all-issue-reports for that). Counters for today's shifts across all cleaning plans: today_total_shift, today_total_completed_shift, today_total_in_progress_shift, today_total_pending_shift (status 'upcoming'), and today_total_worker_late (distinct workers past their shift's scheduled start time who still haven't checked in). Cancelled shifts are excluded from today_total_shift, so it always equals the sum of the completed/in_progress/pending counters. Only counts already-staffed Shift documents (see PATCH /shift/{planId}/{date}/assign-workers) — a due date nobody has staffed today does not contribute to any of these counters.\n\nRequired role: manager.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [],
@@ -6574,7 +6586,7 @@ const paths = {
             summary: 'Manager dashboard report (week/month/quarter/year)',
             operationId: 'getShiftReport',
             description:
-                'Manager-only, system-wide (not scoped to the calling manager). "This week/month/quarter/year" as an inclusive UTC-calendar-day range — week starts Monday. Returns a summary (total_shift, total_issue_report — both period-scoped, unlike the point-in-time fields on GET /shift/today-live-shift-meta), a shift-count trend chart whose bucket granularity scales with the period (week/month -> per day, quarter -> per week, year -> per month; bucket totals always sum to summary.total_shift), and an issue-report breakdown by current status (PENDING/IN_PROGRESS/RESOLVED) for reports filed within the period.\n\nRequired role: manager.',
+                'Manager-only, system-wide (not scoped to the calling manager). "This week/month/quarter/year" as an inclusive UTC-calendar-day range — week starts Monday. Returns a summary (total_shift, total_issue_report — both period-scoped), a shift-count trend chart whose bucket granularity scales with the period (week/month -> per day, quarter -> per week, year -> per month; bucket totals always sum to summary.total_shift), and an issue-report breakdown by current status (PENDING/IN_PROGRESS/RESOLVED) for reports filed within the period.\n\nRequired role: manager.',
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [
@@ -6672,7 +6684,7 @@ const paths = {
             summary: "Today's live shifts (list, system-wide)",
             operationId: 'getShiftTodayLiveShifts',
             description:
-                "Manager-only, not scoped to the calling manager — every manager sees the same system-wide list. Every shift materialized for today, filterable by location, client and status, with resolved cleaning_plan/client context and progress totals — a lean list view (no rooms[]/tasks[]/assigned_workers[] detail; use GET /shift/single-live-shift/{id} for that). Backed by a { date, 'location.location' } index. Pagination is nested under data.meta; records are under data.result.\n\nRequired role: manager.",
+                "Manager-only, not scoped to the calling manager — every manager sees the same system-wide list. Every shift materialized for today, filterable by location, client and status, with resolved cleaning_plan/client context and progress totals — a lean list view (no rooms[]/tasks[]/assigned_workers[] detail; use GET /shift/single-live-shift/{id} for that). Cancelled shifts are always excluded, and status=cancelled is rejected (400) rather than silently returning them. Backed by a { date, 'location.location' } index. Pagination is nested under data.meta; records are under data.result.\n\nRequired role: manager.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [
@@ -6693,9 +6705,9 @@ const paths = {
                     in: 'query',
                     schema: {
                         type: 'string',
-                        enum: ['upcoming', 'in_progress', 'completed', 'cancelled'],
+                        enum: ['upcoming', 'in_progress', 'completed'],
                     },
-                    description: 'Filter to shifts with this status. Returns 400 for any other value.',
+                    description: "Filter to shifts with this status. Cancelled shifts are never returned by this endpoint, so 'cancelled' is not an accepted value — returns 400 for it or any other value.",
                 },
                 {
                     name: 'page',
@@ -6723,7 +6735,7 @@ const paths = {
             responses: {
                 ...errors,
                 '200': {
-                    description: "Today's shifts, or an empty array when there are none.",
+                    description: "Today's shifts (never cancelled ones), or an empty array when there are none.",
                     content: {
                         'application/json': {
                             schema: {
@@ -7012,7 +7024,7 @@ const paths = {
                                                     is_available: {
                                                         type: 'boolean',
                                                         description:
-                                                            "From the worker's own working_days against this date's weekday. true when working_days is empty (not yet configured) — advisory, not a hard restriction.",
+                                                            "From the worker's own working_days against this date's weekday — true only if this weekday is in their working_days. An empty working_days array means unavailable every day.",
                                                     },
                                                     is_conflict: {
                                                         type: 'boolean',

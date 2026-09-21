@@ -42,6 +42,7 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
     try {
         worker = await session.withTransaction(async () => {
             const existing = await User.findOne({
+                isDeleted: { $ne: true },
                 $or: [{ email: workerData.email }, { phone: workerData.phone }],
             }).session(session);
             if (existing) {
@@ -124,6 +125,7 @@ const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
             if (contactFilters.length) {
                 const existing = await User.findOne({
                     _id: { $ne: worker.user },
+                    isDeleted: { $ne: true },
                     $or: contactFilters,
                 }).session(session);
                 if (existing) {
