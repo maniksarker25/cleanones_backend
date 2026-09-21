@@ -53,7 +53,7 @@ const additionalTaskSchema = new Schema<IAdditionalTask>(
         },
         duration_minutes: {
             type: Number,
-            required: true,
+            default: null,
             min: 0,
         },
         is_photo_required: {

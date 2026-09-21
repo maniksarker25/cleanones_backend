@@ -671,7 +671,7 @@ export const resyncTodayShiftAdditionalTaskIfDue = async (additionalTask: {
     cleaning_plan_id: Types.ObjectId;
     date_time: Date;
     name: string;
-    duration_minutes: number;
+    duration_minutes?: number | null;
     is_photo_required: boolean;
     photo_requirements: { title: string }[];
 }) => {
@@ -810,12 +810,20 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
  * A worker only ever appears on a real, staffed Shift (see
  * assignWorkersToShift) — there is no plan-level default roster to preview,
  * so this is a plain query, not a merge with a virtual projection.
+ *
+ * Excludes cancelled shifts — a shift a manager (or a task recurrence
+ * change, see reconcileFutureShiftsForTaskChange) cancelled is no longer
+ * something the worker needs to show up for, so it shouldn't appear on
+ * their "my shifts" list at all. Feeds both GET /shift/my-shifts and
+ * getWorkerTodayMetaFromDB, so this also keeps today's pending/completed
+ * counts from ever counting a cancelled shift.
  */
 export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
     const day = normalizeToUTCDateOnly(date);
     const shifts = await Shift.find({
         date: day,
         'assigned_workers.worker': workerId,
+        status: { $ne: 'cancelled' },
     })
         .sort({ date_time: 1 })
         .lean();
@@ -962,9 +970,13 @@ export const getNextShiftForWorker = async (workerId: string) => {
  * date_time — same definition as getWorkersAttendanceSummaryFromDB's
  * late_check_ins, scoped to today. A worker who never checked in counts
  * toward total_absent but never total_late — the two are mutually exclusive.
- * absent_worker_ids/late_worker_ids carry the same two distinct-worker sets
- * the two counts are derived from, so a caller doesn't have to re-derive
- * "who" from "how many" via a second request.
+ * absent_workers/late_workers carry the same two distinct-worker sets the
+ * two counts are derived from — {worker_id, name} pairs, so a caller
+ * doesn't have to re-derive "who" from "how many" via a second request.
+ * `name` is read straight off the shift's own assigned_workers snapshot
+ * (set at staffing time, see assignWorkersToShift) rather than a fresh
+ * Worker lookup — one less query, and consistent with what the roster
+ * already displays for that shift.
  */
 export const getTodayLiveShiftMetaFromDB = async () => {
     const today = normalizeToUTCDateOnly(new Date());
@@ -975,17 +987,21 @@ export const getTodayLiveShiftMetaFromDB = async () => {
         .lean();
     const shifts = allShifts.filter((s) => s.status !== 'cancelled');
 
-    const absentWorkerIds = new Set<string>();
-    const lateWorkerIds = new Set<string>();
+    const absentWorkers = new Map<string, string>();
+    const lateWorkers = new Map<string, string>();
     shifts.forEach((shift) => {
         shift.assigned_workers.forEach((aw) => {
+            const workerId = aw.worker.toString();
             if (!aw.check_in_at) {
-                if (shift.date_time <= now) absentWorkerIds.add(aw.worker.toString());
+                if (shift.date_time <= now) absentWorkers.set(workerId, aw.name);
             } else if (aw.check_in_at > shift.date_time) {
-                lateWorkerIds.add(aw.worker.toString());
+                lateWorkers.set(workerId, aw.name);
             }
         });
     });
+
+    const toWorkerRows = (workers: Map<string, string>) =>
+        Array.from(workers, ([worker_id, name]) => ({ worker_id, name }));
 
     return {
         today_total_shift: shifts.length,
@@ -998,10 +1014,10 @@ export const getTodayLiveShiftMetaFromDB = async () => {
         today_total_pending_shift: shifts.filter(
             (s) => s.status === 'upcoming'
         ).length,
-        total_absent: absentWorkerIds.size,
-        total_late: lateWorkerIds.size,
-        absent_worker_ids: Array.from(absentWorkerIds),
-        late_worker_ids: Array.from(lateWorkerIds),
+        total_absent: absentWorkers.size,
+        total_late: lateWorkers.size,
+        absent_workers: toWorkerRows(absentWorkers),
+        late_workers: toWorkerRows(lateWorkers),
     };
 };
 

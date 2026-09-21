@@ -189,7 +189,7 @@ export interface AdditionalTaskShiftEntries {
 export const toShiftTaskFromAdditionalTask = (additionalTask: {
     _id: Types.ObjectId;
     name: string;
-    duration_minutes: number;
+    duration_minutes?: number | null;
     is_photo_required: boolean;
     photo_requirements: {
         title: string;

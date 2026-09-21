@@ -963,6 +963,8 @@ const schemas = {
             },
             duration_minutes: {
                 type: 'number',
+                nullable: true,
+                default: null,
                 minimum: 0,
                 example: 20,
             },
@@ -1008,7 +1010,6 @@ const schemas = {
         required: [
             'cleaning_plan_id',
             'name',
-            'duration_minutes',
             'date_time',
         ],
         description:
@@ -1027,6 +1028,7 @@ const schemas = {
             },
             duration_minutes: {
                 type: 'number',
+                nullable: true,
                 minimum: 0,
                 example: 20,
             },
@@ -1907,6 +1909,8 @@ const schemas = {
             },
             duration_minutes: {
                 type: 'number',
+                nullable: true,
+                default: null,
                 minimum: 0,
                 example: 20,
             },
@@ -3357,17 +3361,17 @@ const schemas = {
                 description:
                     "Distinct workers who DID check in today, but after their shift's scheduled date_time — same definition as GET /shift/attendance-summary's late_check_ins, scoped to today. A worker who never checked in is never counted here (see total_absent instead) — the two are mutually exclusive.",
             },
-            absent_worker_ids: {
+            absent_workers: {
                 type: 'array',
-                items: { type: 'string' },
+                items: { $ref: '#/components/schemas/TodayLiveShiftMetaWorkerRow' },
                 description:
-                    'Worker _ids backing total_absent — the same distinct-worker set, so a caller does not need a second request to know who.',
+                    'The distinct workers backing total_absent, so a caller does not need a second request to know who.',
             },
-            late_worker_ids: {
+            late_workers: {
                 type: 'array',
-                items: { type: 'string' },
+                items: { $ref: '#/components/schemas/TodayLiveShiftMetaWorkerRow' },
                 description:
-                    'Worker _ids backing total_late — the same distinct-worker set, so a caller does not need a second request to know who.',
+                    'The distinct workers backing total_late, so a caller does not need a second request to know who.',
             },
         },
         required: [
@@ -3377,9 +3381,17 @@ const schemas = {
             'today_total_pending_shift',
             'total_absent',
             'total_late',
-            'absent_worker_ids',
-            'late_worker_ids',
+            'absent_workers',
+            'late_workers',
         ],
+    },
+    TodayLiveShiftMetaWorkerRow: {
+        type: 'object',
+        properties: {
+            worker_id: { type: 'string' },
+            name: { type: 'string' },
+        },
+        required: ['worker_id', 'name'],
     },
     ManagerReportTrendPoint: {
         type: 'object',
