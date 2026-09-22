@@ -67,7 +67,7 @@ const shiftWorkerProgress = {
         worked_hours: {
             type: 'number',
             description:
-                "Derived from check_in_at/check_out_at. 0 when the worker hasn't checked in. While still checked in on an in_progress shift, computed against the current time.",
+                "Derived from check_in_at/check_out_at, then rounded UP to the nearest 30-minute increment (2h10m -> 2h30m, 2h40m -> 3h, 2h30m unchanged) — this client-facing view always shows the rounded figure, never the raw duration. 0 when the worker hasn't checked in. While still checked in on an in_progress shift, computed against the current time.",
         },
     },
 };
@@ -160,7 +160,7 @@ const clientOverviewPaths = {
                                                     total_worked_hours: {
                                                         type: 'number',
                                                         description:
-                                                            'Sum of actual worked hours across all assigned workers, derived from check-in/check-out.',
+                                                            "Sum of each assigned worker's worked_hours (see shiftWorkerProgress — already rounded up to the nearest 30 minutes per worker before summing).",
                                                     },
                                                     total_rooms: { type: 'integer' },
                                                     completed_rooms: { type: 'integer' },

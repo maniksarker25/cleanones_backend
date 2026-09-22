@@ -3084,12 +3084,17 @@ export const checkOutFromShift = async (
             throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
         }
 
-        const durationHours = Math.max(
-            0,
-            (checkOutAt.getTime() - checkInAt.getTime()) / 3_600_000
-        );
+        // Paid on workable hours (shift.duration_minutes — the sum of this
+        // shift's task durations, including any approved additional tasks;
+        // see getOrCreateBareShift/resyncTodayShiftRoomsIfDue/
+        // resyncTodayShiftAdditionalTaskIfDue for where it's maintained),
+        // NOT the worker's actual check-in/check-out duration. A worker who
+        // takes longer than the assigned workable time isn't paid for the
+        // overage; check_in_at/check_out_at stay on record for attendance
+        // purposes but no longer drive pay.
+        const workableHours = shift.duration_minutes / 60;
         const earnedAmount = roundToTwoDecimals(
-            durationHours * worker.hourly_rate
+            workableHours * worker.hourly_rate
         );
 
         await Worker.findByIdAndUpdate(
