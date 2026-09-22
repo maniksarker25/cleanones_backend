@@ -859,6 +859,14 @@ async function getClientScheduleRosterFromDB(
     };
 };
 
+// Client-facing display rule: actual worked time is rounded UP to the
+// nearest 30-minute increment (2h10m -> 2h30m, 2h40m -> 3h, 2h30m stays
+// 2h30m) — worker/manager views keep the raw, unrounded duration; only what
+// the client sees goes through this. Payment is unaffected by this — see
+// checkOutFromShift's use of shift.duration_minutes (workable hours), not
+// worked_hours, for pay.
+const roundUpToHalfHour = (hours: number) => Math.ceil(hours * 2) / 2;
+
 // Today's live progress: room/task completion + real worked hours derived
 // from worker check-in/check-out timestamps on today's shifts only.
 const getClientActiveProgressFromDB = async (clientId: string) => {
@@ -924,7 +932,9 @@ const getClientActiveProgressFromDB = async (clientId: string) => {
                     (end.getTime() - new Date(w.check_in_at).getTime()) / 3600000
                 );
             }
-            total_worked_hours += worked_hours;
+            // Client sees the rounded-up figure — see roundUpToHalfHour above.
+            const rounded_worked_hours = roundUpToHalfHour(worked_hours);
+            total_worked_hours += rounded_worked_hours;
 
             return {
                 worker_id: w.worker?.toString() || '',
@@ -933,7 +943,7 @@ const getClientActiveProgressFromDB = async (clientId: string) => {
                 is_checked_in: !!w.check_in_at && !w.check_out_at,
                 check_in_at: w.check_in_at || null,
                 check_out_at: w.check_out_at || null,
-                worked_hours: parseFloat(worked_hours.toFixed(2)),
+                worked_hours: rounded_worked_hours,
             };
         });
 

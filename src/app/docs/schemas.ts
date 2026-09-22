@@ -1612,7 +1612,7 @@ const schemas = {
                 default: 0,
                 readOnly: true,
                 description:
-                    'Accrued automatically on each shift check-out (worked hours * hourly_rate at that time). Not directly settable.',
+                    "Accrued automatically on each shift check-out (workable hours * hourly_rate at that time — workable hours is the shift's duration_minutes, i.e. the sum of its task durations including approved additional tasks, NOT the worker's actual check-in/check-out duration). Not directly settable.",
             },
             total_paid: {
                 type: 'number',

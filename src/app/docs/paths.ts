@@ -7458,7 +7458,7 @@ const paths = {
                 summary: 'Check out from a shift',
                 operationId: 'patchShiftPlanIdDateCheckOut',
                 description:
-                    "Same rules as check-in (no materialization, 50m geofence, worker must be assigned) plus: the worker must already have checked in and must not already have checked out, AND the shift's own top-level status must already be 'completed' (every task's required photos uploaded) — 400 otherwise. Workers stay checked in for the duration of the actual cleaning work; check-out only becomes available once the shift as a whole is finished. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.",
+                    "Same rules as check-in (no materialization, 50m geofence, worker must be assigned) plus: the worker must already have checked in and must not already have checked out, AND the shift's own top-level status must already be 'completed' (every task's required photos uploaded) — 400 otherwise. Workers stay checked in for the duration of the actual cleaning work; check-out only becomes available once the shift as a whole is finished. On success, this worker is paid for the shift's workable hours (duration_minutes / 60) at their hourly_rate — not their actual check-in/check-out duration — added to total_earning and pending_amount on their Worker record. See docs/SHIFT_MANAGEMENT_DESIGN.md.\n\nRequired role: worker.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['worker'],
                 parameters: [
