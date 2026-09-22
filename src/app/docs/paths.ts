@@ -2321,7 +2321,7 @@ const paths = {
                 summary: 'Create additional task',
                 operationId: 'postAdditionalTaskCreateAdditionalTask',
                 description:
-                    "The referenced cleaning plan must exist and be active. The task is linked to the plan via its cleaning_plan_id field only (no array is maintained on the plan document). is_completed is forced to false.\n\nRequired role: client or manager. Manager-created tasks are automatically approved (status: 'Approved'); client-created tasks require approval (status: 'Pending'). Approval is determined by the authenticated role and cannot be overridden by the request body.",
+                    "The referenced cleaning plan must exist and be active. date_time's calendar date must be one this plan actually has an occurrence on (per its tasks' recurrence patterns) — returns 400 otherwise; only the date is checked, not the time-of-day against any shift's start/end window, and a Shift document doesn't need to already exist for that date (it's folded in whenever that day's shift is created or resynced). The task is linked to the plan via its cleaning_plan_id field only (no array is maintained on the plan document). is_completed is forced to false.\n\nRequired role: client or manager. Manager-created tasks are automatically approved (status: 'Approved'); client-created tasks require approval (status: 'Pending'). Approval is determined by the authenticated role and cannot be overridden by the request body.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['client', 'manager'],
                 parameters: [],
@@ -2619,7 +2619,7 @@ const paths = {
                 summary: 'List additional tasks',
                 operationId: 'getAdditionalTaskAllAdditionalTasks',
                 description:
-                    'Without planId, managers can list all additional tasks; clients can list tasks only from their own active plans. With planId, clients must own the selected plan. Pagination is nested under data.meta; records are under data.result. status filters on the exact enum value; is_completed and is_photo_required are boolean filters accepting true or false. Unknown query keys are ignored. Invalid query values return 400.\n\nRequired role: manager, client.',
+                    'Without planId, managers can list all additional tasks (optionally narrowed to one client via the client param) or all of that client\'s tasks across all their active plans; clients can list tasks only from their own active plans, and the client query param is ignored for them. With planId, clients must own the selected plan; planId takes precedence over client if both are given. Pagination is nested under data.meta; records are under data.result. status filters on the exact enum value; is_completed and is_photo_required are boolean filters accepting true or false. Unknown query keys are ignored. Invalid query values return 400.\n\nRequired role: manager, client.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager', 'client'],
                 parameters: [
@@ -2640,6 +2640,13 @@ const paths = {
                         in: 'query',
                         required: false,
                         description: 'Optional cleaning plan ID. The plan must exist and be active.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'client',
+                        in: 'query',
+                        required: false,
+                        description: "Manager-only — narrow to one client's tasks across all their active plans. Ignored (never widens scope) when the requester is a client. Only applied when planId is not given. Returns 400 if not a valid ObjectId.",
                         schema: { $ref: '#/components/schemas/ObjectId' },
                     },
                     {

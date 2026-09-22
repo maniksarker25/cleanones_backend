@@ -9,6 +9,9 @@ const queryBoolean = z
     .optional();
 export const additionalTaskListQuerySchema = z.object({
     planId: z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid planId').optional(),
+    // Manager-only — narrows to one client's plans when planId isn't given.
+    // Ignored for a client requester, who is always scoped to themselves.
+    client: z.string().regex(/^[a-fA-F0-9]{24}$/, 'Invalid client ID').optional(),
     page: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),
     limit: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0).optional(),
     searchTerm: z.string().optional(),

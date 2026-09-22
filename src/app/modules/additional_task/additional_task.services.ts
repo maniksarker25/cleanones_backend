@@ -2,9 +2,14 @@ import httpStatus from 'http-status';
 import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
+import {
+    anyPatternOccursOnDate,
+    normalizeToUTCDateOnly,
+} from '../cleaning_plan/availability.util';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import cleaningPlanServices from '../cleaning_plan/cleaning_plan.services';
 import { resyncTodayShiftAdditionalTaskIfDue } from '../shift/shift.services';
+import { buildShiftSnapshot } from '../shift/shift.snapshot.util';
 import { IAdditionalTask, TAdditionalTaskStatus } from './additional_task.interface';
 import { AdditionalTask } from './additional_task.model';
 import { additionalTaskListQuerySchema } from './additional_task.validation';
@@ -49,6 +54,23 @@ const createAdditionalTaskIntoDB = async (
         plan.client.toString() !== requester.profileId
     ) {
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
+    }
+
+    // date_time only needs to fall on a date this plan actually has an
+    // occurrence on (per its tasks' recurrence patterns) — the time-of-day
+    // isn't checked against any shift's start/end window. Matches the same
+    // "no occurrence on the given date" validation assignWorkersToShift and
+    // listEligibleWorkersForShift already do — a materialized Shift row
+    // doesn't need to exist yet (see resyncTodayShiftAdditionalTaskIfDue /
+    // getOrCreateBareShift, which fold an approved additional task in
+    // whenever that day's shift eventually gets created).
+    const snapshot = await buildShiftSnapshot(plan);
+    const day = normalizeToUTCDateOnly(payload.date_time);
+    if (!anyPatternOccursOnDate(snapshot.patterns, day)) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'This cleaning plan has no occurrence on the given date'
+        );
     }
 
     const task = await AdditionalTask.create({
@@ -194,7 +216,7 @@ const getAllAdditionalTasksByPlanFromDB = async (
         const issue = parsed.error.issues[0];
         throw new AppError(httpStatus.BAD_REQUEST, `${issue.path.join('.')}: ${issue.message}`);
     }
-    const { planId, searchTerm, sort } = parsed.data;
+    const { planId, client, searchTerm, sort } = parsed.data;
     const filters: Record<string, unknown> = {};
     if (planId) {
         const plan = await ensureCleaningPlanExists(planId);
@@ -203,7 +225,14 @@ const getAllAdditionalTasksByPlanFromDB = async (
         }
         filters.cleaning_plan_id = new Types.ObjectId(planId);
     } else if (requester.role === USER_ROLE.client) {
+        // Always self-scoped — the `client` query param (manager-only) is
+        // never honored here, so a client can't widen their own view.
         const plans = await CleaningPlan.find({ client: requester.profileId, is_active: true }).select('_id');
+        filters.cleaning_plan_id = { $in: plans.map((plan) => plan._id) };
+    } else if (client) {
+        const plans = await CleaningPlan.find({ client, is_active: true }).select('_id');
+        // An empty $in never matches — correctly yields zero results instead
+        // of accidentally falling through to "no client filter at all".
         filters.cleaning_plan_id = { $in: plans.map((plan) => plan._id) };
     }
 
