@@ -485,6 +485,42 @@ const assignWorkers = catchAsync(async (req, res) => {
     });
 });
 
+const getBulkAssignPreview = catchAsync(async (req, res) => {
+    const { worker, from, to } = shiftValidations.bulkAssignPreviewQuery.parse(req.query);
+    const result = await shiftServices.previewBulkAssignForWorker(
+        req.params.planId,
+        worker,
+        new Date(from),
+        new Date(to)
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Bulk assign preview retrieved successfully',
+        data: result,
+    });
+});
+
+const bulkAssignWorker = catchAsync(async (req, res) => {
+    const force = req.body.force === true || req.query.force === 'true';
+    const result = await shiftServices.bulkAssignWorkerToShifts(
+        req.user.profileId as string,
+        req.params.planId,
+        req.body.worker,
+        req.body.role,
+        req.body.dates.map((d: string) => new Date(d)),
+        new Date(req.body.start_time),
+        new Date(req.body.end_time),
+        force
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Bulk assignment completed',
+        data: result,
+    });
+});
+
 const updateStatus = catchAsync(async (req, res) => {
     const date = parseDateParam(req.params.date);
     const result = await shiftServices.updateShiftStatus(
@@ -608,6 +644,8 @@ const shiftController = {
     getShift,
     getEligibleWorkers,
     assignWorkers,
+    getBulkAssignPreview,
+    bulkAssignWorker,
     updateStatus,
     uploadTaskPhoto,
     markTaskComplete,

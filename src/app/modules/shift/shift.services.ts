@@ -4,6 +4,8 @@ import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
 import {
     anyPatternOccursOnDate,
+    combineDateWithTimeOfDay,
+    laterOf,
     normalizeToUTCDateOnly,
     occursOnDate,
     RecurrencePattern,
@@ -804,6 +806,206 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
         });
     }
     return results;
+};
+
+/** Hard ceiling on how far ahead a bulk-assign preview/confirm can span, so
+ * neither the preview's day-by-day walk nor the confirm loop's per-date
+ * writes can be driven by an unbounded request. The client's own examples
+ * (next week/next month) never approach it. */
+export const MAX_BULK_ASSIGN_RANGE_DAYS = 60;
+
+/** A due date nobody is actively covering: never staffed (virtual), staffed
+ * but cancelled (see reconcileFutureShiftsForTaskChange), or — defensively —
+ * a real shift with an empty crew. Shared by the preview and confirm sides
+ * of bulk-assign so "still needs a worker" means the same thing in both. */
+const isUnstaffedGap = (entry: {
+    is_virtual: boolean;
+    status: string;
+    assigned_workers: unknown[];
+}): boolean =>
+    entry.is_virtual || entry.status === 'cancelled' || entry.assigned_workers.length === 0;
+
+export interface BulkAssignDateEntry {
+    date: Date;
+    weekday: string;
+}
+
+export interface BulkAssignPreviewResult {
+    worker_id: string;
+    worker_name: string;
+    range: { from: Date; to: Date };
+    /** Due, unstaffed, and this worker's own working_days covers the weekday — would be assigned on confirm. */
+    matching_dates: BulkAssignDateEntry[];
+    /** Due and unstaffed, but this worker isn't available that weekday — still needs someone else. */
+    other_gap_dates: BulkAssignDateEntry[];
+    /** Due dates in range that already have an active crew — left untouched either way. */
+    already_covered_count: number;
+}
+
+/**
+ * Read-only preview for the bulk roster-assignment flow: of every date in
+ * [from, to] this plan is actually due on, splits the still-unstaffed ones
+ * into what this worker's own declared working_days does/doesn't cover, so
+ * the manager can review before anything is written (see
+ * bulkAssignWorkerToShifts for the write side, which takes exactly the
+ * dates the manager confirms from here).
+ */
+export const previewBulkAssignForWorker = async (
+    planId: string,
+    workerId: string,
+    from: Date,
+    to: Date
+): Promise<BulkAssignPreviewResult> => {
+    const fromDay = normalizeToUTCDateOnly(from);
+    const toDay = normalizeToUTCDateOnly(to);
+    if (toDay < fromDay) {
+        throw new AppError(httpStatus.BAD_REQUEST, '`to` must not be before `from`');
+    }
+    const rangeDays =
+        Math.round((toDay.getTime() - fromDay.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    if (rangeDays > MAX_BULK_ASSIGN_RANGE_DAYS) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            `Range too large — please select ${MAX_BULK_ASSIGN_RANGE_DAYS} days or fewer`
+        );
+    }
+    if (!mongoose.isValidObjectId(workerId)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid worker ID');
+    }
+
+    // Throws with a precise reason (not found/deleted/blocked) before we
+    // bother walking the plan's occurrences at all.
+    await assertWorkersEligible([workerId]);
+    const worker = await Worker.findById(workerId).select('name working_days').lean();
+    if (!worker) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
+    }
+    const workingDays = new Set(worker.working_days ?? []);
+
+    const shiftEntries = (await listShiftsInRange(planId, fromDay, toDay)) as Array<{
+        date: Date;
+        is_virtual: boolean;
+        status: string;
+        assigned_workers: unknown[];
+    }>;
+
+    const matching_dates: BulkAssignDateEntry[] = [];
+    const other_gap_dates: BulkAssignDateEntry[] = [];
+    let already_covered_count = 0;
+
+    for (const entry of shiftEntries) {
+        if (!isUnstaffedGap(entry)) {
+            already_covered_count += 1;
+            continue;
+        }
+        const weekday = FULL_WEEKDAY_NAMES[entry.date.getUTCDay()];
+        const bucket = workingDays.has(weekday) ? matching_dates : other_gap_dates;
+        bucket.push({ date: entry.date, weekday });
+    }
+
+    return {
+        worker_id: workerId,
+        worker_name: worker.name,
+        range: { from: fromDay, to: toDay },
+        matching_dates,
+        other_gap_dates,
+        already_covered_count,
+    };
+};
+
+export interface BulkAssignOutcome {
+    assigned: string[];
+    skipped_already_staffed: string[];
+    conflicts: Array<{ date: string; reason: string }>;
+    failed: Array<{ date: string; message: string }>;
+}
+
+/**
+ * Write side of bulk-assign: stages the same worker onto every date in
+ * `dates` that's still an unstaffed gap (never touches one that already has
+ * an active crew, so it's safe to re-run with a different worker to cover
+ * whatever's left). Prefetches existing Shifts for the whole batch in one
+ * query rather than one lookup per date, then delegates the actual staffing
+ * of each remaining date to assignWorkersToShift unchanged — so eligibility
+ * checks, conflict detection (409 unless `force`), the
+ * shift.worker_assigned notification, and chat-group sync all behave
+ * exactly as they do for a single manual assignment. Best-effort per date,
+ * not all-or-nothing: one conflicted or no-longer-due date is reported and
+ * skipped rather than failing the whole batch.
+ */
+export const bulkAssignWorkerToShifts = async (
+    managerId: string,
+    planId: string,
+    workerId: string,
+    role: IAssignedWorker['role'],
+    dates: Date[],
+    startTime: Date,
+    endTime: Date,
+    force: boolean
+): Promise<BulkAssignOutcome> => {
+    if (!(endTime > startTime)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'end_time must be after start_time');
+    }
+    if (dates.length > MAX_BULK_ASSIGN_RANGE_DAYS) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            `Too many dates — please select ${MAX_BULK_ASSIGN_RANGE_DAYS} or fewer`
+        );
+    }
+    if (!mongoose.isValidObjectId(workerId)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid worker ID');
+    }
+
+    const normalizedDates = dates.map((d) => normalizeToUTCDateOnly(d));
+
+    const existingShifts = await Shift.find({
+        cleaning_plan: planId,
+        date: { $in: normalizedDates },
+    })
+        .select('date status assigned_workers')
+        .lean();
+    const coveredDateKeys = new Set(
+        existingShifts.filter((s) => !isUnstaffedGap({ ...s, is_virtual: false })).map((s) => s.date.toISOString())
+    );
+
+    const outcome: BulkAssignOutcome = {
+        assigned: [],
+        skipped_already_staffed: [],
+        conflicts: [],
+        failed: [],
+    };
+
+    for (const date of normalizedDates) {
+        const dateKey = date.toISOString();
+        const dateLabel = dateKey.slice(0, 10);
+
+        if (coveredDateKeys.has(dateKey)) {
+            outcome.skipped_already_staffed.push(dateLabel);
+            continue;
+        }
+
+        try {
+            await assignWorkersToShift(
+                managerId,
+                planId,
+                date,
+                [{ worker: new Types.ObjectId(workerId), role }],
+                combineDateWithTimeOfDay(date, startTime),
+                combineDateWithTimeOfDay(date, endTime),
+                force
+            );
+            outcome.assigned.push(dateLabel);
+        } catch (error) {
+            if (!(error instanceof AppError)) throw error;
+            if (error.statusCode === httpStatus.CONFLICT) {
+                outcome.conflicts.push({ date: dateLabel, reason: error.message });
+            } else {
+                outcome.failed.push({ date: dateLabel, message: error.message });
+            }
+        }
+    }
+
+    return outcome;
 };
 
 /**
@@ -2082,7 +2284,7 @@ export const getPlanGroupedRosterFromDB = async (
     const [totalPlans, plans] = await Promise.all([
         CleaningPlan.countDocuments(planFilter),
         CleaningPlan.find(planFilter)
-            .select('title location rooms')
+            .select('title location rooms createdAt')
             .sort({ title: 1, _id: 1 })
             .skip((page - 1) * limit)
             .limit(limit)
@@ -2136,8 +2338,11 @@ export const getPlanGroupedRosterFromDB = async (
         const planIdStr = plan._id.toString();
         const planRoomIds = (plan.rooms ?? []).map((r) => r.toString());
         const planTasks = planRoomIds.flatMap((r) => tasksByRoom.get(r) ?? []);
-        // Anchored per-task on its own createdAt — see shift.snapshot.util.ts.
-        const patterns = planTasks.map((t) => taskToPattern(t, t.createdAt, null));
+        // Anchored on whichever is later, the task's or the plan's own
+        // createdAt — see shift.snapshot.util.ts's buildShiftSnapshot.
+        const patterns = planTasks.map((t) =>
+            taskToPattern(t, laterOf(t.createdAt, plan.createdAt), null)
+        );
         const locationName = locationNameById.get(plan.location.toString()) ?? '';
 
         const shifts: PlanRosterShiftEntry[] = [];
@@ -2223,11 +2428,21 @@ export const getPlanGroupedRosterFromDB = async (
             totalShifts += 1;
         }
 
+        // A gap the manager still needs to staff: never staffed (virtual),
+        // cancelled (e.g. by reconcileFutureShiftsForTaskChange), or somehow
+        // real but crew-less. Surfaced so the roster list view can flag a
+        // plan without the caller having to inspect every shift itself —
+        // see bulkAssignWorkerToShifts for the same gap definition.
+        const unassignedShiftCount = shifts.filter(
+            (s) => s.is_virtual || s.status === 'cancelled' || s.assigned_workers.length === 0
+        ).length;
+
         return {
             plan_id: planIdStr,
             plan_title: plan.title,
             location_name: locationName,
             total_shifts_in_range: shifts.length,
+            unassigned_shift_count: unassignedShiftCount,
             total_hours_in_range: roundToTwoDecimals(totalMinutes / 60),
             shifts,
         };
@@ -2427,6 +2642,11 @@ export const assignWorkersToShift = async (
             date_time: startTime,
             end_time: endTime,
             last_updated_by: managerId,
+            // A previously-cancelled shift (e.g. by
+            // reconcileFutureShiftsForTaskChange) getting a crew again means
+            // it's back on — without this it would stay stuck on
+            // 'cancelled' forever despite having an active assignment.
+            ...(shift.status === 'cancelled' && { status: 'upcoming' }),
         },
         { new: true, runValidators: true }
     );
@@ -3473,6 +3693,8 @@ const shiftServices = {
     setPhotoVerdict,
     assignWorkersToShift,
     listEligibleWorkersForShift,
+    previewBulkAssignForWorker,
+    bulkAssignWorkerToShifts,
     updateShiftStatus,
     uploadShiftTaskPhoto,
     markShiftTaskComplete,

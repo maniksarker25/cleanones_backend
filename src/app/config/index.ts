@@ -31,6 +31,10 @@ export default {
         smtp_pass: process.env.SMTP_PASS,
         name: process.env.SERVICE_NAME,
     },
+    resend: {
+        api_key: process.env.RESEND_API_KEY,
+        from_email: process.env.RESEND_FROM_EMAIL,
+    },
     aws: {
         region: process.env.AWS_REGION,
         access_key_id: process.env.AWS_ACCESS_KEY_ID,
