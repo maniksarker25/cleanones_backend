@@ -7168,6 +7168,167 @@ const paths = {
             },
         },
     },
+    '/shift/{planId}/bulk-assign/preview': {
+        get: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Preview a bulk roster assignment for one worker',
+                operationId: 'getShiftPlanIdBulkAssignPreview',
+                description:
+                    "Manager-only, read-only — writes nothing. Of every date in [from, to] this plan is actually due on, splits the still-unstaffed ones (no shift, a cancelled shift, or a shift with an empty crew) into matching_dates (this worker's own working_days covers that weekday — would be assigned by POST .../bulk-assign) and other_gap_dates (still needs a different worker). Dates that already have an active crew are counted in already_covered_count but never listed or touched. Range is capped at 60 days (400 if exceeded).\n\nRequired role: manager.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'worker',
+                        in: 'query',
+                        required: true,
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                        description: 'The worker being considered for this bulk assignment.',
+                    },
+                    {
+                        name: 'from',
+                        in: 'query',
+                        required: true,
+                        schema: { type: 'string', format: 'date' },
+                        description: 'ISO date (YYYY-MM-DD), range start.',
+                    },
+                    {
+                        name: 'to',
+                        in: 'query',
+                        required: true,
+                        schema: { type: 'string', format: 'date' },
+                        description: 'ISO date (YYYY-MM-DD), range end — at most 60 days after from.',
+                    },
+                ],
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', enum: [true] },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/BulkAssignPreview',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/shift/{planId}/bulk-assign': {
+        post: {
+            ...{
+                tags: ['Shifts'],
+                summary: 'Bulk-assign one worker to every matching due date in a range',
+                operationId: 'postShiftPlanIdBulkAssign',
+                description:
+                    "Manager-only. Confirm step for the preview above — dates is normally exactly the manager-confirmed subset of that preview's matching_dates (max 60 entries). Never overwrites a date that already has an active crew (skipped_already_staffed, no write) — safe to call repeatedly with different workers to cover the remaining gaps. Each remaining date is staffed via the exact same logic as PATCH .../assign-workers (eligibility checks, conflict detection, notifications, chat sync), one date at a time — a conflicted or no-longer-due date is reported per-date rather than failing the whole batch. force applies uniformly to every date in this call, same meaning as PATCH .../assign-workers.\n\nRequired role: manager.",
+                security: [{ bearerAuth: [] }],
+                'x-roles': ['manager'],
+                parameters: [
+                    {
+                        name: 'planId',
+                        in: 'path',
+                        required: true,
+                        description: 'Cleaning plan identifier.',
+                        schema: { $ref: '#/components/schemas/ObjectId' },
+                    },
+                    {
+                        name: 'force',
+                        in: 'query',
+                        schema: { type: 'boolean' },
+                        description:
+                            'Alternative to force in the body; assign despite scheduling conflicts.',
+                    },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    worker: { $ref: '#/components/schemas/ObjectId' },
+                                    role: {
+                                        type: 'string',
+                                        enum: [
+                                            'Team leader',
+                                            'Co-leader',
+                                            'Normal worker',
+                                        ],
+                                    },
+                                    dates: {
+                                        type: 'array',
+                                        maxItems: 60,
+                                        items: { type: 'string', format: 'date' },
+                                        description:
+                                            'Calendar dates (YYYY-MM-DD) to assign this worker to. Max 60.',
+                                    },
+                                    start_time: {
+                                        type: 'string',
+                                        format: 'date-time',
+                                        description:
+                                            'Only the time-of-day is used, applied to every date in dates.',
+                                    },
+                                    end_time: {
+                                        type: 'string',
+                                        format: 'date-time',
+                                        description: 'Must be after start_time (time-of-day only).',
+                                    },
+                                    force: { type: 'boolean' },
+                                },
+                                required: ['worker', 'role', 'dates', 'start_time', 'end_time'],
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                ...errors,
+                ...{
+                    '200': {
+                        description:
+                            'Successful request. HTTP 200 is also used for create and delete operations.',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        success: { type: 'boolean', enum: [true] },
+                                        message: { type: 'string' },
+                                        data: {
+                                            $ref: '#/components/schemas/BulkAssignOutcome',
+                                        },
+                                    },
+                                    required: ['success', 'message'],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/shift/{planId}/{date}/status': {
         patch: {
             ...{

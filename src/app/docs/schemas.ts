@@ -3322,6 +3322,11 @@ const schemas = {
                         plan_title: { type: 'string' },
                         location_name: { type: 'string' },
                         total_shifts_in_range: { type: 'integer' },
+                        unassigned_shift_count: {
+                            type: 'integer',
+                            description:
+                                "Of this plan's shifts in the range, how many still need a worker — never staffed, cancelled, or (defensively) a real shift with an empty crew. Lets a list view flag a plan needing attention without inspecting every shift. See GET /shift/{planId}/bulk-assign/preview and POST /shift/{planId}/bulk-assign to close these gaps.",
+                        },
                         total_hours_in_range: { type: 'number' },
                         shifts: {
                             type: 'array',
@@ -3332,6 +3337,95 @@ const schemas = {
             },
         },
         required: ['view', 'start_date', 'end_date', 'meta', 'cleaning_plans'],
+    },
+    BulkAssignDateEntry: {
+        type: 'object',
+        properties: {
+            date: { type: 'string', format: 'date', example: '2026-09-20' },
+            weekday: {
+                type: 'string',
+                enum: ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
+            },
+        },
+        required: ['date', 'weekday'],
+    },
+    BulkAssignPreview: {
+        type: 'object',
+        properties: {
+            worker_id: { $ref: '#/components/schemas/ObjectId' },
+            worker_name: { type: 'string' },
+            range: {
+                type: 'object',
+                properties: {
+                    from: { type: 'string', format: 'date-time' },
+                    to: { type: 'string', format: 'date-time' },
+                },
+                required: ['from', 'to'],
+            },
+            matching_dates: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/BulkAssignDateEntry' },
+                description:
+                    "Due, unstaffed dates whose weekday is in this worker's own working_days — these are exactly what POST /shift/{planId}/bulk-assign will assign if you send them back as `dates`.",
+            },
+            other_gap_dates: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/BulkAssignDateEntry' },
+                description: "Due, unstaffed dates this worker is NOT available for — still need a different worker.",
+            },
+            already_covered_count: {
+                type: 'integer',
+                description: 'Due dates in range that already have an active crew — left untouched either way.',
+            },
+        },
+        required: [
+            'worker_id',
+            'worker_name',
+            'range',
+            'matching_dates',
+            'other_gap_dates',
+            'already_covered_count',
+        ],
+    },
+    BulkAssignOutcome: {
+        type: 'object',
+        properties: {
+            assigned: {
+                type: 'array',
+                items: { type: 'string', format: 'date' },
+                description: 'Dates the worker was newly staffed onto.',
+            },
+            skipped_already_staffed: {
+                type: 'array',
+                items: { type: 'string', format: 'date' },
+                description: 'Dates left untouched because they already had an active crew.',
+            },
+            conflicts: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        date: { type: 'string', format: 'date' },
+                        reason: { type: 'string' },
+                    },
+                    required: ['date', 'reason'],
+                },
+                description: 'Dates rejected with a scheduling conflict (409) — retry the whole request with force=true to override.',
+            },
+            failed: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        date: { type: 'string', format: 'date' },
+                        message: { type: 'string' },
+                    },
+                    required: ['date', 'message'],
+                },
+                description: 'Dates rejected for another reason (e.g. no longer due on that date).',
+            },
+        },
+        required: ['assigned', 'skipped_already_staffed', 'conflicts', 'failed'],
     },
     TodayLiveShiftMeta: {
         type: 'object',

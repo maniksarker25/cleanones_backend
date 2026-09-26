@@ -120,6 +120,24 @@ router.patch(
     shiftController.assignWorkers
 );
 
+// 3-segment path deliberately, not `/:planId/bulk-assign-preview` — a
+// 2-segment GET would be silently swallowed by `GET /:planId/:date` above
+// (`:date` would just capture the literal string).
+router.get(
+    '/:planId/bulk-assign/preview',
+    auth(USER_ROLE.manager),
+    shiftController.getBulkAssignPreview
+);
+
+// No other route on this router uses POST, so this can't collide with the
+// GET-only `/:planId/:date` pattern regardless of segment count.
+router.post(
+    '/:planId/bulk-assign',
+    auth(USER_ROLE.manager),
+    validateRequest(shiftValidations.bulkAssignValidationSchema),
+    shiftController.bulkAssignWorker
+);
+
 router.patch(
     '/:planId/:date/status',
     auth(USER_ROLE.manager),

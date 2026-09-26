@@ -49,6 +49,48 @@ const photoVerdictValidationSchema = z.object({
     }),
 });
 
+const dateOnlyString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use YYYY-MM-DD').refine(
+    (value) => {
+        const date = new Date(value);
+        return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    },
+    'Date must be a valid calendar date'
+);
+
+// MAX_BULK_ASSIGN_RANGE_DAYS in shift.services.ts — kept in sync manually
+// since a Zod schema can't import a service-layer constant without creating
+// a validation -> service dependency the rest of this file avoids.
+const MAX_BULK_ASSIGN_DATES = 60;
+
+const bulkAssignValidationSchema = z.object({
+    body: z
+        .object({
+            worker: z.string({ required_error: 'Worker ID is required' }),
+            role: z.enum(['Team leader', 'Co-leader', 'Normal worker'], {
+                required_error: 'Worker role is required',
+            }),
+            dates: z
+                .array(dateOnlyString)
+                .min(1, 'At least one date is required')
+                .max(MAX_BULK_ASSIGN_DATES, `No more than ${MAX_BULK_ASSIGN_DATES} dates per request`),
+            start_time: z.coerce.date({ required_error: 'start_time is required' }),
+            end_time: z.coerce.date({ required_error: 'end_time is required' }),
+            force: z.coerce.boolean().optional(),
+        })
+        .refine((data) => data.end_time > data.start_time, {
+            message: 'end_time must be after start_time',
+            path: ['end_time'],
+        }),
+});
+
+const bulkAssignPreviewQuery = z
+    .object({
+        worker: z.string({ required_error: 'worker is required' }),
+        from: dateOnlyString,
+        to: dateOnlyString,
+    })
+    .strict();
+
 const checkInOutValidationSchema = z.object({
     body: z.object({
         latitude: z.coerce.number({ required_error: 'latitude is required' }).min(-90).max(90),
@@ -76,6 +118,8 @@ const shiftValidations = {
     }).strict(),
     managerReportQuery,
     assignWorkersValidationSchema,
+    bulkAssignValidationSchema,
+    bulkAssignPreviewQuery,
     updateStatusValidationSchema,
     uploadTaskPhotoValidationSchema,
     photoVerdictValidationSchema,

@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { AdditionalTask } from '../additional_task/additional_task.model';
 import {
+    laterOf,
     normalizeToUTCDateOnly,
     occursOnDate,
     RecurrencePattern,
@@ -19,6 +20,7 @@ import {
 interface PlanLike {
     location: Types.ObjectId | string;
     rooms: (Types.ObjectId | string)[];
+    createdAt: Date;
 }
 
 export interface ShiftSnapshot {
@@ -125,10 +127,14 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
         0
     );
 
-    // Anchored per-task on its own createdAt (not a plan-level date) — a task
-    // added to an existing plan is never "due" before it existed. No end
+    // Anchored on whichever is later: the task's own createdAt, or the
+    // plan's — a task is never "due" for this plan before it existed itself,
+    // NOR before the plan itself existed (a task can predate the plan when
+    // its room is reused from/added to an existing plan later). No end
     // bound: a task recurs indefinitely until deactivated.
-    const patterns = tasks.map((t) => taskToPattern(t, t.createdAt, null));
+    const patterns = tasks.map((t) =>
+        taskToPattern(t, laterOf(t.createdAt, plan.createdAt), null)
+    );
 
     return {
         location: locationSnapshot,
