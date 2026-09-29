@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import mongoose, { Types } from 'mongoose';
 import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
+import { errorLogger } from '../../shared/logger';
 import {
     anyPatternOccursOnDate,
     combineDateWithTimeOfDay,
@@ -916,8 +917,17 @@ export const previewBulkAssignForWorker = async (
 export interface BulkAssignOutcome {
     assigned: string[];
     skipped_already_staffed: string[];
-    conflicts: Array<{ date: string; reason: string }>;
+    /** Due, unstaffed dates skipped because this worker is already double-booked
+     * elsewhere that day — not an error the caller needs to act on. Pass
+     * `force: true` on a retry if these should be assigned anyway. */
+    ignored_due_to_conflict: Array<{ date: string; reason: string }>;
     failed: Array<{ date: string; message: string }>;
+    counts: {
+        assigned: number;
+        skipped_already_staffed: number;
+        ignored_due_to_conflict: number;
+        failed: number;
+    };
 }
 
 /**
@@ -927,11 +937,18 @@ export interface BulkAssignOutcome {
  * whatever's left). Prefetches existing Shifts for the whole batch in one
  * query rather than one lookup per date, then delegates the actual staffing
  * of each remaining date to assignWorkersToShift unchanged — so eligibility
- * checks, conflict detection (409 unless `force`), the
- * shift.worker_assigned notification, and chat-group sync all behave
- * exactly as they do for a single manual assignment. Best-effort per date,
- * not all-or-nothing: one conflicted or no-longer-due date is reported and
- * skipped rather than failing the whole batch.
+ * checks and the shift.worker_assigned notification/chat-group sync all
+ * behave exactly as they do for a single manual assignment.
+ *
+ * Best-effort per date, not all-or-nothing. In particular, a scheduling
+ * conflict (this worker double-booked elsewhere that day) is NOT a blocking
+ * error here the way it is for a single manual assign — for a bulk action
+ * the useful default is "staff whoever's actually free, quietly skip the
+ * rest": with `force` left false/omitted, a conflicted date is simply
+ * skipped and reported in `ignored_due_to_conflict`, no follow-up call
+ * required. Passing `force: true` flips that for the whole batch — every
+ * conflicted date gets assigned anyway (flagged `assigned_with_conflict` on
+ * the shift, same as the single-date flow) instead of being skipped.
  */
 export const bulkAssignWorkerToShifts = async (
     managerId: string,
@@ -968,10 +985,10 @@ export const bulkAssignWorkerToShifts = async (
         existingShifts.filter((s) => !isUnstaffedGap({ ...s, is_virtual: false })).map((s) => s.date.toISOString())
     );
 
-    const outcome: BulkAssignOutcome = {
+    const outcome: Omit<BulkAssignOutcome, 'counts'> = {
         assigned: [],
         skipped_already_staffed: [],
-        conflicts: [],
+        ignored_due_to_conflict: [],
         failed: [],
     };
 
@@ -996,16 +1013,38 @@ export const bulkAssignWorkerToShifts = async (
             );
             outcome.assigned.push(dateLabel);
         } catch (error) {
-            if (!(error instanceof AppError)) throw error;
-            if (error.statusCode === httpStatus.CONFLICT) {
-                outcome.conflicts.push({ date: dateLabel, reason: error.message });
-            } else {
+            if (error instanceof AppError && error.statusCode === httpStatus.CONFLICT) {
+                outcome.ignored_due_to_conflict.push({ date: dateLabel, reason: error.message });
+            } else if (error instanceof AppError) {
                 outcome.failed.push({ date: dateLabel, message: error.message });
+            } else {
+                // An unexpected (non-AppError) failure for THIS date — e.g. a
+                // transient DB hiccup — must never take down the rest of an
+                // otherwise-successful batch. Logged for diagnosis; the
+                // caller just sees this one date as failed and can retry it
+                // (retrying is always safe — this loop never double-assigns
+                // an already-covered date).
+                errorLogger.error(
+                    `bulkAssignWorkerToShifts: unexpected error assigning ${planId}/${dateLabel}`,
+                    error
+                );
+                outcome.failed.push({
+                    date: dateLabel,
+                    message: 'Unexpected error while assigning this date — please retry.',
+                });
             }
         }
     }
 
-    return outcome;
+    return {
+        ...outcome,
+        counts: {
+            assigned: outcome.assigned.length,
+            skipped_already_staffed: outcome.skipped_already_staffed.length,
+            ignored_due_to_conflict: outcome.ignored_due_to_conflict.length,
+            failed: outcome.failed.length,
+        },
+    };
 };
 
 /**
