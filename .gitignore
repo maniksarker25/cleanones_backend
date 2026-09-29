@@ -1,7 +1,5 @@
 node_modules
 .next
-.env
-.env*
 package-lock.json
 logs
 branch_structure.json
@@ -15,3 +13,4 @@ temp_interactive_push.bat
 bench/
 samples/
 test-photos/
+config.bat
