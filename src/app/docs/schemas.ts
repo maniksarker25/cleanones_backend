@@ -3400,7 +3400,7 @@ const schemas = {
                 items: { type: 'string', format: 'date' },
                 description: 'Dates left untouched because they already had an active crew.',
             },
-            conflicts: {
+            ignored_due_to_conflict: {
                 type: 'array',
                 items: {
                     type: 'object',
@@ -3410,7 +3410,7 @@ const schemas = {
                     },
                     required: ['date', 'reason'],
                 },
-                description: 'Dates rejected with a scheduling conflict (409) — retry the whole request with force=true to override.',
+                description: 'Dates skipped because this worker is already double-booked elsewhere that day. Not an error — this is the default, expected outcome for a bulk action. Retry with force=true to assign these dates anyway despite the conflict.',
             },
             failed: {
                 type: 'array',
@@ -3424,8 +3424,19 @@ const schemas = {
                 },
                 description: 'Dates rejected for another reason (e.g. no longer due on that date).',
             },
+            counts: {
+                type: 'object',
+                description: 'Same totals as the array lengths above, provided directly so callers don\'t have to compute them.',
+                properties: {
+                    assigned: { type: 'integer' },
+                    skipped_already_staffed: { type: 'integer' },
+                    ignored_due_to_conflict: { type: 'integer' },
+                    failed: { type: 'integer' },
+                },
+                required: ['assigned', 'skipped_already_staffed', 'ignored_due_to_conflict', 'failed'],
+            },
         },
-        required: ['assigned', 'skipped_already_staffed', 'conflicts', 'failed'],
+        required: ['assigned', 'skipped_already_staffed', 'ignored_due_to_conflict', 'failed', 'counts'],
     },
     TodayLiveShiftMeta: {
         type: 'object',

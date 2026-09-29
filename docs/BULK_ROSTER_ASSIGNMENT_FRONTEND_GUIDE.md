@@ -112,17 +112,23 @@ Does the actual staffing. Call this after the manager reviews the preview and co
   "data": {
     "assigned": ["2026-10-01", "2026-10-04"],              // newly staffed
     "skipped_already_staffed": ["2026-10-08"],             // already had a crew — untouched, not an error
-    "conflicts": [                                          // worker double-booked elsewhere that day
-      { "date": "2026-10-11", "reason": "double_booked" }
+    "ignored_due_to_conflict": [                            // worker double-booked elsewhere that day — skipped, not an error
+      { "date": "2026-10-11", "reason": "One or more workers have a scheduling conflict..." }
     ],
-    "failed": []                                             // any other per-date failure (rare)
+    "failed": [],                                            // any other per-date failure (rare)
+    "counts": {                                              // same totals as the array lengths, for convenience
+      "assigned": 1,
+      "skipped_already_staffed": 1,
+      "ignored_due_to_conflict": 1,
+      "failed": 0
+    }
   }
 }
 ```
 
 **This call always returns `200`** even if some dates didn't go through — it's a per-date, best-effort result, not all-or-nothing. **Read the response body**, don't just check the HTTP status.
 
-**Handling `conflicts`:** if `conflicts` is non-empty, show the manager which dates had a scheduling conflict (worker already booked elsewhere) and offer a **"Force assign anyway"** action that resubmits the *same request* with `force: true`. This mirrors the existing single-date assign-workers flow exactly.
+**Handling `ignored_due_to_conflict`:** this is the **normal, expected outcome** for a bulk action, not an error — by default the endpoint quietly staffs whoever's actually free and skips anyone double-booked elsewhere that day. **No follow-up action is required.** Just show it informationally in the result summary, e.g. *"3 dates skipped — worker already booked elsewhere."* Only if the manager explicitly wants to override that (rare — "yes, double-book them anyway") should you offer a secondary "Force assign anyway" action that resubmits the same request with `force: true`; that's optional polish, not required for v1.
 
 **Error cases (request rejected outright, nothing written):**
 | Status | When |
@@ -187,11 +193,11 @@ Below the list, a **shared time window** input (start time / end time) and a **r
 
 **Step 3 — Confirm**
 - "Assign N workers" button — sends only the **currently-checked** dates from the "Will be assigned" group as `dates`.
-- On response, show a result summary:
+- On response, show a result summary using `counts` (all informational, none are error states the manager must resolve):
   - "✅ Assigned to N dates"
-  - If `skipped_already_staffed` is non-empty: "N dates were already staffed by someone else in the meantime" (informational, not an error — this is just the small race window between preview and confirm)
-  - If `conflicts` is non-empty: list them with a **"Force assign anyway"** button that resubmits with `force: true`
-  - If `failed` is non-empty: show the message per date
+  - If `skipped_already_staffed.length`: "N dates were already staffed by someone else in the meantime" (the small race window between preview and confirm)
+  - If `ignored_due_to_conflict.length`: "N dates skipped — worker already booked elsewhere that day" (optionally: a "Force assign anyway" link/button that resubmits with `force: true`, but this isn't required)
+  - If `failed.length`: show the message per date
 
 **Step 4 — Repeat for the gap**
 After confirming, if `other_gap_dates` (from the original preview) is still non-empty, prompt: *"3 dates still need a worker — assign someone else?"* → takes the manager back to Step 1 with the same date range pre-filled, ready to pick a different worker. This is the manager-repeats-with-another-worker loop described in the requirements.
@@ -220,10 +226,10 @@ After confirming, if `other_gap_dates` (from the original preview) is still non-
 
 ## 6. Things to get right (backend behaviors you should not fight against)
 
-- **Never assume `dates` you send were exactly what gets assigned.** Always read `assigned`/`skipped_already_staffed`/`conflicts`/`failed` from the response and reconcile the UI against that, not against what you sent.
+- **Never assume `dates` you send were exactly what gets assigned.** Always read `assigned`/`skipped_already_staffed`/`ignored_due_to_conflict`/`failed` (or just `counts`) from the response and reconcile the UI against that, not against what you sent.
 - **Don't try to "undo" a bulk assign from the frontend by re-running preview and diffing** — if the manager wants to change something after confirming, use the existing single-date assign-workers screen for that one date, same as today.
 - **The 60-day/60-date cap is a hard server-side limit.** Client-side validation is for UX only — always handle the `400` gracefully regardless.
-- **`already_covered` dates and `skipped_already_staffed` dates are never shown as errors** — they're expected, normal outcomes of "don't overwrite an existing assignment."
+- **None of `already_covered_count`, `skipped_already_staffed`, or `ignored_due_to_conflict` are error states.** All three are expected, normal outcomes of "don't overwrite an existing assignment" / "don't double-book by default" — show them informationally, don't block the manager or demand action.
 
 ---
 
@@ -253,8 +259,14 @@ interface BulkAssignRequest {
 interface BulkAssignResponse {
   assigned: string[];
   skipped_already_staffed: string[];
-  conflicts: { date: string; reason: string }[];
+  ignored_due_to_conflict: { date: string; reason: string }[];
   failed: { date: string; message: string }[];
+  counts: {
+    assigned: number;
+    skipped_already_staffed: number;
+    ignored_due_to_conflict: number;
+    failed: number;
+  };
 }
 ```
 
