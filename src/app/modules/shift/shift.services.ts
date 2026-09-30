@@ -2600,13 +2600,31 @@ const getOrCreateBareShift = async (
 };
 
 /**
- * The single staffing action: schedules who works a due date and when. The
- * first call for a given (planId, date) creates that day's Shift (rooms/
- * tasks snapshotted from the plan's current state); later calls edit the
- * crew and/or schedule of the same Shift. Ineligible workers are always
- * rejected; a worker already double-booked on another staffed shift that
- * day is rejected unless `force`, in which case the conflicting entry is
- * flagged (assigned_with_conflict) rather than silently allowed.
+ * The single staffing action: schedules who works a due date and when, and
+ * is also how a manager swaps the crew after the shift has started (a
+ * no-show replaced, or a worker pulled mid-shift because they fell ill).
+ *
+ * The first call for a given (planId, date) creates that day's Shift (rooms/
+ * tasks snapshotted from the plan's current state). Every call after that
+ * is a MERGE against the existing crew, never a blind overwrite: a worker
+ * who is already on the list keeps their check_in_at/check_out_at/
+ * coordinates exactly as they were (only their role can change) — losing
+ * that data would corrupt their attendance record and silently break their
+ * pay. A worker dropped from the list is simply removed, check-in state and
+ * all; a worker not yet on the list is added as a fresh, not-checked-in
+ * entry. Scheduling conflicts are only re-checked for newly added workers —
+ * someone already on the shift already passed that check once and re-
+ * running it would just risk spuriously flagging someone currently at work.
+ *
+ * The requested start/end time is only applied while the shift hasn't
+ * started yet (status 'upcoming'). Once it's 'in_progress'/'completed',
+ * the schedule is left alone — changing it after the fact would retroactively
+ * move the duration that already-checked-in workers' pay is based on.
+ *
+ * Ineligible workers are always rejected; a newly added worker already
+ * double-booked on another staffed shift that day is rejected unless
+ * `force`, in which case the conflicting entry is flagged
+ * (assigned_with_conflict) rather than silently allowed.
  */
 export const assignWorkersToShift = async (
     managerId: string,
@@ -2622,20 +2640,44 @@ export const assignWorkersToShift = async (
     }
 
     const shift = await getOrCreateBareShift(planId, date);
-    const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / 60_000);
+    const shiftHasStarted = shift.status === 'in_progress' || shift.status === 'completed';
 
-    await assertWorkersEligible(assignedWorkers.map((aw) => aw.worker));
+    const existingByWorkerId = new Map(
+        shift.assigned_workers.map((aw) => [aw.worker.toString(), aw])
+    );
+
+    // Only workers genuinely new to this shift need (re-)validating — an
+    // existing entry already passed eligibility/conflict checks when first
+    // assigned, and the shift's own schedule can't have moved under them
+    // once it's started (see shiftHasStarted above).
+    const newlyAddedWorkers = assignedWorkers.filter(
+        (aw) => !existingByWorkerId.has(aw.worker.toString())
+    );
+
+    if (newlyAddedWorkers.length) {
+        await assertWorkersEligible(newlyAddedWorkers.map((aw) => aw.worker));
+    }
+
+    // Conflict-check against the shift's REAL committed window once it has
+    // started — the caller's start/end params are ignored for scheduling
+    // in that case (see shiftHasStarted above), so checking against them
+    // here would validate a window this shift will never actually have.
+    const effectiveStartTime = shiftHasStarted ? shift.date_time : startTime;
+    const effectiveEndTime = shiftHasStarted ? shift.end_time : endTime;
+    const effectiveDurationMinutes = Math.round(
+        (effectiveEndTime.getTime() - effectiveStartTime.getTime()) / 60_000
+    );
 
     const conflictEntries = new Map<
         string,
         { conflicting_plan_id: Types.ObjectId; reason: string }
     >();
-    for (const aw of assignedWorkers) {
+    for (const aw of newlyAddedWorkers) {
         const conflict = await findWorkerConflictOnDate(
             aw.worker,
             shift.date,
-            startTime,
-            durationMinutes,
+            effectiveStartTime,
+            effectiveDurationMinutes,
             { shiftId: shift._id }
         );
         if (conflict) conflictEntries.set(aw.worker.toString(), conflict);
@@ -2660,27 +2702,57 @@ export const assignWorkersToShift = async (
 
     // The client only sends { worker, role } — resolve the display-name
     // snapshot server-side rather than trusting a client-supplied name.
-    const workerDocs = await Worker.find({
-        _id: { $in: assignedWorkers.map((aw) => aw.worker) },
-    })
-        .select('name')
-        .lean();
+    // Only needed for genuinely new entries; existing ones keep their
+    // already-snapshotted name.
+    const workerDocs = newlyAddedWorkers.length
+        ? await Worker.find({
+              _id: { $in: newlyAddedWorkers.map((aw) => aw.worker) },
+          })
+              .select('name')
+              .lean()
+        : [];
     const nameById = new Map(workerDocs.map((w) => [w._id.toString(), w.name]));
 
-    const previousWorkerIds = shift.assigned_workers.map((aw) => aw.worker.toString());
+    const previousWorkerIds = [...existingByWorkerId.keys()];
+
+    const nextAssignedWorkers = assignedWorkers.map((aw) => {
+        const workerIdStr = aw.worker.toString();
+        const existing = existingByWorkerId.get(workerIdStr);
+
+        if (existing) {
+            // Carry the existing entry forward untouched — attendance state
+            // is never rewritten by a roster edit. Only the role is
+            // editable here.
+            return {
+                worker: existing.worker,
+                name: existing.name,
+                role: aw.role,
+                assigned_with_conflict: existing.assigned_with_conflict,
+                check_in_at: existing.check_in_at ?? null,
+                check_in_coordinates: existing.check_in_coordinates ?? null,
+                check_out_at: existing.check_out_at ?? null,
+                check_out_coordinates: existing.check_out_coordinates ?? null,
+            };
+        }
+
+        return {
+            worker: aw.worker,
+            name: nameById.get(workerIdStr) ?? '',
+            role: aw.role,
+            assigned_with_conflict: conflictEntries.has(workerIdStr),
+            check_in_at: null,
+            check_in_coordinates: null,
+            check_out_at: null,
+            check_out_coordinates: null,
+        };
+    });
 
     const result = await Shift.findByIdAndUpdate(
         shift._id,
         {
-            assigned_workers: assignedWorkers.map((aw) => ({
-                worker: aw.worker,
-                name: nameById.get(aw.worker.toString()) ?? '',
-                role: aw.role,
-                assigned_with_conflict: conflictEntries.has(aw.worker.toString()),
-            })),
-            date_time: startTime,
-            end_time: endTime,
+            assigned_workers: nextAssignedWorkers,
             last_updated_by: managerId,
+            ...(!shiftHasStarted && { date_time: startTime, end_time: endTime }),
             // A previously-cancelled shift (e.g. by
             // reconcileFutureShiftsForTaskChange) getting a crew again means
             // it's back on — without this it would stay stuck on
@@ -3278,6 +3350,26 @@ export const checkInToShift = async (
 
 const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
 
+/**
+ * A worker leaving the shift. Anyone but the last one out can check out any
+ * time once they've checked in — tasks don't have to be finished, since a
+ * worker may have completed their own part, or been swapped out, while
+ * others are still working. Only the LAST worker still on-site is gated on
+ * the shift actually being done (every task's required photos uploaded —
+ * see maybeAutoCompleteShift): the whole crew can't be marked "left" while
+ * work remains unfinished and unattended.
+ *
+ * Pay is NOT credited per individual checkout. It's settled once, for
+ * everyone, the moment the last person checks out — at that point the
+ * final crew size is known, so shift.duration_minutes is split evenly
+ * across every worker who actually checked in (a worker never removed from
+ * the roster but who never showed up doesn't dilute anyone's share; a
+ * worker removed from the roster via assignWorkersToShift after checking in
+ * forfeits their share by design — see assignWorkersToShift). Settling
+ * earlier, per checkout, was the old model, but it can't survive a crew
+ * whose size changes mid-shift: whoever checked out first would lock in a
+ * share based on a headcount that later turned out to be wrong.
+ */
 export const checkOutFromShift = async (
     workerId: string,
     planId: string,
@@ -3294,14 +3386,16 @@ export const checkOutFromShift = async (
     if (shift.assigned_workers[workerIndex].check_out_at) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked out for this shift');
     }
-    // Check-out is gated on the whole shift being completed (every task's
-    // required photos uploaded — see maybeAutoCompleteShift) — workers stay
-    // checked in until the actual cleaning work is done, then everyone
-    // checks out once the shift as a whole is finished.
-    if (shift.status !== 'completed') {
+
+    const otherWorkersStillOnSite = shift.assigned_workers.filter(
+        (aw, idx) => idx !== workerIndex && aw.check_in_at && !aw.check_out_at
+    );
+    const isLastWorkerOut = otherWorkersStillOnSite.length === 0;
+
+    if (isLastWorkerOut && shift.status !== 'completed') {
         throw new AppError(
             httpStatus.BAD_REQUEST,
-            'This shift is not completed yet — finish all tasks before checking out'
+            'All tasks must be completed before the last worker can check out'
         );
     }
 
@@ -3314,7 +3408,6 @@ export const checkOutFromShift = async (
         const result = await Shift.findOneAndUpdate(
             {
                 _id: shift._id,
-                status: 'completed',
                 assigned_workers: {
                     $elemMatch: {
                         worker: workerId,
@@ -3332,35 +3425,59 @@ export const checkOutFromShift = async (
             { new: true, session }
         );
         if (!result) {
-            throw new AppError(
-                httpStatus.BAD_REQUEST,
-                'Already checked out for this shift, or the shift is not completed yet'
+            throw new AppError(httpStatus.BAD_REQUEST, 'Already checked out for this shift');
+        }
+
+        // Workers who never checked in (never showed, and were never
+        // removed from the roster) don't count toward the crew size and
+        // don't block settlement — only people who actually worked do.
+        const workersWhoWorked = result.assigned_workers.filter((aw) => aw.check_in_at);
+        const everyoneSettled = workersWhoWorked.every((aw) => aw.check_out_at);
+
+        if (everyoneSettled && workersWhoWorked.length) {
+            const shareHours = result.duration_minutes / workersWhoWorked.length / 60;
+
+            const workerIds = workersWhoWorked.map((aw) => aw.worker);
+            const workerDocs = await Worker.find({ _id: { $in: workerIds } })
+                .select('hourly_rate')
+                .session(session);
+            const rateById = new Map(
+                workerDocs.map((w) => [w._id.toString(), w.hourly_rate])
             );
+
+            const bulkOps = workersWhoWorked.flatMap((aw) => {
+                const workerIdStr = aw.worker.toString();
+                const hourlyRate = rateById.get(workerIdStr);
+                if (hourlyRate === undefined) {
+                    // Worker record vanished between check-in and
+                    // settlement (deleted mid-shift) — skip paying a
+                    // nonexistent account rather than fail the whole
+                    // crew's settlement over it.
+                    errorLogger.warn(
+                        `checkOutFromShift: worker ${workerIdStr} missing at settlement for shift ${result._id.toString()}, skipped`
+                    );
+                    return [];
+                }
+                const earnedAmount = roundToTwoDecimals(shareHours * hourlyRate);
+                return [
+                    {
+                        updateOne: {
+                            filter: { _id: aw.worker },
+                            update: {
+                                $inc: {
+                                    total_earning: earnedAmount,
+                                    pending_amount: earnedAmount,
+                                },
+                            },
+                        },
+                    },
+                ];
+            });
+
+            if (bulkOps.length) {
+                await Worker.bulkWrite(bulkOps, { session });
+            }
         }
-
-        const worker = await Worker.findById(workerId).session(session);
-        if (!worker) {
-            throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
-        }
-
-        // Paid on workable hours (shift.duration_minutes — the sum of this
-        // shift's task durations, including any approved additional tasks;
-        // see getOrCreateBareShift/resyncTodayShiftRoomsIfDue/
-        // resyncTodayShiftAdditionalTaskIfDue for where it's maintained),
-        // NOT the worker's actual check-in/check-out duration. A worker who
-        // takes longer than the assigned workable time isn't paid for the
-        // overage; check_in_at/check_out_at stay on record for attendance
-        // purposes but no longer drive pay.
-        const workableHours = shift.duration_minutes / 60;
-        const earnedAmount = roundToTwoDecimals(
-            workableHours * worker.hourly_rate
-        );
-
-        await Worker.findByIdAndUpdate(
-            workerId,
-            { $inc: { total_earning: earnedAmount, pending_amount: earnedAmount } },
-            { session }
-        );
 
         await session.commitTransaction();
         session.endSession();
