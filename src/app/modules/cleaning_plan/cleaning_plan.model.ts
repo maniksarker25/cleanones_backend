@@ -40,6 +40,11 @@ const cleaningPlanSchema = new Schema<ICleaningPlan>(
             ref: 'Room',
             default: [],
         },
+        tasks: {
+            type: [Schema.Types.ObjectId],
+            ref: 'Task',
+            default: [],
+        },
         max_estimated_duration: {
             type: Number,
             default: 0,

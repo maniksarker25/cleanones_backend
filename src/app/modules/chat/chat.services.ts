@@ -111,6 +111,7 @@ const createWorkerManagersChat = async (workerId: Types.ObjectId | string) => {
             worker: workerId,
         });
     } catch {
+        // Socket.io not initialized (e.g. in a script/test context) — the chat itself still got created.
     }
 
     return chat;

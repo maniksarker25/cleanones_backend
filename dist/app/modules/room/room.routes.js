@@ -1,0 +1,21 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.roomRoutes = void 0;
+const express_1 = require("express");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const user_constant_1 = require("../user/user.constant");
+const room_controller_1 = __importDefault(require("./room.controller"));
+const room_validation_1 = __importDefault(require("./room.validation"));
+const router = (0, express_1.Router)();
+router.post('/create-room', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), (0, validateRequest_1.default)(room_validation_1.default.createRoomValidationSchema), room_controller_1.default.createRoom);
+router.patch('/update-room/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), (0, validateRequest_1.default)(room_validation_1.default.updateRoomValidationSchema), room_controller_1.default.updateRoom);
+router.delete('/delete-room/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), room_controller_1.default.deleteRoom);
+router.get('/all-rooms', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), room_controller_1.default.getAllRooms);
+router.get('/all-rooms/:locationId', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), room_controller_1.default.getAllRoomsByLocation);
+router.get('/my-rooms/:locationId', (0, auth_1.default)(user_constant_1.USER_ROLE.client), room_controller_1.default.getMyRooms);
+router.get('/single-room/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), room_controller_1.default.getSingleRoom);
+exports.roomRoutes = router;

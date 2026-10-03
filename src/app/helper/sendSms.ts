@@ -1,8 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-
-// export default sendSMS;
-// @ts-ignore
+// @ts-expect-error — mocean-sdk ships no type declarations.
 import moceansdk from 'mocean-sdk';
 
 const mocean = new moceansdk.Mocean(
@@ -32,8 +28,11 @@ export const sendSMS = async (
         });
 
         return response;
-    } catch (error: any) {
-        console.error('Failed to send SMS:', error.message || error);
+    } catch (error) {
+        console.error(
+            'Failed to send SMS:',
+            error instanceof Error ? error.message : error
+        );
         throw new Error('Failed to send SMS');
     }
 };

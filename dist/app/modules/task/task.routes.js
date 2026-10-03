@@ -1,0 +1,20 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.taskRoutes = void 0;
+const express_1 = require("express");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const user_constant_1 = require("../user/user.constant");
+const task_controller_1 = __importDefault(require("./task.controller"));
+const task_validation_1 = __importDefault(require("./task.validation"));
+const router = (0, express_1.Router)();
+router.post('/create-task', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), (0, validateRequest_1.default)(task_validation_1.default.createTaskValidationSchema), task_controller_1.default.createTask);
+router.patch('/update-task/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), (0, validateRequest_1.default)(task_validation_1.default.updateTaskValidationSchema), task_controller_1.default.updateTask);
+router.delete('/delete-task/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), task_controller_1.default.deleteTask);
+router.get('/all-tasks/:roomId', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), task_controller_1.default.getAllTasksByRoom);
+router.get('/my-tasks/:roomId', (0, auth_1.default)(user_constant_1.USER_ROLE.client), task_controller_1.default.getMyTasks);
+router.get('/single-task/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), task_controller_1.default.getSingleTask);
+exports.taskRoutes = router;

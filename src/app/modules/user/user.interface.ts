@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { Model, Types } from 'mongoose';
 import { USER_ROLE } from './user.constant';
 

@@ -20,12 +20,7 @@ const activeUserIdSetFor = async (
     return new Set(activeUsers.map((u) => u._id.toString()));
 };
 
-/**
- * Hard eligibility check: not deleted (Worker profile) and the linked User
- * account is not deleted/blocked/inactive. This is never overridable by
- * `force` — it's a data-integrity fact, not a schedulable judgment call.
- * Throws 400 naming exactly which worker IDs failed and why.
- */
+/** Hard eligibility check (never overridable by `force`): not deleted, and the linked User isn't blocked/inactive. */
 export const assertWorkersEligible = async (
     workerIds: (Types.ObjectId | string)[]
 ): Promise<{ _id: Types.ObjectId; user: Types.ObjectId }[]> => {

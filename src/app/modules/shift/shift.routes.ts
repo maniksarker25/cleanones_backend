@@ -4,6 +4,9 @@ import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import shiftController from './shift.controller';
 import shiftValidations from './shift.validation';
+// Side-effect import: registers the auto-checkout cron (see shift.cron.ts)
+// the moment this module loads, same as shiftController/shiftValidations do.
+import './shift.cron';
 
 const router = Router();
 

@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-/* eslint-disable no-undef */
 import { Server as HTTPServer } from 'http'; // Import HTTPServer type
 import mongoose from 'mongoose';
 import server from './app';

@@ -1,0 +1,23 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.authRoutes = void 0;
+const express_1 = require("express");
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const rateLimit_config_1 = require("../../config/rateLimit.config");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const user_constant_1 = require("../user/user.constant");
+const auth_controller_1 = __importDefault(require("./auth.controller"));
+const auth_validation_1 = __importDefault(require("./auth.validation"));
+const router = (0, express_1.Router)();
+router.post('/login', rateLimit_config_1.authLimiter, (0, validateRequest_1.default)(auth_validation_1.default.loginValidationSchema), auth_controller_1.default.loginUser);
+router.post('/change-password', rateLimit_config_1.authLimiter, (0, auth_1.default)(user_constant_1.USER_ROLE.client, user_constant_1.USER_ROLE.worker, user_constant_1.USER_ROLE.admin, user_constant_1.USER_ROLE.superAdmin), (0, validateRequest_1.default)(auth_validation_1.default.changePasswordValidationSchema), auth_controller_1.default.changePassword);
+router.post('/refresh-token', rateLimit_config_1.authLimiter, (0, validateRequest_1.default)(auth_validation_1.default.refreshTokenValidationSchema), auth_controller_1.default.refreshToken);
+router.post('/forget-password', rateLimit_config_1.authLimiter, (0, validateRequest_1.default)(auth_validation_1.default.forgetPasswordValidationSchema), auth_controller_1.default.forgetPassword);
+router.post('/reset-password', rateLimit_config_1.authLimiter, (0, validateRequest_1.default)(auth_validation_1.default.resetPasswordValidationSchema), auth_controller_1.default.resetPassword);
+router.post('/verify-reset-otp', rateLimit_config_1.authLimiter, (0, validateRequest_1.default)(auth_validation_1.default.verifyResetOtpValidationSchema), auth_controller_1.default.verifyResetOtp);
+router.post('/resend-reset-code', rateLimit_config_1.authLimiter, auth_controller_1.default.resendResetCode);
+router.get('/all-user', (0, auth_1.default)(user_constant_1.USER_ROLE.superAdmin, user_constant_1.USER_ROLE.admin), auth_controller_1.default.getAllUser);
+exports.authRoutes = router;

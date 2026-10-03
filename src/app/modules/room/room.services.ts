@@ -77,7 +77,7 @@ const getAllRoomsByLocationFromDB = async (
     const skip = (page - 1) * limit;
     const sort = query.sort as string | undefined;
 
-    const filters: any = {};
+    const filters: Record<string, unknown> = {};
     Object.keys(query).forEach((key) => {
         if (
             !['searchTerm', 'page', 'limit', 'sort', 'fields'].includes(key)

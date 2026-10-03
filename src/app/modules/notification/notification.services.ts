@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-/* eslint-disable no-undef */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { JwtPayload } from 'jsonwebtoken';
 import QueryBuilder from '../../builder/QueryBuilder';
 import { getIO, isUserOnline } from '../../socket/socket';
@@ -28,7 +25,7 @@ export interface SendNotificationParams {
     meta?: Record<string, unknown>;
 }
 const getAllNotificationFromDB = async (
-    query: Record<string, any>,
+    query: Record<string, unknown>,
     user: JwtPayload
 ) => {
     const receiver =
@@ -69,9 +66,6 @@ const seeNotification = async (user: JwtPayload) => {
             { isRead: true },
             { runValidators: true, new: true }
         );
-        // const adminUnseenNotificationCount = await getAdminNotificationCount();
-        //@ts-ignore
-        // global.io.emit('admin-notifications', adminUnseenNotificationCount);
     }
     if (user?.role !== USER_ROLE.superAdmin) {
         result = await Notification.updateMany(
@@ -80,11 +74,6 @@ const seeNotification = async (user: JwtPayload) => {
             { runValidators: true, new: true }
         );
     }
-    //   const updatedNotificationCount = await getUnseenNotificationCount(
-    //     user?.userId,
-    //   );
-    //@ts-ignore
-    //   global.io.to(user?.userId).emit('notifications', updatedNotificationCount);
     return result;
 };
 const seeSingleNotification = async (
@@ -95,7 +84,7 @@ const seeSingleNotification = async (
         throw new Error('Invalid Notification ID');
     }
 
-    const filter: any = {
+    const filter: Record<string, unknown> = {
         _id: new mongoose.Types.ObjectId(notificationId),
     };
 
@@ -119,7 +108,7 @@ const deleteNotification = async (notificationId: string, user: JwtPayload) => {
         throw new Error('Invalid Notification ID');
     }
 
-    const filter: any = {
+    const filter: Record<string, unknown> = {
         _id: new mongoose.Types.ObjectId(notificationId),
     };
 
@@ -179,7 +168,7 @@ const sendNotification = async ({
         isActive: true,
     }).select('playerId');
 
-    const playerIds = devices.map((d: any) => d.playerId).filter(Boolean);
+    const playerIds = devices.map((d) => d.playerId).filter(Boolean);
     if (playerIds.length > 0) {
         await sendPushNotification({
             playerIds,
@@ -208,17 +197,10 @@ export interface SendChatPushNotificationParams {
 }
 
 /**
- * Chat messages are deliberately NOT routed through sendNotification/the
- * Notification collection: a busy group chat would otherwise flood the
- * generic notification list with one row per message, drowning out actual
- * business events (plan created, task approved, etc.), and an offline
- * recipient would get one separate OS push per message instead of one
- * collapsed "new messages" alert. Chat already has its own history/unread
- * tracking (ChatMessage + the seen mechanism) and its own realtime delivery
- * (group:new-message/message:new via chat_message.services.ts) — this only
- * covers the one gap those don't: an OS-level push for someone who's
- * currently offline, collapsed per-chat via OneSignal's collapse key so it
- * can never stack into a wall of alerts.
+ * Chat messages skip sendNotification/the Notification collection entirely —
+ * a busy chat would flood that generic list. This only covers the one gap
+ * chat's own realtime delivery doesn't: an OS push for an offline recipient,
+ * collapsed per-chat so it can't stack into a wall of alerts.
  */
 const sendChatPushNotification = async ({
     receiver,
@@ -229,8 +211,7 @@ const sendChatPushNotification = async ({
 }: SendChatPushNotificationParams) => {
     const userId = receiver.toString();
 
-    // Online: the chat's own socket event (group:new-message/message:new)
-    // already delivered this in realtime — nothing further to do here.
+    // Online: the chat's own socket event already delivered this in realtime.
     if (isUserOnline(userId)) return;
 
     const devices = await Device.find({
@@ -238,7 +219,7 @@ const sendChatPushNotification = async ({
         isActive: true,
     }).select('playerId');
 
-    const playerIds = devices.map((d: any) => d.playerId).filter(Boolean);
+    const playerIds = devices.map((d) => d.playerId).filter(Boolean);
     if (playerIds.length === 0) return;
 
     await sendPushNotification({

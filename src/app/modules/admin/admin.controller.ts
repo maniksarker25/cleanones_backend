@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import httpStatus from 'http-status';
 import { getCloudFrontUrl } from '../../helper/multer-s3-uploader';
 import catchAsync from '../../utilities/catchasync';
@@ -6,8 +5,8 @@ import sendResponse from '../../utilities/sendResponse';
 import AdminServices from './admin.services';
 
 const createAdmin = catchAsync(async (req, res) => {
-    const file: any = req.files?.profile_image;
-    if (req.files?.profile_image) {
+    const file = req.files?.profile_image;
+    if (file?.length) {
         req.body.profile_image = getCloudFrontUrl(file[0].key);
     }
     const result = await AdminServices.createAdminIntoDB(req?.body);
@@ -19,8 +18,8 @@ const createAdmin = catchAsync(async (req, res) => {
     });
 });
 const updateAdminProfile = catchAsync(async (req, res) => {
-    const file: any = req.files?.profile_image;
-    if (req.files?.profile_image) {
+    const file = req.files?.profile_image;
+    if (file?.length) {
         req.body.profile_image = getCloudFrontUrl(file[0].key);
     }
     const result = await AdminServices.updateAdminProfile(
@@ -45,7 +44,6 @@ const deleteAdmin = catchAsync(async (req, res) => {
     });
 });
 
-// update shop status
 const updateAdminStatus = catchAsync(async (req, res) => {
     const result = await AdminServices.updateAdminStatus(req?.params?.id);
     sendResponse(res, {

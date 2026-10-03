@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import axios from 'axios';
 
 interface INotificationPayload {
@@ -7,14 +6,7 @@ interface INotificationPayload {
     heading?: string;
     url?: string;
     data?: object;
-    /**
-     * OneSignal collapse key (`collapse_id` on iOS/APNs, `android_group` +
-     * `android_group_message` on Android). When set, a new push with the
-     * same collapseId REPLACES the previous unread one for that key in the
-     * OS notification tray instead of stacking as a separate alert — pass
-     * something like a chat id so 20 messages while offline show up as one
-     * tray entry, not twenty.
-     */
+    /** OneSignal collapse key — a new push with the same id replaces the previous one in the tray instead of stacking. */
     collapseId?: string;
 }
 
@@ -41,9 +33,7 @@ const sendPushNotification = async ({
                 ...(collapseId && {
                     collapse_id: collapseId,
                     android_group: collapseId,
-                    // Android also needs an explicit summary text when
-                    // grouping, otherwise it just shows the latest message
-                    // with no "N more" indication.
+                    // Android needs an explicit summary text when grouping.
                     android_group_message: { en: 'You have new messages' },
                 }),
             },
@@ -53,10 +43,14 @@ const sendPushNotification = async ({
                 },
             }
         );
-    } catch (error: any) {
+    } catch (error) {
+        const responseData =
+            error && typeof error === 'object' && 'response' in error
+                ? (error as { response?: { data?: unknown } }).response?.data
+                : undefined;
         console.error(
             'OneSignal Error:',
-            error?.response?.data || error.message
+            responseData ?? (error instanceof Error ? error.message : error)
         );
     }
 };

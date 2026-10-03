@@ -1,13 +1,8 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { S3Client } from '@aws-sdk/client-s3';
 import { Request } from 'express';
-import multer from 'multer';
+import multer, { FileFilterCallback } from 'multer';
 import multerS3 from 'multer-s3';
 
-/**
- * Configure and setup AWS S3 client
- */
 const s3 = new S3Client({
     region: process.env.AWS_REGION || 'eu-west-3',
     credentials: {
@@ -16,11 +11,12 @@ const s3 = new S3Client({
     },
 });
 
-/**
- * Setup file upload to AWS S3
- */
 export const uploadFile = () => {
-    const fileFilter = (req: Request, file: any, cb: any) => {
+    const fileFilter = (
+        req: Request,
+        file: Express.Multer.File,
+        cb: FileFilterCallback
+    ) => {
         const allowedFieldnames = [
             'image',
             'profile_image',
@@ -31,6 +27,7 @@ export const uploadFile = () => {
             'reject_evidence',
             'conversation_pdf',
             'conversation_image',
+            'conversation_video',
             'identification_document',
             'beforeImages',
             'afterImages',
@@ -72,11 +69,9 @@ export const uploadFile = () => {
         s3: s3,
         bucket: process.env.AWS_S3_BUCKET_NAME || 'your-bucket-name',
         contentType: multerS3.AUTO_CONTENT_TYPE,
-        // Removing ACL setting as your bucket doesn't support ACLs
         key: function (req, file, cb) {
             let uploadPath = '';
 
-            // Maintain the same folder structure as before
             if (file.fieldname === 'profile_image') {
                 uploadPath = 'uploads/images/profile';
             } else if (file.fieldname === 'category_image') {
@@ -97,6 +92,8 @@ export const uploadFile = () => {
                 uploadPath = 'uploads/documents/conversation_pdf';
             } else if (file.fieldname === 'conversation_image') {
                 uploadPath = 'uploads/images/conversation_image';
+            } else if (file.fieldname === 'conversation_video') {
+                uploadPath = 'uploads/videos/conversation_video';
             } else if (file.fieldname === 'identification_document') {
                 uploadPath = 'uploads/documents/identification_document';
             } else if (file.fieldname === 'beforeImages') {
@@ -109,14 +106,11 @@ export const uploadFile = () => {
                 uploadPath = 'uploads';
             }
 
-            // Sanitize the filename just like in the original code
             const sanitizedOriginalName = file.originalname
                 .replace(/\s+/g, '_')
                 .replace(/[^\w.-]+/g, '');
 
             const name = Date.now() + '-' + sanitizedOriginalName;
-
-            // Construct the full S3 key (path + filename)
             const fullPath = `${uploadPath}/${name}`;
 
             cb(null, fullPath);
@@ -138,6 +132,7 @@ export const uploadFile = () => {
         { name: 'task_attachments', maxCount: 5 },
         { name: 'service_image', maxCount: 5 },
         { name: 'conversation_image', maxCount: 5 },
+        { name: 'conversation_video', maxCount: 2 },
         { name: 'conversation_pdf', maxCount: 2 },
         { name: 'identification_document', maxCount: 1 },
         { name: 'beforeImages', maxCount: 8 },

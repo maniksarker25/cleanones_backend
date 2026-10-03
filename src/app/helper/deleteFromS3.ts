@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // with version 3
 import {
     S3Client,
@@ -36,8 +35,8 @@ export const deleteFileFromS3 = async (fileUrl: string) => {
 
         try {
             await s3.send(headCommand);
-        } catch (err: any) {
-            if (err.name === 'NotFound') {
+        } catch (err) {
+            if (err instanceof Error && err.name === 'NotFound') {
                 console.log(`File ${fileKey} does not exist in S3.`);
                 return;
             }
@@ -52,8 +51,8 @@ export const deleteFileFromS3 = async (fileUrl: string) => {
 
         await s3.send(deleteCommand);
         console.log(`Successfully deleted ${fileKey} from S3`);
-    } catch (err: any) {
-        if (err.name === 'NotFound') {
+    } catch (err) {
+        if (err instanceof Error && err.name === 'NotFound') {
             console.error(`File ${fileKey} was not found in S3.`);
         } else {
             console.error('Error deleting file from S3:', err);

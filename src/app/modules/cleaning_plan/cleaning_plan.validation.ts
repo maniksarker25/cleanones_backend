@@ -10,6 +10,7 @@ const createCleaningPlanValidationSchema = z.object({
         client: z.string({ required_error: 'Client is required' }),
         location: z.string({ required_error: 'Location is required' }),
         rooms: z.array(z.string()).optional(),
+        tasks: z.array(z.string()).optional(),
         note: z.string().nullable().optional(),
         status: z.enum(['active', 'inactive', 'completed']).optional(),
     }),
@@ -21,6 +22,7 @@ const updateCleaningPlanValidationSchema = z.object({
             title: z.string().min(1).trim().optional(),
             description: z.string().min(1).trim().optional(),
             rooms: z.array(z.string()).optional(),
+            tasks: z.array(z.string()).optional(),
             note: z.string().nullable().optional(),
             status: z.enum(['active', 'inactive', 'completed']).optional(),
         })

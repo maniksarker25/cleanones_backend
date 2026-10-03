@@ -1,4 +1,5 @@
 import { Server as IOServer, Socket } from 'socket.io';
+import AppError from '../error/appError';
 import chatServices from '../modules/chat/chat.services';
 import chatMessageServices from '../modules/chat_message/chat_message.services';
 import { TChatMessageSenderRole } from '../modules/chat_message/chat_message.interface';
@@ -10,6 +11,14 @@ const toSenderRole = (role: string): TChatMessageSenderRole | null => {
         return role;
     }
     return null;
+};
+
+const errorInfo = (error: unknown): { statusCode?: number; message: string } => {
+    if (error instanceof AppError) {
+        return { statusCode: error.statusCode, message: error.message };
+    }
+    if (error instanceof Error) return { message: error.message };
+    return { message: 'Unexpected error' };
 };
 
 const handleChat = (
@@ -34,10 +43,11 @@ const handleChat = (
             }
             await chatServices.ensureChatAccessOrThrow(groupId, profileId, role);
             socket.join(`group:${groupId}`);
-        } catch (error: any) {
+        } catch (error) {
+            const info = errorInfo(error);
             emitError(socket, {
-                code: error?.statusCode || 500,
-                message: error?.message || 'Failed to join chat',
+                code: info.statusCode || 500,
+                message: info.message || 'Failed to join chat',
                 type: 'auth',
             });
         }
@@ -67,13 +77,14 @@ const handleChat = (
             });
 
             callback?.({ success: true, data: message });
-        } catch (error: any) {
+        } catch (error) {
+            const info = errorInfo(error);
             emitError(socket, {
-                code: error?.statusCode || 500,
-                message: error?.message || 'Failed to send message',
+                code: info.statusCode || 500,
+                message: info.message || 'Failed to send message',
                 type: 'server',
             });
-            callback?.({ success: false, message: error?.message });
+            callback?.({ success: false, message: info.message });
         }
     });
 
@@ -86,13 +97,14 @@ const handleChat = (
                 role
             );
             callback?.({ success: true, data: message });
-        } catch (error: any) {
+        } catch (error) {
+            const info = errorInfo(error);
             emitError(socket, {
-                code: error?.statusCode || 500,
-                message: error?.message || 'Failed to delete message',
+                code: info.statusCode || 500,
+                message: info.message || 'Failed to delete message',
                 type: 'server',
             });
-            callback?.({ success: false, message: error?.message });
+            callback?.({ success: false, message: info.message });
         }
     });
 
@@ -147,14 +159,15 @@ const handleChat = (
             });
 
             callback?.({ success: true, data: message });
-        } catch (error: any) {
+        } catch (error) {
+            const info = errorInfo(error);
             emitError(socket, {
-                code: error?.statusCode || 500,
-                message: error?.message || 'Failed to send message',
+                code: info.statusCode || 500,
+                message: info.message || 'Failed to send message',
                 type: 'general',
-                details: error?.message,
+                details: info.message,
             });
-            callback?.({ success: false, message: error?.message });
+            callback?.({ success: false, message: info.message });
         }
     });
 

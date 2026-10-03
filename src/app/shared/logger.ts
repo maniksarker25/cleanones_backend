@@ -1,11 +1,9 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import path from 'path';
 import { createLogger, format, transports } from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 const { combine, timestamp, label, printf } = format;
 
-// Custom log
-const myFormat = printf(({ level, message, label, timestamp }: any) => {
+const myFormat = printf(({ level, message, label, timestamp }) => {
   const date = new Date(timestamp);
   const h = date.getHours();
   const m = date.getMinutes();
@@ -18,7 +16,7 @@ const logDir = path.join(process.cwd(), 'logs', 'winston');
 
 export const logger = createLogger({
   level: 'info',
-  format: combine(label({ label: 'Cigar App' }), timestamp(), myFormat),
+  format: combine(label({ label: 'CleanOnes' }), timestamp(), myFormat),
   transports: [
     new transports.Console(),
     new transports.File({
@@ -39,7 +37,7 @@ export const logger = createLogger({
 
 export const errorLogger = createLogger({
   level: 'error',
-  format: combine(label({ label: 'Cigar App' }), timestamp(), myFormat),
+  format: combine(label({ label: 'CleanOnes' }), timestamp(), myFormat),
   transports: [
     new transports.Console(),
     new DailyRotateFile({

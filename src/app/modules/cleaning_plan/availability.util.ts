@@ -15,12 +15,7 @@ export const dayOfWeekCode = (date: Date): (typeof WEEKDAYS)[number] =>
 
 export const dayOfMonth = (date: Date): number => date.getUTCDate();
 
-/**
- * The later of two dates — used to anchor a task's recurrence pattern to
- * whichever came second: the task's own creation, or the cleaning plan's
- * (a task reused by/added to a plan is never "due" for that plan before the
- * plan itself existed, even if the task document is older).
- */
+/** Later of two dates — anchors a recurrence to whichever came second: the task's or the plan's own creation. */
 export const laterOf = (a: Date, b: Date): Date => (a > b ? a : b);
 
 /** Strips the time-of-day, keeping only the UTC calendar date. */

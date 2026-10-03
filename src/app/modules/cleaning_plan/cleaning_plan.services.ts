@@ -13,25 +13,70 @@ import {
 import { ICleaningPlan } from './cleaning_plan.interface';
 import { CleaningPlan } from './cleaning_plan.model';
 
-/**
- * Server-computed conservative upper bound: sum of duration_minutes across
- * every active task under the given rooms. Deliberately worst-case (assumes
- * every task could land on the same day) rather than a per-date-accurate
- * figure — used only as an informational estimate on the plan (see
- * max_estimated_duration); the real, authoritative duration for a specific
- * day lives on that day's materialized Shift.
- */
+/** Worst-case estimate (assumes every task lands the same day): sum of duration_minutes across the plan's tasks. */
 const computeMaxEstimatedDuration = async (
-    roomIds: (Types.ObjectId | string)[]
+    taskIds: (Types.ObjectId | string)[]
 ): Promise<number> => {
-    if (!roomIds.length) return 0;
+    if (!taskIds.length) return 0;
     const tasks = await Task.find({
-        room: { $in: roomIds },
+        _id: { $in: taskIds },
         is_active: true,
     })
         .select('duration_minutes')
         .lean();
     return tasks.reduce((sum, t) => sum + (t.duration_minutes || 0), 0);
+};
+
+/** Enforces that every selected task belongs to one of the plan's selected rooms; also catches stale task ids. */
+const validateTasksBelongToRooms = async (
+    taskIds: (Types.ObjectId | string)[],
+    roomIds: (Types.ObjectId | string)[]
+): Promise<void> => {
+    if (!taskIds.length) return;
+
+    const uniqueTaskIds = [...new Set(taskIds.map(String))];
+    const roomIdSet = new Set(roomIds.map(String));
+
+    const tasks = await Task.find({ _id: { $in: uniqueTaskIds } })
+        .select('room')
+        .lean();
+
+    if (tasks.length !== uniqueTaskIds.length) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'One or more selected tasks do not exist'
+        );
+    }
+    const invalid = tasks.some((t) => !roomIdSet.has(t.room.toString()));
+    if (invalid) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            "One or more selected tasks do not belong to this plan's selected rooms"
+        );
+    }
+};
+
+/** Drops any selected task whose room fell out of the plan's (just-updated) room list. */
+const pruneTasksForRemovedRooms = async (
+    taskIds: (Types.ObjectId | string)[],
+    roomIds: (Types.ObjectId | string)[]
+): Promise<Types.ObjectId[]> => {
+    if (!taskIds.length) return [];
+
+    const roomIdSet = new Set(roomIds.map(String));
+    const tasks = await Task.find({ _id: { $in: taskIds } })
+        .select('room')
+        .lean();
+    const keepTaskIdSet = new Set(
+        tasks
+            .filter((t) => roomIdSet.has(t.room.toString()))
+            .map((t) => t._id.toString())
+    );
+
+    return taskIds
+        .map(String)
+        .filter((id) => keepTaskIdSet.has(id))
+        .map((id) => new Types.ObjectId(id));
 };
 
 const ensureClientExists = async (clientId: string) => {
@@ -65,10 +110,14 @@ const createCleaningPlanIntoDB = async (
     await ensureLocationExists(payload.location.toString());
 
     const rooms = payload.rooms ?? [];
-    const max_estimated_duration = await computeMaxEstimatedDuration(rooms);
+    const tasks = payload.tasks ?? [];
+    await validateTasksBelongToRooms(tasks, rooms);
+    const max_estimated_duration = await computeMaxEstimatedDuration(tasks);
 
     const result = await CleaningPlan.create({
         ...payload,
+        rooms,
+        tasks,
         max_estimated_duration,
         manager: managerId,
         last_updated_by: managerId,
@@ -99,13 +148,27 @@ const updateCleaningPlanIntoDB = async (
     if (!plan)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
 
-    const { rooms, ...rest } = payload;
+    const { rooms, tasks, ...rest } = payload;
 
     const update: Record<string, unknown> = { ...rest, last_updated_by: managerId };
 
+    const effectiveRooms = rooms !== undefined ? rooms : plan.rooms;
+    let effectiveTasks = tasks !== undefined ? tasks : plan.tasks;
+
+    if (tasks !== undefined) {
+        // Must belong to whichever room list is in effect after this same edit.
+        await validateTasksBelongToRooms(tasks, effectiveRooms);
+    } else if (rooms !== undefined) {
+        // Rooms changed but tasks weren't touched — drop any task whose room just fell out.
+        effectiveTasks = await pruneTasksForRemovedRooms(plan.tasks, rooms);
+    }
+
     if (rooms !== undefined) {
         update.rooms = rooms;
-        update.max_estimated_duration = await computeMaxEstimatedDuration(rooms);
+    }
+    if (rooms !== undefined || tasks !== undefined) {
+        update.tasks = effectiveTasks;
+        update.max_estimated_duration = await computeMaxEstimatedDuration(effectiveTasks);
     }
 
     const result = await CleaningPlan.findByIdAndUpdate(id, update, {
@@ -113,11 +176,9 @@ const updateCleaningPlanIntoDB = async (
         runValidators: true,
     });
 
-    // A room added/removed on the plan needs today's already-materialized
-    // shift (if any) resynced — otherwise it keeps showing whatever
-    // rooms/tasks existed at staffing time until someone re-visits it.
-    if (result && rooms !== undefined) {
-        await resyncTodayShiftRoomsIfDue(result._id, result.rooms);
+    // Keeps today's already-materialized shift (if any) in sync with this change.
+    if (result && (rooms !== undefined || tasks !== undefined)) {
+        await resyncTodayShiftRoomsIfDue(result._id, result.rooms, result.tasks);
     }
 
     return result;
@@ -130,12 +191,7 @@ const deleteCleaningPlanFromDB = async (managerId: string, id: string) => {
     if (!plan)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
 
-    // The plan flip, its chat group, and cancelling its future shifts must
-    // land together or not at all — a crash mid-cascade must never leave a
-    // "deleted" plan with a shift still 'upcoming' and staffable. Events are
-    // deliberately fired AFTER the transaction commits, never inside it:
-    // they're external side effects (notifications), not data that needs to
-    // roll back, and must never fire for a write that didn't actually land.
+    // Plan flip + chat group + shift cancellation land atomically; events fire only after commit.
     const session = await mongoose.startSession();
     let result;
     let workerIds: string[];
@@ -299,13 +355,13 @@ const getAllCleaningPlansFromDB = async (
                 {
                     $lookup: {
                         from: 'tasks',
-                        let: { planRooms: { $ifNull: ['$rooms', []] } },
+                        let: { planTasks: { $ifNull: ['$tasks', []] } },
                         pipeline: [
                             {
                                 $match: {
                                     $expr: {
                                         $and: [
-                                            { $in: ['$room', '$$planRooms'] },
+                                            { $in: ['$_id', '$$planTasks'] },
                                             { $eq: ['$is_active', true] },
                                         ],
                                     },
@@ -456,18 +512,32 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
         {
             $lookup: {
                 from: 'rooms',
-                localField: 'rooms',
-                foreignField: '_id',
-                as: 'rooms',
+                let: {
+                    roomIds: { $ifNull: ['$rooms', []] },
+                    planTaskIds: { $ifNull: ['$tasks', []] },
+                },
                 pipeline: [
+                    { $match: { $expr: { $in: ['$_id', '$$roomIds'] } } },
                     { $project: { location: 0, last_updated_by: 0 } },
                     {
+                        // Only this plan's own selected tasks under the room, not every active task.
                         $lookup: {
                             from: 'tasks',
-                            localField: '_id',
-                            foreignField: 'room',
+                            let: { roomId: '$_id', planTaskIds: '$$planTaskIds' },
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: {
+                                            $and: [
+                                                { $eq: ['$room', '$$roomId'] },
+                                                { $in: ['$_id', '$$planTaskIds'] },
+                                                { $eq: ['$is_active', true] },
+                                            ],
+                                        },
+                                    },
+                                },
+                            ],
                             as: 'tasks',
-                            pipeline: [{ $match: { is_active: true } }],
                         },
                     },
                     {
@@ -477,6 +547,7 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
                         },
                     },
                 ],
+                as: 'rooms',
             },
         },
         {
@@ -491,11 +562,9 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
             $addFields: {
                 total_rooms: { $size: { $ifNull: ['$rooms', []] } },
                 total_tasks: { $sum: '$rooms.total_task' },
-                // Sum of the recurring room tasks' duration_minutes only —
-                // the plan's regular checklist, excluding ad-hoc work.
+                // Regular checklist duration only, excluding ad-hoc tasks.
                 total_task_duration: { $sum: '$rooms.total_duration' },
-                // Sum across every AdditionalTask regardless of status —
-                // same "unfiltered" convention as total_additional_tasks_pending below.
+                // Sum across every AdditionalTask regardless of status.
                 total_additional_task_duration: {
                     $sum: { $ifNull: ['$additional_tasks.duration_minutes', []] },
                 },
@@ -511,9 +580,7 @@ const getSingleCleaningPlanFromDB = async (id: string) => {
             },
         },
         {
-            // Grand total: regular checklist time + ad-hoc task time
-            // combined — split into its own stage so it can reference the
-            // two fields computed just above.
+            // Grand total: checklist time + ad-hoc task time.
             $addFields: {
                 total_duration: {
                     $add: ['$total_task_duration', '$total_additional_task_duration'],

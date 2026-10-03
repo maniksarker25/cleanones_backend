@@ -46,6 +46,7 @@ async function seed() {
                     description: `Recurring cleaning of ${spec.rooms.map((r) => r.name).join(', ')} at ${spec.location.name}. Schedule follows the rooms' active tasks.`,
                     client: clientId, manager: client.manager, last_updated_by: client.manager,
                     location: spec.location._id, rooms: spec.rooms.map((r) => r._id),
+                    tasks: tasks.filter((t) => spec.rooms.some((r) => r._id.equals(t.room))).map((t) => t._id),
                     assigned_workers: [], additional_tasks: [],
                     date_time: new Date(`${startDate}T${String(9 + i * 2).padStart(2, '0')}:00:00+06:00`),
                     end_date: null, status: 'active', is_active: true,

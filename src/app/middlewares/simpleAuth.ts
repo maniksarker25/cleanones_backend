@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextFunction, Request, Response } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import mongoose from 'mongoose';
@@ -25,8 +24,8 @@ const simpleAuth = async (req: Request, res: Response, next: NextFunction) => {
                 token,
                 config.jwt_access_secret as string
             ) as JwtPayload;
-        } catch (err: any) {
-            if (err.name === 'TokenExpiredError') {
+        } catch (err) {
+            if (err instanceof Error && err.name === 'TokenExpiredError') {
                 decoded = jwt.decode(token) as JwtPayload | null;
             } else {
                 return next(); // ignore invalid token
@@ -35,7 +34,7 @@ const simpleAuth = async (req: Request, res: Response, next: NextFunction) => {
 
         if (!decoded) return next(); // nothing to attach
 
-        let profileData: any;
+        let profileData: { _id: mongoose.Types.ObjectId; user: unknown } | null = null;
         const { id, role } = decoded;
 
         if (role === USER_ROLE.client) {

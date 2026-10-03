@@ -11,6 +11,7 @@ import { TUser } from '../user/user.interface';
 import { User } from '../user/user.model';
 import { TClient } from './client.interface';
 import { Client } from './client.model';
+import { TLocation } from '../location/location.interface';
 import { Shift } from '../shift/shift.model';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Location } from '../location/location.model';
@@ -19,7 +20,6 @@ import { Room } from '../room/room.model';
 import { Task } from '../task/task.model';
 import { AdditionalTask } from '../additional_task/additional_task.model';
 import '../worker/worker.model';
-import { Worker } from '../worker/worker.model';
 import { TRosterView, getPlanGroupedRosterFromDB } from '../shift/shift.services';
 
 const createClientIntoDB = async (
@@ -271,7 +271,7 @@ const getClientOverviewFromDB = async (clientId: string) => {
         total_locations,
         total_global_tasks
     ] = await Promise.all([
-        CleaningPlan.find({ client: clientId }).select('_id rooms'),
+        CleaningPlan.find({ client: clientId }).select('_id rooms tasks'),
         Location.find({ client: clientId }).select('_id'),
         CleaningPlan.countDocuments({ client: clientId, isDeleted: { $ne: true } }),
         Location.countDocuments({ client: clientId }),
@@ -279,7 +279,9 @@ const getClientOverviewFromDB = async (clientId: string) => {
     ]);
 
     const clientPlanIds = clientPlans.map(p => p._id);
-    const planRoomIds = clientPlans.flatMap(p => p.rooms || []);
+    // Each plan's OWN selected tasks — not every task under its rooms, since
+    // two plans can cover the same room with different task subsets.
+    const planTaskIds = clientPlans.flatMap(p => p.tasks || []);
     const locationIds = clientLocations.map(l => l._id);
 
     const todayStart = new Date();
@@ -450,7 +452,7 @@ const getClientOverviewFromDB = async (clientId: string) => {
         Task.aggregate([
             {
                 $match: {
-                    room: { $in: planRoomIds },
+                    _id: { $in: planTaskIds },
                     is_active: true,
                     $or: [
                         { frequency_type: 'daily' },
@@ -615,7 +617,9 @@ async function getClientScheduleRosterFromDB(
         .lean();
 
     const clientPlanIds = clientPlans.map((p) => p._id);
-    const planRoomIds = clientPlans.flatMap((p) => p.rooms || []);
+    // Each plan's OWN selected tasks — not every task under its rooms, since
+    // two plans can cover the same room with different task subsets.
+    const planTaskIds = clientPlans.flatMap((p) => p.tasks || []);
 
     // 3. Find materialized shifts for this date window
     const savedShifts = await Shift.find({
@@ -629,28 +633,23 @@ async function getClientScheduleRosterFromDB(
 
     const savedPlanIds = new Set(savedShifts.map((s) => s.cleaning_plan?._id?.toString() || s.cleaning_plan?.toString()));
 
-    // 4. Find active tasks matching frequency for this day (same logic as overview API)
+    // 4. Find active, plan-selected tasks matching frequency for this day
+    // (same logic as overview API). Scoped to each plan's OWN `tasks` — not
+    // every task under its rooms — so two plans sharing a room with
+    // different task subsets don't leak each other's duration/count.
     const matchingTasks = await Task.find({
-        room: { $in: planRoomIds },
+        _id: { $in: planTaskIds },
         is_active: true,
         $or: [
             { frequency_type: 'daily' },
             { frequency_type: 'weekly', days_of_week: dayOfWeekStr },
             { frequency_type: 'monthly', days_of_month: dayOfMonthNum },
         ],
-    }).select('room duration_minutes').lean();
+    }).select('duration_minutes').lean();
 
-    const activeRoomsSet = new Set(matchingTasks.map((t) => t.room.toString()));
-
-    // Map tasks duration per room
-    const roomTaskDurations = new Map<string, number>();
-    for (const t of matchingTasks) {
-        const roomId = t.room.toString();
-        roomTaskDurations.set(
-            roomId,
-            (roomTaskDurations.get(roomId) || 0) + (t.duration_minutes || 0)
-        );
-    }
+    const taskDurationById = new Map(
+        matchingTasks.map((t) => [t._id.toString(), t.duration_minutes || 0])
+    );
 
     // Format helper for "HH:mm"
     const formatTime = (d: Date): string => {
@@ -694,20 +693,24 @@ async function getClientScheduleRosterFromDB(
 
     const teamMembersSet = new Set<string>();
 
+    // These fields are typed as plain ObjectId refs, but the queries above
+    // populate() them into real documents — these describe the populated shape.
+    type PopulatedLocationDoc = Pick<TLocation, 'name' | 'address'>;
+    type PopulatedPlanRef = { _id: mongoose.Types.ObjectId; title?: string };
+    type PopulatedWorkerRef = { _id: mongoose.Types.ObjectId; name?: string };
+
     // 5. Process materialized shifts first
     for (const shift of savedShifts) {
+        const populatedShiftLocation = shift.location.location as unknown as
+            | PopulatedLocationDoc
+            | undefined;
         const locationName =
-            (shift.location as any)?.name ||
-            (shift.location as any)?.location?.name ||
-            'CleanOnes HQ';
-        const locationAddress =
-            (shift.location as any)?.location?.address || '';
+            shift.location.name || populatedShiftLocation?.name || 'CleanOnes HQ';
+        const locationAddress = populatedShiftLocation?.address || '';
+        const populatedPlan = shift.cleaning_plan as unknown as PopulatedPlanRef;
         const planId =
-            (shift.cleaning_plan as any)?._id?.toString() ||
-            shift.cleaning_plan?.toString() ||
-            '';
-        const planTitle =
-            (shift.cleaning_plan as any)?.title || 'Cleaning Plan';
+            populatedPlan?._id?.toString() || shift.cleaning_plan?.toString() || '';
+        const planTitle = populatedPlan?.title || 'Cleaning Plan';
 
         // A materialized Shift always carries a real date_time/end_time —
         // both are set together, required, at staffing time.
@@ -718,7 +721,7 @@ async function getClientScheduleRosterFromDB(
         const workers = shift.assigned_workers || [];
         const isStaffed = workers.length > 0;
         const assignedWorkers = workers.map((w) => ({
-            name: w.name || (w.worker as any)?.name || 'Specialist',
+            name: w.name || (w.worker as unknown as PopulatedWorkerRef)?.name || 'Specialist',
             role: w.role || 'Specialist',
         }));
 
@@ -748,18 +751,16 @@ async function getClientScheduleRosterFromDB(
             teamMembersSet.add('Unassigned Specialist');
         } else {
             for (const aw of workers) {
-                const workerName =
-                    aw.name ||
-                    (aw.worker as any)?.name ||
-                    'Specialist';
+                const populatedWorker = aw.worker as unknown as PopulatedWorkerRef;
+                const workerName = aw.name || populatedWorker?.name || 'Specialist';
                 teamMembersSet.add(workerName);
                 rosterShifts.push({
-                    id: `${shift._id}_${(aw.worker as any)?._id || aw.name}`,
+                    id: `${shift._id}_${populatedWorker?._id || aw.name}`,
                     shiftId: shift._id.toString(),
                     planId,
                     planTitle,
                     workerName,
-                    workerId: (aw.worker as any)?._id?.toString() || '',
+                    workerId: populatedWorker?._id?.toString() || '',
                     workerRole: aw.role || 'Specialist',
                     location: locationName,
                     locationAddress,
@@ -781,23 +782,26 @@ async function getClientScheduleRosterFromDB(
     for (const plan of clientPlans) {
         if (savedPlanIds.has(plan._id.toString())) continue;
 
-        const planRooms = (plan.rooms || []).map((r: any) => r.toString());
-        const hasMatchingTask = planRooms.some((r: string) => activeRoomsSet.has(r));
+        const planRooms = (plan.rooms || []).map((r) => r.toString());
+        const planTaskIdsForThisPlan = (plan.tasks || []).map((t) => t.toString());
+        const hasMatchingTask = planTaskIdsForThisPlan.some((id) => taskDurationById.has(id));
 
-        if (!hasMatchingTask && planRooms.length > 0) {
+        if (!hasMatchingTask && planTaskIdsForThisPlan.length > 0) {
             continue;
         }
 
-        const locationName = (plan.location as any)?.name || 'CleanOnes HQ';
-        const locationAddress = (plan.location as any)?.address || '';
+        const populatedPlanLocation = plan.location as unknown as PopulatedLocationDoc;
+        const locationName = populatedPlanLocation?.name || 'CleanOnes HQ';
+        const locationAddress = populatedPlanLocation?.address || '';
         const planId = plan._id.toString();
         const planTitle = plan.title || 'Cleaning Plan';
 
         let planTasksDuration = 0;
         let planTasksCount = 0;
-        for (const roomId of planRooms) {
-            planTasksDuration += roomTaskDurations.get(roomId) || 0;
-            if (activeRoomsSet.has(roomId)) {
+        for (const taskId of planTaskIdsForThisPlan) {
+            const duration = taskDurationById.get(taskId);
+            if (duration !== undefined) {
+                planTasksDuration += duration;
                 planTasksCount++;
             }
         }

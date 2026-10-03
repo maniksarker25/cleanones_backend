@@ -1,12 +1,8 @@
-/* eslint-disable no-undef */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable no-unused-vars */
-/* eslint-disable prefer-const */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import crypto from 'crypto';
 import express, { Application } from 'express';
+import helmet from 'helmet';
 import sendContactUsEmail from './app/helper/sendContactUsEmail';
 
 import globalErrorHandler from './app/middlewares/globalErrorHandler';
@@ -19,6 +15,24 @@ import './app/events/listeners';
 const app: Application = express();
 // VERY IMPORTANT (for proxy / nginx)
 app.set('trust proxy', 1);
+
+// security headers ----------------
+app.use(
+    helmet({
+        // This API's real clients (mobile/web apps) only ever consume JSON.
+        // The one HTML page it renders itself is Swagger UI (/api-docs),
+        // which injects inline scripts/styles that a default CSP blocks —
+        // tuning CSP just for that one docs page isn't worth it, so CSP
+        // stays off here while every other helmet header (frameguard,
+        // nosniff, HSTS, referrer-policy, hidePoweredBy, etc.) still applies.
+        contentSecurityPolicy: false,
+        // Uploaded photos (/uploads) are loaded cross-origin by every
+        // frontend in the CORS allowlist below (the vercel.app domains) —
+        // helmet's default 'same-origin' resource policy would make
+        // browsers block those image loads.
+        crossOriginResourcePolicy: { policy: 'cross-origin' },
+    })
+);
 
 // parser----------------
 app.use(express.json());
@@ -52,8 +66,7 @@ app.use('/uploads', express.static('uploads'));
 
 setupSwagger(app);
 
-// app.use(rateLimiters.apiLimiter);
-app.use('/api/v1', router);
+app.use('/api/v1', rateLimiters.apiLimiter, router);
 app.post('/contact-us', sendContactUsEmail);
 
 app.get('/', async (req, res) => {
