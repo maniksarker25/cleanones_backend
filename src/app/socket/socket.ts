@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 import { Server as HTTPServer } from 'http';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import { Server as IOServer, Socket } from 'socket.io';

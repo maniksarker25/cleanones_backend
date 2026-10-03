@@ -86,9 +86,7 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
         await session.endSession();
     }
 
-    // Best-effort, outside the transaction — same pattern as
-    // createChatGroupForPlan for cleaning plans. Idempotent (unique index on
-    // the chat side), so a retry here can never create a duplicate.
+    // Best-effort, outside the transaction — idempotent, so a retry can't duplicate it.
     await chatServices.createWorkerManagersChat(worker._id);
 
     return worker;
@@ -196,10 +194,7 @@ const deleteWorkerFromDB = async (id: string) => {
 
 const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
 
-// All-time sum of (check_out_at - check_in_at) across every completed
-// check-in, per worker, in hours — mirrors the same calculation used by
-// shift.services.ts's attendance/performance endpoints, just without a date
-// range since this is a lifetime total for the worker list.
+// Lifetime sum of (check_out_at - check_in_at) per worker, in hours.
 const getTotalCompletedWorkHoursByWorker = async (
     workerIds: mongoose.Types.ObjectId[]
 ) => {
@@ -243,22 +238,9 @@ interface WorkerShiftStats {
 }
 
 /**
- * All-time shift stats for a batch of workers, in ONE query total — not one
- * per worker — so a 100-row page (the list's max limit) costs the same
- * single round trip as a 1-row page. Mirrors
- * getTotalCompletedWorkHoursByWorker/getWorkerAttendanceStatsFromDB's
- * definitions but computes every field in a single pass over the same
- * shift/assigned_workers data instead of running separate queries for hours
- * vs. late/on-time/absent:
- * - total_shift: shifts (excluding cancelled) this worker was ever assigned to.
- * - total_late_check_ins / total_on_time_check_ins: of the shifts they
- *   actually checked into, whether check_in_at was after/at-or-before the
- *   shift's scheduled date_time. Mutually exclusive with each other.
- * - total_absent: past shifts (date before today) they were assigned to but
- *   never checked into at all — mutually exclusive with the two above (a
- *   worker who checked in, even late, was not absent).
- * - total_completed_work_hours: sum of (check_out_at - check_in_at) across
- *   every completed check-in, in hours.
+ * All-time shift stats for a batch of workers in one query, not one per
+ * worker. late/on-time/absent are mutually exclusive — a worker who checked
+ * in late was not absent.
  */
 const getWorkerShiftStatsByWorker = async (
     workerIds: mongoose.Types.ObjectId[]
@@ -374,12 +356,8 @@ const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
     return { meta, result };
 };
 
-// All-time attendance stats for one worker, across every materialized shift
-// they've ever been assigned to. Mirrors the late/absent definitions used by
-// getWorkerPerformanceFromDB (shift.services.ts), just without the month
-// filter — late: worker's own check_in_at is after the shift's scheduled
-// date_time; absent: the shift's date is in the past, status isn't
-// 'cancelled', and the worker never checked in.
+// Lifetime attendance stats for one worker. late = checked in after the scheduled start;
+// absent = past date, status not cancelled, never checked in.
 const getWorkerAttendanceStatsFromDB = async (workerId: mongoose.Types.ObjectId) => {
     const today = new Date(
         Date.UTC(

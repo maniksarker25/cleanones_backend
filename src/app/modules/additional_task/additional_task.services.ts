@@ -111,8 +111,8 @@ const updateAdditionalTaskIntoDB = async (
     await ensureClientOwnsAdditionalTask(task.cleaning_plan_id, requester);
 
     // prevent client from touching approval fields
-    delete (payload as any).status;
-    delete (payload as any).reject_reason;
+    delete payload.status;
+    delete payload.reject_reason;
 
     const result = await AdditionalTask.findByIdAndUpdate(id, payload, {
         new: true,

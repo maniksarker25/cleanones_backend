@@ -1,7 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 import { Request } from 'express';
-import multer from 'multer';
+import multer, { FileFilterCallback } from 'multer';
 import fs from 'fs';
 export const uploadFile = () => {
   const storage = multer.diskStorage({
@@ -41,8 +39,7 @@ export const uploadFile = () => {
       ) {
         cb(null, uploadPath);
       } else {
-        //@ts-ignore
-        cb(new Error('Invalid file type'));
+        cb(new Error('Invalid file type'), '');
       }
     },
     filename: function (req, file, cb) {
@@ -51,7 +48,11 @@ export const uploadFile = () => {
     },
   });
 
-  const fileFilter = (req: Request, file: any, cb: any) => {
+  const fileFilter = (
+    req: Request,
+    file: Express.Multer.File,
+    cb: FileFilterCallback
+  ) => {
     const allowedFieldnames = [
       'image',
       'profile_image',

@@ -2,8 +2,8 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 // Global API limiter
 export const apiLimiter = rateLimit({
-    windowMs: 10 * 60 * 1000, // 1 minute
-    max: 60, // 60 requests per minute
+    windowMs: 10 * 60 * 1000, // 10 minutes
+    max: 300, // 300 requests per 10 minutes, per IP
 
     standardHeaders: true,
     legacyHeaders: false,

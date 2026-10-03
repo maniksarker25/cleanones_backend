@@ -1,0 +1,24 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.clientRoutes = void 0;
+const express_1 = require("express");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const user_constant_1 = require("../user/user.constant");
+const client_controller_1 = __importDefault(require("./client.controller"));
+const client_validation_1 = __importDefault(require("./client.validation"));
+const router = (0, express_1.Router)();
+router.post('/create-client', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), (0, validateRequest_1.default)(client_validation_1.default.createClientValidationSchema), client_controller_1.default.createClient);
+router.patch('/update-client/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), (0, validateRequest_1.default)(client_validation_1.default.updateClientValidationSchema), client_controller_1.default.updateClient);
+router.delete('/delete-client/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), client_controller_1.default.deleteClient);
+router.get('/all-clients', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), client_controller_1.default.getAllClients);
+router.get('/overview', (0, auth_1.default)(user_constant_1.USER_ROLE.client), client_controller_1.default.getClientOverview);
+router.get('/schedule-roster', (0, auth_1.default)(user_constant_1.USER_ROLE.client), client_controller_1.default.getClientScheduleRoster);
+router.get('/active-progress', (0, auth_1.default)(user_constant_1.USER_ROLE.client), client_controller_1.default.getClientActiveProgress);
+router.get('/shift-stats', (0, auth_1.default)(user_constant_1.USER_ROLE.client), client_controller_1.default.getClientShiftStats);
+router.get('/totals', (0, auth_1.default)(user_constant_1.USER_ROLE.client), client_controller_1.default.getClientTotals);
+router.get('/roster', (0, auth_1.default)(user_constant_1.USER_ROLE.client), client_controller_1.default.getClientPlanRoster);
+exports.clientRoutes = router;

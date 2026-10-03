@@ -33,6 +33,7 @@ import {
     ConflictReason,
     IAssignedWorker,
     IShift,
+    IShiftAssignedWorker,
     IShiftTask,
 } from './shift.interface';
 import { photoAiConfig } from '../photo_ai/photo_ai.config';
@@ -56,13 +57,7 @@ const isDuplicateKeyError = (error: unknown): boolean =>
     'code' in error &&
     (error as { code: number }).code === MONGO_DUPLICATE_KEY_ERROR;
 
-/**
- * `end_time` is a required field going forward (set by the manager at
- * staffing time — see assignWorkersToShift), but Shift documents
- * materialized before it existed on the schema have none stored. Falls back
- * to date_time + duration_minutes for those so every response still carries
- * a real end_time instead of silently omitting the field.
- */
+// end_time is required now, but shifts from before the field existed have none — fall back to date_time + duration.
 const resolveShiftEndTime = (shift: {
     date_time: Date;
     end_time?: Date | null;
@@ -78,12 +73,7 @@ const ensureActivePlan = async (planId: string | Types.ObjectId) => {
     return plan;
 };
 
-/**
- * Loads an already-staffed Shift or throws 404. A Shift only ever exists
- * once a manager has staffed it (see assignWorkersToShift) — there is no
- * more auto-materialization from a plan default, since a CleaningPlan
- * carries no schedule/crew of its own to materialize from.
- */
+// A Shift only exists once a manager has staffed it — nothing auto-materializes it.
 const getShiftOrThrow = async (
     planId: string | Types.ObjectId,
     date: Date
@@ -100,50 +90,29 @@ const getShiftOrThrow = async (
 };
 
 /**
- * Recomputes a shift's `tasks[]` from the current active Tasks under
- * `roomIds` — additions, removals, AND edits (name/duration_minutes/
- * is_photo_required/photo_requirements) to a task that still exists.
- * Shared by both resync entry points below (one triggered by a Task edit,
- * the other by a plan's room-list edit), so the merge rules can't drift
- * between them.
- *
- * For a task that still exists, `photo_requirements` (the randomly-selected
- * subset actually attached to this shift) is reconciled against the
- * template's current pool/`required_photo_count` rather than blindly
- * re-copied: a previously-selected title still present in the pool keeps its
- * `photo_url`/`is_uploaded` (edits never erase upload progress); if the
- * selected count now falls short of `required_photo_count` (pool grew, count
- * increased, or a selected title was removed from the pool), more titles are
- * randomly drawn from the remaining pool to top back up to the target count;
- * if the selected count now exceeds the target (count decreased), the excess
- * is trimmed, preferring to drop not-yet-uploaded titles first. `is_completed`
- * is then recomputed the normal way for a photo-required task (true once
- * every selected requirement is uploaded); for a no-photo task it's left
- * exactly as-is, since that one is only ever changed by the worker's explicit
- * mark-complete action, never by a plan edit.
+ * Resyncs a shift's tasks[] against the plan's current active tasks.
+ * Reconciles photo_requirements against the template so uploads already
+ * made survive the sync, topping up or trimming the random selection to
+ * match required_photo_count.
  */
 const computeSyncedShiftTasks = async (
     shift: Pick<IShift, 'tasks' | 'date'>,
-    roomIds: (Types.ObjectId | string)[]
+    taskIds: (Types.ObjectId | string)[]
 ) => {
     const allActiveTasks = await Task.find({
-        room: { $in: roomIds },
+        _id: { $in: taskIds },
         is_active: true,
     })
         .select(
             'room name duration_minutes is_photo_required photo_requirements required_photo_count frequency_type days_of_week days_of_month createdAt'
         )
         .lean();
-    // Same per-task recurrence check as tasksOccurringOnDate: a room mixes
-    // daily/weekly/monthly tasks, so only the ones actually due on this
-    // shift's own date belong in its tasks[] — not every active task in the room.
+    // Only tasks actually due today belong here — a room mixes daily/weekly/monthly tasks.
     const activeTasks = allActiveTasks.filter((t) =>
         occursOnDate(shift.date, taskToPattern(t, t.createdAt, null))
     );
 
-    // Additional tasks folded into this shift (see buildAdditionalTaskEntriesForDay)
-    // aren't sourced from the Task collection at all, so this room/task sync
-    // must never touch them — they're carried forward unchanged below.
+    // Additional tasks aren't sourced from Task at all — carried forward unchanged.
     const planTaskEntries = shift.tasks.filter((t) => t.source !== 'additional_task');
     const additionalTaskEntries = shift.tasks.filter((t) => t.source === 'additional_task');
 
@@ -182,9 +151,7 @@ const computeSyncedShiftTasks = async (
             }));
         } else {
             const poolByTitle = new Map(pool.map((pr) => [pr.title, pr]));
-            // Refreshes description/reference_image_url from the current
-            // template on every sync (pure guidance, not upload state) while
-            // preserving this occurrence's own photo_url/is_uploaded.
+            // Refresh guidance text from the template; keep this occurrence's own upload state.
             let kept = existing.photo_requirements
                 .filter((p) => poolByTitle.has(p.title))
                 .map((p) => {
@@ -288,16 +255,9 @@ const computeSyncedShiftTasks = async (
 };
 
 /**
- * If today's shift for a plan touching these rooms is already materialized
- * AND still 'upcoming', syncs its `tasks[]` to match the rooms' current
- * active Tasks. Called after a Task is created, updated, or (soft-)deleted,
- * so any edit on a room is reflected in today's shift the same way it
- * already is for future/virtual occurrences (those are built live from the
- * plan's current state every time, so they need no fixup at all).
- *
- * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts —
- * work already underway or finished must never be retroactively altered by
- * a plan/task edit made afterward.
+ * Syncs today's materialized 'upcoming' shift when a task in its rooms
+ * changes — future shifts rebuild live, so only today needs this fixup.
+ * Skips in_progress/completed/cancelled shifts.
  */
 export const resyncTodayShiftTasksForRoomsIfDue = async (
     roomIds: (Types.ObjectId | string)[]
@@ -309,7 +269,7 @@ export const resyncTodayShiftTasksForRoomsIfDue = async (
         is_active: true,
         status: { $ne: 'completed' },
     })
-        .select('rooms')
+        .select('rooms tasks')
         .lean();
 
     for (const plan of plans) {
@@ -322,7 +282,7 @@ export const resyncTodayShiftTasksForRoomsIfDue = async (
 
         const { tasks, durationMinutes, changed } = await computeSyncedShiftTasks(
             shift,
-            plan.rooms
+            plan.tasks ?? []
         );
         if (!changed) continue;
 
@@ -336,22 +296,13 @@ export const resyncTodayShiftTasksForRoomsIfDue = async (
 };
 
 /**
- * If today's shift for this plan is already materialized AND still
- * 'upcoming', syncs its `rooms[]` AND `tasks[]` to match the plan's current
- * room list. Covers the gap resyncTodayShiftTasksForRoomsIfDue can't: that
- * one only fires for a room already in the plan's rooms array, so assigning
- * a brand-new room (with its own tasks) onto the plan via a plan update
- * never touched an already-materialized today's shift — it would keep
- * showing whatever rooms/tasks existed at materialization time until the
- * next midnight cron. Called from cleaning_plan.services.ts whenever a
- * plan's `rooms` array changes.
- *
- * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts,
- * same reasoning as resyncTodayShiftTasksForRoomsIfDue.
+ * Same fixup as resyncTodayShiftTasksForRoomsIfDue, but also handles a
+ * brand-new room added to the plan, which that one alone would miss.
  */
 export const resyncTodayShiftRoomsIfDue = async (
     planId: Types.ObjectId | string,
-    roomIds: (Types.ObjectId | string)[]
+    roomIds: (Types.ObjectId | string)[],
+    taskIds: (Types.ObjectId | string)[]
 ) => {
     const today = normalizeToUTCDateOnly(new Date());
     const shift = await Shift.findOne({
@@ -370,7 +321,7 @@ export const resyncTodayShiftRoomsIfDue = async (
         room_type: r.room_type,
     }));
 
-    const { tasks, durationMinutes } = await computeSyncedShiftTasks(shift, roomIds);
+    const { tasks, durationMinutes } = await computeSyncedShiftTasks(shift, taskIds);
     const nextRooms = roomsWithDueTasks(allRooms, tasks);
 
     await Shift.updateOne(
@@ -401,29 +352,11 @@ export interface FutureTaskPatternChange {
 }
 
 /**
- * A Task's frequency_type/days_of_week/days_of_month edit (or its deletion/
- * deactivation) changes which future dates the plan is actually "due" on
- * (see occursOnDate) — but any already-materialized 'upcoming' Shift dated
- * after today was snapshotted at staffing time and does NOT recompute
- * itself. Left alone, it would keep showing on the roster (with its crew)
- * even after the date it's on no longer matches the new pattern.
- *
- * Reconciles that gap for every plan touching `roomIds`, comparing each of
- * their future 'upcoming' Shifts against the plan's pattern AS IT WILL BE
- * after this edit (every other active task's real pattern, plus
- * `nextPattern` for the task being changed):
- *  - still due → left alone (see resyncFutureShiftTasksForRoomsIfDue for
- *    keeping its tasks[] content in sync).
- *  - no longer due, nobody staffed → deleted outright; nobody is affected.
- *  - no longer due, staffed → a worker was told to show up and the client
- *    may already know, so it's never silently discarded. Blocked behind
- *    `force` (409, same convention as assignWorkersToShift's conflict
- *    gate) until the caller confirms, then CANCELLED (not deleted, so the
- *    record survives as history) with the crew and client notified.
- *
- * Must be called BEFORE the Task write itself (from task.services.ts), so a
- * blocked change (409, no `force`) leaves nothing mutated at all — Shifts
- * included.
+ * A task's schedule edit can make a future shift no longer due, but
+ * materialized shifts don't recompute themselves. Unstaffed orphans get
+ * deleted; staffed ones need `force` (409 otherwise) and are cancelled,
+ * not deleted, with the crew/client notified. Must run before the Task
+ * write so a blocked edit leaves nothing mutated.
  */
 export const reconcileFutureShiftsForTaskChange = async (
     roomIds: (Types.ObjectId | string)[],
@@ -436,10 +369,11 @@ export const reconcileFutureShiftsForTaskChange = async (
 
     const plans = await CleaningPlan.find({
         rooms: { $in: roomIds },
+        tasks: changedTaskId,
         is_active: true,
         status: { $ne: 'completed' },
     })
-        .select('title client rooms')
+        .select('title client rooms tasks')
         .lean();
     if (!plans.length) return;
 
@@ -450,9 +384,8 @@ export const reconcileFutureShiftsForTaskChange = async (
 
     for (const plan of plans) {
         const otherTasks = await Task.find({
-            room: { $in: plan.rooms },
+            _id: { $in: plan.tasks, $ne: changedTaskId },
             is_active: true,
-            _id: { $ne: changedTaskId },
         })
             .select('frequency_type days_of_week days_of_month createdAt')
             .lean();
@@ -540,9 +473,7 @@ export const cancelUpcomingShiftsAcrossPlans = async (
 ): Promise<string[]> => {
     if (!planIds.length) return [];
 
-    // Only _id/assigned_workers are ever read below — .lean() skips Mongoose
-    // hydration and .select() skips pulling each shift's full tasks/rooms
-    // payload over the wire just to inspect its crew.
+    // Only _id/assigned_workers are read below, so skip the rest of the payload.
     const shifts = await Shift.find({
         cleaning_plan: { $in: planIds },
         status: 'upcoming',
@@ -577,14 +508,9 @@ export const cancelUpcomingShiftsAcrossPlans = async (
 };
 
 /**
- * Keeps every already-materialized future ('upcoming', dated after today)
- * Shift's tasks[]/duration_minutes in sync with the rooms' current active
- * Tasks — the forward-looking counterpart to
- * resyncTodayShiftTasksForRoomsIfDue, covering shifts a manager staffed
- * ahead of time. Call AFTER reconcileFutureShiftsForTaskChange (so orphaned
- * shifts are already gone/cancelled and don't get needlessly resynced here)
- * and after the Task write itself has landed (so this reads the new task
- * state, not the pre-edit one).
+ * Forward-looking counterpart to resyncTodayShiftTasksForRoomsIfDue, for
+ * already-staffed future shifts. Run after reconcileFutureShiftsForTaskChange
+ * and after the Task write lands.
  */
 export const resyncFutureShiftTasksForRoomsIfDue = async (
     roomIds: (Types.ObjectId | string)[]
@@ -596,7 +522,7 @@ export const resyncFutureShiftTasksForRoomsIfDue = async (
         is_active: true,
         status: { $ne: 'completed' },
     })
-        .select('rooms')
+        .select('rooms tasks')
         .lean();
 
     for (const plan of plans) {
@@ -609,7 +535,7 @@ export const resyncFutureShiftTasksForRoomsIfDue = async (
         for (const shift of shifts) {
             const { tasks, durationMinutes, changed } = await computeSyncedShiftTasks(
                 shift,
-                plan.rooms
+                plan.tasks ?? []
             );
             if (!changed) continue;
 
@@ -622,20 +548,9 @@ export const resyncFutureShiftTasksForRoomsIfDue = async (
 };
 
 /**
- * If today's shift for this plan is already materialized AND still
- * 'upcoming', re-copies the plan's current Location (name + coordinates)
- * into the shift's frozen `location` snapshot. Without this, a manager
- * editing a Location's address/GPS point from the dashboard would leave
- * today's already-materialized shift silently pointing at stale
- * coordinates — including the ones the 50m check-in geofence validates
- * against (see assertWithinGeofence) — until the next midnight cron
- * re-materializes it fresh. Called from location.services.ts whenever a
- * Location's coordinates or name change.
- *
- * Deliberately skipped for 'in_progress'/'completed'/'cancelled' shifts,
- * same reasoning as the other resync entry points: a worker already
- * checked in against the old point must not have the ground shift under
- * their feet mid-shift.
+ * Re-copies a Location's current name/coordinates into today's materialized
+ * shift snapshot — otherwise an address edit wouldn't reach the geofence
+ * check until the next midnight cron. Skips shifts already in progress.
  */
 export const resyncTodayShiftLocationIfDue = async (
     planId: Types.ObjectId | string
@@ -759,10 +674,8 @@ export const getShiftForDate = async (
 };
 
 /**
- * Lists every occurrence of the plan between [from, to]: the materialized
- * (staffed) Shift where one exists, otherwise an unstaffed placeholder for
- * any date the plan's current tasks are actually due on. Dates the plan
- * doesn't occur on at all are omitted entirely.
+ * Every occurrence of the plan in [from, to]: the materialized shift where
+ * one exists, otherwise an unstaffed placeholder for dates the plan is due.
  */
 export const listShiftsInRange = async (planId: string, from: Date, to: Date) => {
     const plan = await ensureActivePlan(planId);
@@ -809,16 +722,10 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
     return results;
 };
 
-/** Hard ceiling on how far ahead a bulk-assign preview/confirm can span, so
- * neither the preview's day-by-day walk nor the confirm loop's per-date
- * writes can be driven by an unbounded request. The client's own examples
- * (next week/next month) never approach it. */
+// Caps how far a bulk-assign preview/confirm can span, so neither walk is unbounded.
 export const MAX_BULK_ASSIGN_RANGE_DAYS = 60;
 
-/** A due date nobody is actively covering: never staffed (virtual), staffed
- * but cancelled (see reconcileFutureShiftsForTaskChange), or — defensively —
- * a real shift with an empty crew. Shared by the preview and confirm sides
- * of bulk-assign so "still needs a worker" means the same thing in both. */
+// A due date with nobody covering it: virtual, cancelled, or an empty crew.
 const isUnstaffedGap = (entry: {
     is_virtual: boolean;
     status: string;
@@ -844,12 +751,8 @@ export interface BulkAssignPreviewResult {
 }
 
 /**
- * Read-only preview for the bulk roster-assignment flow: of every date in
- * [from, to] this plan is actually due on, splits the still-unstaffed ones
- * into what this worker's own declared working_days does/doesn't cover, so
- * the manager can review before anything is written (see
- * bulkAssignWorkerToShifts for the write side, which takes exactly the
- * dates the manager confirms from here).
+ * Read-only preview for bulk-assign: splits this plan's still-unstaffed
+ * dates in [from, to] by whether the worker's own working_days covers them.
  */
 export const previewBulkAssignForWorker = async (
     planId: string,
@@ -874,8 +777,6 @@ export const previewBulkAssignForWorker = async (
         throw new AppError(httpStatus.BAD_REQUEST, 'Invalid worker ID');
     }
 
-    // Throws with a precise reason (not found/deleted/blocked) before we
-    // bother walking the plan's occurrences at all.
     await assertWorkersEligible([workerId]);
     const worker = await Worker.findById(workerId).select('name working_days').lean();
     if (!worker) {
@@ -917,9 +818,7 @@ export const previewBulkAssignForWorker = async (
 export interface BulkAssignOutcome {
     assigned: string[];
     skipped_already_staffed: string[];
-    /** Due, unstaffed dates skipped because this worker is already double-booked
-     * elsewhere that day — not an error the caller needs to act on. Pass
-     * `force: true` on a retry if these should be assigned anyway. */
+    /** Skipped — worker's already booked elsewhere that day. Retry with force:true to assign anyway. */
     ignored_due_to_conflict: Array<{ date: string; reason: string }>;
     failed: Array<{ date: string; message: string }>;
     counts: {
@@ -931,24 +830,11 @@ export interface BulkAssignOutcome {
 }
 
 /**
- * Write side of bulk-assign: stages the same worker onto every date in
- * `dates` that's still an unstaffed gap (never touches one that already has
- * an active crew, so it's safe to re-run with a different worker to cover
- * whatever's left). Prefetches existing Shifts for the whole batch in one
- * query rather than one lookup per date, then delegates the actual staffing
- * of each remaining date to assignWorkersToShift unchanged — so eligibility
- * checks and the shift.worker_assigned notification/chat-group sync all
- * behave exactly as they do for a single manual assignment.
- *
- * Best-effort per date, not all-or-nothing. In particular, a scheduling
- * conflict (this worker double-booked elsewhere that day) is NOT a blocking
- * error here the way it is for a single manual assign — for a bulk action
- * the useful default is "staff whoever's actually free, quietly skip the
- * rest": with `force` left false/omitted, a conflicted date is simply
- * skipped and reported in `ignored_due_to_conflict`, no follow-up call
- * required. Passing `force: true` flips that for the whole batch — every
- * conflicted date gets assigned anyway (flagged `assigned_with_conflict` on
- * the shift, same as the single-date flow) instead of being skipped.
+ * Write side of bulk-assign: stages the worker onto every still-unstaffed
+ * date, delegating each one to assignWorkersToShift so eligibility checks
+ * and notifications behave the same as a single manual assign. Best-effort,
+ * not all-or-nothing — a scheduling conflict is skipped (not a failure)
+ * unless `force` is set, in which case it's assigned anyway.
  */
 export const bulkAssignWorkerToShifts = async (
     managerId: string,
@@ -982,7 +868,9 @@ export const bulkAssignWorkerToShifts = async (
         .select('date status assigned_workers')
         .lean();
     const coveredDateKeys = new Set(
-        existingShifts.filter((s) => !isUnstaffedGap({ ...s, is_virtual: false })).map((s) => s.date.toISOString())
+        existingShifts
+            .filter((s) => !isUnstaffedGap({ ...s, is_virtual: false }))
+            .map((s) => s.date.toISOString())
     );
 
     const outcome: Omit<BulkAssignOutcome, 'counts'> = {
@@ -1018,12 +906,7 @@ export const bulkAssignWorkerToShifts = async (
             } else if (error instanceof AppError) {
                 outcome.failed.push({ date: dateLabel, message: error.message });
             } else {
-                // An unexpected (non-AppError) failure for THIS date — e.g. a
-                // transient DB hiccup — must never take down the rest of an
-                // otherwise-successful batch. Logged for diagnosis; the
-                // caller just sees this one date as failed and can retry it
-                // (retrying is always safe — this loop never double-assigns
-                // an already-covered date).
+                // One bad date (e.g. a DB hiccup) shouldn't fail the whole batch.
                 errorLogger.error(
                     `bulkAssignWorkerToShifts: unexpected error assigning ${planId}/${dateLabel}`,
                     error
@@ -1048,16 +931,9 @@ export const bulkAssignWorkerToShifts = async (
 };
 
 /**
- * A worker only ever appears on a real, staffed Shift (see
- * assignWorkersToShift) — there is no plan-level default roster to preview,
- * so this is a plain query, not a merge with a virtual projection.
- *
- * Excludes cancelled shifts — a shift a manager (or a task recurrence
- * change, see reconcileFutureShiftsForTaskChange) cancelled is no longer
- * something the worker needs to show up for, so it shouldn't appear on
- * their "my shifts" list at all. Feeds both GET /shift/my-shifts and
- * getWorkerTodayMetaFromDB, so this also keeps today's pending/completed
- * counts from ever counting a cancelled shift.
+ * A worker's shifts for one date — plain query, no virtual projection,
+ * since a worker only ever appears on a real staffed shift. Excludes
+ * cancelled shifts; feeds both my-shifts and today's meta counts.
  */
 export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
     const day = normalizeToUTCDateOnly(date);
@@ -1076,12 +952,8 @@ export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
 };
 
 /**
- * Per-room progress = completed tasks in that room / total tasks in that
- * room. Overall shift progress = average of the rooms' progress (not a raw
- * task count across the whole shift), so one large room doesn't drown out a
- * small one. completed_room counts rooms at 100% — useful for an "X/Y rooms"
- * style summary. Keeps `tasks` in the result; callers that don't want the
- * full per-task detail (e.g. the client live-status list) strip it themselves.
+ * Per-room progress = completed/total tasks in that room; overall progress
+ * is the average across rooms, so one large room can't drown out a small one.
  */
 const attachProgress = (shift: IShift & { _id: Types.ObjectId }) => {
     const rooms = shift.rooms.map((room) => {
@@ -1117,12 +989,7 @@ const attachProgress = (shift: IShift & { _id: Types.ObjectId }) => {
     };
 };
 
-/**
- * Client-facing "what's happening right now": every in_progress shift across
- * all of this client's active cleaning plans, each with room-level and
- * overall completion progress computed live (never cached/stored). Full
- * per-task detail is intentionally omitted — this is a summary view.
- */
+/** Client-facing "what's happening now": every in_progress shift across this client's plans, with live progress. */
 export const getClientLiveShiftsFromDB = async (clientId: string) => {
     const planIds = await CleaningPlan.find({
         client: clientId,
@@ -1189,35 +1056,11 @@ export const getNextShiftForWorker = async (workerId: string) => {
 };
 
 /**
- * System-wide "today's shifts at a glance" for the manager dashboard — every
- * manager sees the same numbers, not scoped to who's calling. Only counts
- * already-materialized Shift documents for today — the nightly cron (plus
- * this system's same-day auto-materialization on plan create/update/assign)
- * means today's occurrences are expected to already exist by the time
- * anyone looks at this. Purely shift data — no issue-report count here (see
- * /issue-report for that).
- *
- * today_total_shift excludes cancelled shifts, same as
- * getTodayLiveShiftsFromDB (the list this meta summarizes) — so it always
- * equals today_total_completed_shift + today_total_in_progress_shift +
- * today_total_pending_shift. today_total_pending_shift maps to status
- * 'upcoming' (not yet checked into).
- *
- * total_absent counts DISTINCT workers (not shift-assignment rows) whose
- * shift's scheduled date_time has already passed but who still haven't
- * checked in at all (check_in_at is null), excluding cancelled shifts — no
- * grace period beyond the exact scheduled start time. total_late counts
- * DISTINCT workers who DID check in today, but after their shift's
- * date_time — same definition as getWorkersAttendanceSummaryFromDB's
- * late_check_ins, scoped to today. A worker who never checked in counts
- * toward total_absent but never total_late — the two are mutually exclusive.
- * absent_workers/late_workers carry the same two distinct-worker sets the
- * two counts are derived from — {worker_id, name} pairs, so a caller
- * doesn't have to re-derive "who" from "how many" via a second request.
- * `name` is read straight off the shift's own assigned_workers snapshot
- * (set at staffing time, see assignWorkersToShift) rather than a fresh
- * Worker lookup — one less query, and consistent with what the roster
- * already displays for that shift.
+ * Dashboard-wide "today at a glance" — same for every manager, not scoped
+ * to the caller. Only counts already-materialized shifts (the daily cron
+ * guarantees today's exist by now). total_absent/total_late are
+ * point-in-time: absent = past start, never checked in; late = checked in
+ * after the scheduled start. Mutually exclusive, both exclude cancelled shifts.
  */
 export const getTodayLiveShiftMetaFromDB = async () => {
     const today = normalizeToUTCDateOnly(new Date());
@@ -1267,13 +1110,7 @@ export const getTodayLiveShiftMetaFromDB = async () => {
 export const REPORT_PERIODS = ['week', 'month', 'quarter', 'year'] as const;
 export type TReportPeriod = (typeof REPORT_PERIODS)[number];
 
-/**
- * "This week/month/quarter/year" as an inclusive [from, to] range of
- * UTC-normalized calendar days — same UTC-day convention the rest of the
- * shift system uses (see normalizeToUTCDateOnly), so a shift's `date` field
- * compares directly against these without extra conversion. Week starts
- * Monday (ISO week), matching the Mon..Sun labels on the dashboard.
- */
+// "This week/month/quarter/year" as an inclusive UTC [from, to] range. Week starts Monday.
 const getReportDateRange = (period: TReportPeriod, now: Date) => {
     const today = normalizeToUTCDateOnly(now);
 
@@ -1312,12 +1149,7 @@ const MONTH_LABELS = [
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-/**
- * Bucket granularity per period — deliberately gets finer as the range gets
- * shorter and coarser as it gets longer, so every period renders a readable
- * number of bars: week -> 1 bar/day (7 total), month -> 1 bar/day (28-31),
- * quarter -> 1 bar/week (~13), year -> 1 bar/month (12).
- */
+/** Bucket size scales with range length so every period renders a readable number of bars. */
 const buildShiftTrendBuckets = (
     period: TReportPeriod,
     from: Date,
@@ -1374,14 +1206,7 @@ const buildShiftTrendBuckets = (
     });
 };
 
-/**
- * Manager dashboard report: total shifts + total issue reports for the
- * selected period, a shift-count trend chart bucketed per
- * buildShiftTrendBuckets, and an issue-report status breakdown (PENDING /
- * IN_PROGRESS / RESOLVED) — all scoped to the same [from, to] range, unlike
- * getTodayLiveShiftMetaFromDB's total_absent/total_late, which are
- * point-in-time, not period-scoped.
- */
+/** Dashboard report: shift + issue-report totals for the period, plus a trend chart and status breakdown. */
 export const getManagerReportFromDB = async (period: TReportPeriod) => {
     const now = new Date();
     const { from, to } = getReportDateRange(period, now);
@@ -1433,12 +1258,7 @@ const parseObjectIdQueryParam = (
     return new Types.ObjectId(value);
 };
 
-/**
- * Batch-resolves { cleaning_plan: {_id, title}, client: {_id, name} } for a
- * set of shifts in at most two queries total (not one per shift), keyed by
- * shift cleaning_plan id. Short-circuits on an empty input to avoid two
- * pointless round trips on an empty page/result.
- */
+// Batch-resolves plan/client info for a set of shifts in two queries total, not one per shift.
 const attachPlanAndClient = async <T extends { cleaning_plan: Types.ObjectId }>(
     shifts: T[]
 ) => {
@@ -1483,9 +1303,7 @@ const attachPlanAndClient = async <T extends { cleaning_plan: Types.ObjectId }>(
     });
 };
 
-// Allowlisted so a caller can't force a sort on an arbitrary/unindexed path
-// (e.g. a large nested array field) and degrade this into a full in-memory
-// sort under load.
+// Allowlisted so a caller can't force a sort on an unindexed path.
 const TODAY_LIVE_SHIFTS_SORTABLE_FIELDS = new Set([
     'date_time',
     'status',
@@ -1493,23 +1311,14 @@ const TODAY_LIVE_SHIFTS_SORTABLE_FIELDS = new Set([
     'updatedAt',
 ]);
 
-// Cancelled shifts are never surfaced by getTodayLiveShiftsFromDB — 'today's
-// live shifts' means what's actually happening/scheduled today, not what got
-// called off. 'cancelled' is intentionally excluded so a ?status=cancelled
-// query is rejected the same way any other invalid value would be, rather
-// than silently overriding the base filter below.
+// 'cancelled' is deliberately not a valid filter value here — today's live shifts never includes it.
 const SHIFT_STATUSES = new Set<IShift['status']>([
     'upcoming',
     'in_progress',
     'completed',
 ]);
 
-/**
- * Manager-facing list of today's shifts, system-wide (not scoped to the
- * calling manager, same as today-live-shift-meta), filterable by location
- * and client. A lean list view: room-level detail lives on the
- * single-live-shift endpoint instead — this only carries the summary totals.
- */
+/** Manager-facing today's-shifts list, system-wide, filterable by location/client. Room detail lives on the single-shift endpoint. */
 export const getTodayLiveShiftsFromDB = async (
     query: Record<string, unknown>
 ) => {
@@ -1539,8 +1348,6 @@ export const getTodayLiveShiftsFromDB = async (
     const clientId = parseObjectIdQueryParam(query.client, 'client');
     if (clientId) {
         const planIds = await CleaningPlan.find({ client: clientId }).distinct('_id');
-        // An empty $in never matches — correctly yields zero results instead
-        // of accidentally falling through to "no client filter at all".
         match.cleaning_plan = { $in: planIds };
     }
 
@@ -1556,10 +1363,7 @@ export const getTodayLiveShiftsFromDB = async (
 
     const [shifts, total] = await Promise.all([
         Shift.find(match)
-            // _id as a tiebreaker guarantees deterministic ordering across
-            // pages even when many shifts share the same sortField value —
-            // without it, concurrent writes can shift rows between pages or
-            // repeat/skip a row under pagination.
+            // _id tiebreaker keeps pagination stable when sortField ties.
             .sort({ [sortField]: sortOrder, _id: 1 })
             .skip(skip)
             .limit(limit)
@@ -1584,12 +1388,7 @@ export const getTodayLiveShiftsFromDB = async (
     };
 };
 
-/**
- * One shift's full detail: tasks[], rooms[] (with per-room progress),
- * assigned_workers[], plus cleaning_plan/client context — the counterpart to
- * getTodayLiveShiftsFromDB's lean list view. Not date/today-restricted; any
- * materialized shift can be fetched by its own _id.
- */
+/** One shift's full detail — tasks, rooms with progress, crew, plan/client context. */
 export const getSingleLiveShiftFromDB = async (id: string) => {
     if (!mongoose.isValidObjectId(id)) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Invalid shift ID');
@@ -1605,22 +1404,9 @@ export const getSingleLiveShiftFromDB = async (id: string) => {
 };
 
 /**
- * Manager-facing worker performance for one calendar month (UTC), combining
- * already-materialized Shift documents (the only source of truth for
- * completed/in_progress/late/absent/worked-hours — those require real
- * check-in/check-out data) with not-yet-materialized future occurrences of
- * the worker's currently active plans (so total_shift/total_upcoming for a
- * mostly-future month aren't artificially low just because the cron hasn't
- * caught up to those days yet).
- *
- * Definitions:
- * - late: this worker's own check_in_at is after the shift's scheduled date_time (no grace period).
- * - absent: the shift's calendar date is in the past, status isn't 'cancelled',
- *   and this worker never checked in. Only ever true for materialized shifts —
- *   if a plan's occurrence was never materialized at all (e.g. the cron
- *   didn't run that day), there is no record to judge absence from.
- * - total_work: sum of (check_out_at - check_in_at) across this worker's
- *   completed check-ins this month, in hours, rounded to 2 decimals.
+ * One worker's monthly performance, from materialized shifts only (the
+ * source of truth for check-in/check-out data). late = checked in after the
+ * scheduled start; absent = past date, status not cancelled, never checked in.
  */
 export const getWorkerPerformanceFromDB = async (
     workerId: string,
@@ -1638,9 +1424,7 @@ export const getWorkerPerformanceFromDB = async (
     const monthEnd = new Date(Date.UTC(targetYear, targetMonth, 0)); // last day of the month
     const today = normalizeToUTCDateOnly(now);
 
-    // A worker only ever appears on a real, staffed Shift — there is no
-    // plan-level default roster to project unstaffed future occurrences
-    // from, so this month's total is exactly its materialized shifts.
+    // A worker only ever appears on a real, staffed Shift.
     const materialized = await Shift.find({
         'assigned_workers.worker': workerId,
         date: { $gte: monthStart, $lte: monthEnd },
@@ -1707,12 +1491,9 @@ export interface IWorkerPhotoQuality {
 }
 
 /**
- * Photo quality for one worker's shifts.
- *
- * Counts a manager's verdict where there is one and the automatic decision
- * otherwise, but reports them separately as well: a high approval rate made
- * entirely of machine decisions means something different from one a person
- * signed off.
+ * Photo quality for one worker. Uses a manager's verdict where there is
+ * one, the automatic decision otherwise — but reports both counts
+ * separately, since an all-machine approval rate means something different.
  */
 const summarisePhotoQuality = (
     shifts: { tasks?: IShiftTask[] }[]
@@ -1787,19 +1568,9 @@ const getAttendanceSummaryPeriodRange = (
 };
 
 /**
- * Manager-facing attendance summary metadata aggregated across ALL workers
- * for `period` ('today' | 'weekly' | 'monthly').
- *
- * Definitions (each assigned-worker entry across every shift in the period
- * counts separately — a shift with 3 assigned workers contributes up to 3
- * check-ins):
- * - completed_shifts: shifts with status 'completed' whose date falls in the period.
- * - total_hours: sum of (check_out_at - check_in_at) across every worker's
- *   completed check-ins in the period, in hours, rounded to 2 decimals.
- * - punctuality_percentage: of all worker check-ins that happened during the
- *   period, the share that were on-time (check_in_at <= shift's scheduled
- *   date_time, no grace period — same rule as getWorkerPerformanceFromDB's
- *   `late`). 0 when there were no check-ins in the period.
+ * Attendance summary across all workers for the period. Each assigned-worker
+ * entry counts separately. punctuality_percentage is on-time check-ins over
+ * total check-ins (on-time = at or before the scheduled start, no grace).
  */
 export const getWorkersAttendanceSummaryFromDB = async (
     period: TAttendanceSummaryPeriod
@@ -1854,16 +1625,8 @@ export const getWorkersAttendanceSummaryFromDB = async (
 };
 
 /**
- * Manager-facing per-worker attendance rows for `period`, optionally
- * filtered by worker name (`searchTerm`) and/or `workerType`. One row per
- * active worker matching the filters, even those with zero shifts in the
- * period (hours_worked/total_shifts/late_days all 0).
- *
- * - total_shifts: count of shifts this worker was assigned to in the period.
- * - hours_worked: sum of (check_out_at - check_in_at) across this worker's
- *   completed check-ins in the period, in hours, rounded to 2 decimals.
- * - late_days: count of this worker's check-ins after the shift's scheduled
- *   date_time (no grace period — same rule used across this module).
+ * Per-worker attendance rows for the period, filterable by name/worker type.
+ * One row per matching active worker, even with zero shifts (an all-0 row).
  */
 export const getWorkersAttendanceListFromDB = async (
     period: TAttendanceSummaryPeriod,
@@ -1933,19 +1696,7 @@ export const getWorkersAttendanceListFromDB = async (
     });
 };
 
-/**
- * Single-worker attendance summary for `period` ('today' | 'weekly' | 'monthly'),
- * powering the worker profile's Attendance tab.
- *
- * Same definitions as getWorkersAttendanceSummaryFromDB, scoped to this
- * worker's own assigned-worker entry on each shift in the period:
- * - completed_shifts: this worker's shifts with status 'completed' in the period.
- * - total_hours: sum of (check_out_at - check_in_at) across this worker's
- *   completed check-ins in the period, in hours, rounded to 2 decimals.
- * - punctuality_percentage: of this worker's check-ins in the period, the
- *   share that were on-time (check_in_at <= shift's scheduled date_time, no
- *   grace period). 0 when there were no check-ins in the period.
- */
+/** Same as getWorkersAttendanceSummaryFromDB, scoped to one worker — powers the profile's Attendance tab. */
 export const getWorkerAttendanceSummaryFromDB = async (
     workerId: string,
     period: TAttendanceSummaryPeriod
@@ -2085,25 +1836,11 @@ export const getRosterDateRange = (
 };
 
 /**
- * Manager-facing shift roster for the "Shift Roster" page: for `view`
- * ('day' | 'week' | 'month'), one PAGE of active workers (optionally
- * filtered by name/type, same filters as getWorkersAttendanceListFromDB)
- * with their STAFFED shifts for each date in the range. A worker only ever
- * appears on a real, staffed Shift (see assignWorkersToShift) — there is no
- * plan-level default roster to merge in, so every entry here is real.
- *
- * client/location narrow this to workers who have at least one shift for
- * that client/location in the range — AND their calendar cells only show
- * shifts matching the filter too, not their unrelated shifts elsewhere (same
- * "filtered means filtered end to end" behavior as getManagerPlanRosterFromDB).
- *
- * Pagination happens FIRST, on the Worker query itself (via a single
- * `$facet` aggregation that returns the page and the total count in one
- * round trip) — the materialized-Shift query is then scoped to only this
- * page's workers, not the whole roster. When client/location is supplied, an
- * extra up-front query resolves the matching worker ids so the Worker
- * `$facet` can be scoped to them too (empty $in yields zero results, never
- * "filter ignored" — same convention as getTodayLiveShiftsFromDB's client filter).
+ * Shift Roster page: one page of active workers (filterable by name/type)
+ * with their staffed shifts per date in the range. client/location narrow
+ * to workers with a matching shift, and their calendar cells show only
+ * matching shifts too. Pagination runs on the Worker query first (one
+ * `$facet` for page + total), then Shifts are fetched only for that page.
  */
 export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
     const { view, date, year, month, searchTerm, workerType, client, location } = params;
@@ -2127,8 +1864,6 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
             throw new AppError(httpStatus.BAD_REQUEST, 'Invalid client ID');
         }
         const planIds = await CleaningPlan.find({ client }).distinct('_id');
-        // An empty $in never matches — correctly yields zero results instead
-        // of accidentally falling through to "no client filter at all".
         shiftFilter.cleaning_plan = { $in: planIds };
     }
     const filteringByClientOrLocation = location !== undefined || client !== undefined;
@@ -2146,8 +1881,6 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
         workerFilter._id = { $in: matchingWorkerIds };
     }
 
-    // Single round trip for both the page and the total count, so pagination
-    // metadata never costs a second query.
     const [facet] = await Worker.aggregate<{
         data: { _id: Types.ObjectId; name: string; worker_type: WorkerType }[];
         totalCount: { total: number }[];
@@ -2280,8 +2013,7 @@ export interface PlanRosterShiftEntry {
     shift_id: string | null;
     is_virtual: boolean;
     status: string;
-    // null until a manager has staffed this due date (see
-    // assignWorkersToShift) — a Cleaning Plan carries no schedule of its own.
+    // null until a manager staffs this due date.
     start_time: Date | null;
     end_time: Date | null;
     duration_minutes: number;
@@ -2300,15 +2032,9 @@ export interface PlanGroupedRosterParams {
 }
 
 /**
- * Core of the "roster grouped by cleaning plan" view, shared by the
- * client-facing GET /client/roster (scoped to that client's own plans) and
- * the manager-facing GET /shift/plan-roster (scoped by whatever `planFilter`
- * the caller passes — e.g. every active plan, or narrowed by client/location).
- * For each matching plan (paginated), every due date in the selected day/
- * week/month window: the real, staffed Shift where one exists, otherwise an
- * unstaffed placeholder (is_virtual: true, status 'unstaffed', no start_time/
- * end_time/assigned_workers) for a date the plan's current tasks are due on
- * but nobody has scheduled yet.
+ * Roster grouped by plan: shared by the client-facing and manager-facing
+ * roster endpoints (via `planFilter`). For each matching plan, every due
+ * date gets either the real staffed shift or an unstaffed placeholder.
  */
 export const getPlanGroupedRosterFromDB = async (
     planFilter: Record<string, unknown>,
@@ -2323,7 +2049,7 @@ export const getPlanGroupedRosterFromDB = async (
     const [totalPlans, plans] = await Promise.all([
         CleaningPlan.countDocuments(planFilter),
         CleaningPlan.find(planFilter)
-            .select('title location rooms createdAt')
+            .select('title location rooms tasks createdAt')
             .sort({ title: 1, _id: 1 })
             .skip((page - 1) * limit)
             .limit(limit)
@@ -2343,13 +2069,13 @@ export const getPlanGroupedRosterFromDB = async (
     }
 
     const planIds = plans.map((p) => p._id);
-    const allRoomIds = [
-        ...new Set(plans.flatMap((p) => (p.rooms ?? []).map((r) => r.toString()))),
+    const allTaskIds = [
+        ...new Set(plans.flatMap((p) => (p.tasks ?? []).map((t) => t.toString()))),
     ];
     const allLocationIds = [...new Set(plans.map((p) => p.location.toString()))];
 
     const [tasks, locations, materializedShifts] = await Promise.all([
-        Task.find({ room: { $in: allRoomIds }, is_active: true })
+        Task.find({ _id: { $in: allTaskIds }, is_active: true })
             .select('room frequency_type days_of_week days_of_month duration_minutes createdAt')
             .lean(),
         Location.find({ _id: { $in: allLocationIds } }).select('name').lean(),
@@ -2359,13 +2085,7 @@ export const getPlanGroupedRosterFromDB = async (
         }).lean(),
     ]);
 
-    const tasksByRoom = new Map<string, typeof tasks>();
-    for (const t of tasks) {
-        const key = t.room.toString();
-        const list = tasksByRoom.get(key);
-        if (list) list.push(t);
-        else tasksByRoom.set(key, [t]);
-    }
+    const tasksById = new Map(tasks.map((t) => [t._id.toString(), t]));
     const locationNameById = new Map(locations.map((l) => [l._id.toString(), l.name]));
     const materializedByPlanDate = new Map(
         materializedShifts.map((s) => [`${s.cleaning_plan.toString()}|${s.date.toISOString()}`, s])
@@ -2375,10 +2095,10 @@ export const getPlanGroupedRosterFromDB = async (
 
     const cleaning_plans = plans.map((plan) => {
         const planIdStr = plan._id.toString();
-        const planRoomIds = (plan.rooms ?? []).map((r) => r.toString());
-        const planTasks = planRoomIds.flatMap((r) => tasksByRoom.get(r) ?? []);
-        // Anchored on whichever is later, the task's or the plan's own
-        // createdAt — see shift.snapshot.util.ts's buildShiftSnapshot.
+        const planTasks = (plan.tasks ?? [])
+            .map((id) => tasksById.get(id.toString()))
+            .filter((t): t is NonNullable<typeof t> => !!t);
+        // Anchored on whichever is later, the task's or the plan's own createdAt.
         const patterns = planTasks.map((t) =>
             taskToPattern(t, laterOf(t.createdAt, plan.createdAt), null)
         );
@@ -2433,10 +2153,6 @@ export const getPlanGroupedRosterFromDB = async (
             }
 
             if (!planTasks.length) continue;
-            // Each task's own frequency/anchor is checked individually — a
-            // room mixes daily/weekly/monthly tasks that don't all recur on
-            // the same days, so planTasks.length is never the right count
-            // for this specific date (see tasksOccurringOnDate).
             const dueTasksForDay = planTasks.filter((_, i) =>
                 occursOnDate(day, patterns[i])
             );
@@ -2444,8 +2160,7 @@ export const getPlanGroupedRosterFromDB = async (
 
             const dueRoomIds = new Set(dueTasksForDay.map((t) => t.room.toString()));
 
-            // Due, but not yet staffed (see assignWorkersToShift) — no time
-            // or crew to show until a manager schedules it.
+            // Due, but not yet staffed — no time or crew to show.
             const virtualDurationMinutes = dueTasksForDay.reduce(
                 (sum, t) => sum + (t.duration_minutes || 0),
                 0
@@ -2467,11 +2182,7 @@ export const getPlanGroupedRosterFromDB = async (
             totalShifts += 1;
         }
 
-        // A gap the manager still needs to staff: never staffed (virtual),
-        // cancelled (e.g. by reconcileFutureShiftsForTaskChange), or somehow
-        // real but crew-less. Surfaced so the roster list view can flag a
-        // plan without the caller having to inspect every shift itself —
-        // see bulkAssignWorkerToShifts for the same gap definition.
+        // A gap the manager still needs to staff: virtual, cancelled, or crew-less.
         const unassignedShiftCount = shifts.filter(
             (s) => s.is_virtual || s.status === 'cancelled' || s.assigned_workers.length === 0
         ).length;
@@ -2502,12 +2213,7 @@ export interface ManagerPlanRosterParams extends PlanGroupedRosterParams {
     searchTerm?: string;
 }
 
-/**
- * Manager-facing plan-grouped roster: every active cleaning plan in the
- * system (not scoped to one client), optionally narrowed to one client,
- * one location, or a plan-title search — the system-wide counterpart to
- * GET /client/roster. Same day/week/month semantics and response shape.
- */
+/** System-wide plan-grouped roster — same shape as GET /client/roster, filterable by client/location/title. */
 export const getManagerPlanRosterFromDB = async (params: ManagerPlanRosterParams) => {
     const { client, location, searchTerm, ...rosterParams } = params;
     const planFilter: Record<string, unknown> = { is_active: true };
@@ -2533,13 +2239,9 @@ export const getManagerPlanRosterFromDB = async (params: ManagerPlanRosterParams
 };
 
 /**
- * Loads the existing Shift for (planId, date), or builds and creates a fresh
- * one (rooms/tasks/location snapshotted from the plan's current state, plus
- * any already-approved AdditionalTasks for that day) if this is the first
- * time this due date is being staffed. Throws if the plan's current tasks
- * don't actually occur on this date. Idempotent under concurrency via the
- * { cleaning_plan, date } unique index: if two managers race to staff the
- * same date, the loser recovers by re-fetching the winner's document.
+ * Loads the existing Shift for (planId, date), or creates one snapshotted
+ * from the plan's current state. Throws if the plan doesn't occur on this
+ * date. Race-safe: the loser of a concurrent create just refetches the winner.
  */
 const getOrCreateBareShift = async (
     planId: string | Types.ObjectId,
@@ -2577,8 +2279,7 @@ const getOrCreateBareShift = async (
         return await Shift.create({
             cleaning_plan: plan._id,
             date: day,
-            // Placeholder until the caller (assignWorkersToShift) sets the
-            // manager-chosen schedule right below — never left this way.
+            // Placeholder — assignWorkersToShift sets the real schedule right after.
             date_time: day,
             end_time: day,
             location: snapshot.location,
@@ -2590,8 +2291,7 @@ const getOrCreateBareShift = async (
         });
     } catch (error) {
         if (isDuplicateKeyError(error)) {
-            // Lost the race to a concurrent creator — their document is
-            // authoritative, use it.
+            // Lost the race — use the winner's document.
             const winner = await Shift.findOne({ cleaning_plan: planId, date: day });
             if (winner) return winner;
         }
@@ -2600,31 +2300,14 @@ const getOrCreateBareShift = async (
 };
 
 /**
- * The single staffing action: schedules who works a due date and when, and
- * is also how a manager swaps the crew after the shift has started (a
- * no-show replaced, or a worker pulled mid-shift because they fell ill).
- *
- * The first call for a given (planId, date) creates that day's Shift (rooms/
- * tasks snapshotted from the plan's current state). Every call after that
- * is a MERGE against the existing crew, never a blind overwrite: a worker
- * who is already on the list keeps their check_in_at/check_out_at/
- * coordinates exactly as they were (only their role can change) — losing
- * that data would corrupt their attendance record and silently break their
- * pay. A worker dropped from the list is simply removed, check-in state and
- * all; a worker not yet on the list is added as a fresh, not-checked-in
- * entry. Scheduling conflicts are only re-checked for newly added workers —
- * someone already on the shift already passed that check once and re-
- * running it would just risk spuriously flagging someone currently at work.
- *
- * The requested start/end time is only applied while the shift hasn't
- * started yet (status 'upcoming'). Once it's 'in_progress'/'completed',
- * the schedule is left alone — changing it after the fact would retroactively
- * move the duration that already-checked-in workers' pay is based on.
- *
- * Ineligible workers are always rejected; a newly added worker already
- * double-booked on another staffed shift that day is rejected unless
- * `force`, in which case the conflicting entry is flagged
- * (assigned_with_conflict) rather than silently allowed.
+ * The staffing action: schedules a crew for a due date, and also how a
+ * manager swaps the crew mid-shift (no-show replaced, worker pulled sick).
+ * Every call after the first MERGES against the existing crew — a worker
+ * already on the list keeps their check-in/out state (only role changes);
+ * dropping and re-adding never corrupts attendance or pay. Only newly added
+ * workers get (re-)validated for eligibility/conflicts. The start/end time
+ * only applies while the shift is still 'upcoming' — once it's started, the
+ * schedule is locked so pay math can't shift under an already-working crew.
  */
 export const assignWorkersToShift = async (
     managerId: string,
@@ -2646,10 +2329,7 @@ export const assignWorkersToShift = async (
         shift.assigned_workers.map((aw) => [aw.worker.toString(), aw])
     );
 
-    // Only workers genuinely new to this shift need (re-)validating — an
-    // existing entry already passed eligibility/conflict checks when first
-    // assigned, and the shift's own schedule can't have moved under them
-    // once it's started (see shiftHasStarted above).
+    // Only genuinely new workers need (re-)validating.
     const newlyAddedWorkers = assignedWorkers.filter(
         (aw) => !existingByWorkerId.has(aw.worker.toString())
     );
@@ -2658,10 +2338,7 @@ export const assignWorkersToShift = async (
         await assertWorkersEligible(newlyAddedWorkers.map((aw) => aw.worker));
     }
 
-    // Conflict-check against the shift's REAL committed window once it has
-    // started — the caller's start/end params are ignored for scheduling
-    // in that case (see shiftHasStarted above), so checking against them
-    // here would validate a window this shift will never actually have.
+    // Once started, conflict-check against the real committed window, not the caller's params.
     const effectiveStartTime = shiftHasStarted ? shift.date_time : startTime;
     const effectiveEndTime = shiftHasStarted ? shift.end_time : endTime;
     const effectiveDurationMinutes = Math.round(
@@ -2700,10 +2377,7 @@ export const assignWorkersToShift = async (
         );
     }
 
-    // The client only sends { worker, role } — resolve the display-name
-    // snapshot server-side rather than trusting a client-supplied name.
-    // Only needed for genuinely new entries; existing ones keep their
-    // already-snapshotted name.
+    // Resolve the display-name snapshot server-side; existing entries keep theirs.
     const workerDocs = newlyAddedWorkers.length
         ? await Worker.find({
               _id: { $in: newlyAddedWorkers.map((aw) => aw.worker) },
@@ -2720,9 +2394,7 @@ export const assignWorkersToShift = async (
         const existing = existingByWorkerId.get(workerIdStr);
 
         if (existing) {
-            // Carry the existing entry forward untouched — attendance state
-            // is never rewritten by a roster edit. Only the role is
-            // editable here.
+            // Attendance state is never rewritten by a roster edit — only role is editable.
             return {
                 worker: existing.worker,
                 name: existing.name,
@@ -2753,10 +2425,7 @@ export const assignWorkersToShift = async (
             assigned_workers: nextAssignedWorkers,
             last_updated_by: managerId,
             ...(!shiftHasStarted && { date_time: startTime, end_time: endTime }),
-            // A previously-cancelled shift (e.g. by
-            // reconcileFutureShiftsForTaskChange) getting a crew again means
-            // it's back on — without this it would stay stuck on
-            // 'cancelled' forever despite having an active assignment.
+            // A cancelled shift getting a crew again means it's back on.
             ...(shift.status === 'cancelled' && { status: 'upcoming' }),
         },
         { new: true, runValidators: true }
@@ -2788,10 +2457,7 @@ export const assignWorkersToShift = async (
         });
     }
 
-    // Chat group membership for the plan accumulates every worker ever
-    // staffed onto any of its shifts — never auto-removed, since a crew
-    // rotating day to day shouldn't lose access to prior context. A manager
-    // can still remove someone from the group chat manually.
+    // Chat group membership accumulates — never auto-removed when a crew rotates.
     if (addedWorkerIds.length) {
         const currentGroupWorkerIds = await chatServices.getChatGroupWorkerIds(planId);
         const unionWorkerIds = [
@@ -2815,10 +2481,7 @@ const FULL_WEEKDAY_NAMES = [
 
 export interface EligibleWorkerRow {
     worker: Record<string, unknown>;
-    // Based on the worker's own declared working_days (see worker.model.ts)
-    // against this date's weekday: available only if this weekday is in
-    // their working_days. An empty working_days array (never configured, or
-    // explicitly cleared) means unavailable every day — no special-casing.
+    // True if this date's weekday is in the worker's own working_days.
     is_available: boolean;
     is_conflict: boolean;
     conflict_reason: ConflictReason | null;
@@ -2826,15 +2489,9 @@ export interface EligibleWorkerRow {
 }
 
 /**
- * Worker picker for staffing one due date: every active, eligible worker
- * (deleted/blocked/inactive accounts are omitted entirely, not flagged),
- * each annotated with whether they're generally available that weekday
- * (is_available, from their own working_days) and whether staffing them for
- * this exact start/end window would double-book them against another
- * already-staffed shift (is_conflict, reusing the same check
- * assignWorkersToShift itself runs). Purely a preview — nothing is written,
- * and neither flag blocks anything here; assignWorkersToShift is still what
- * actually enforces the conflict gate (unless force=true).
+ * Worker picker for staffing one due date: every active, eligible worker,
+ * annotated with weekday availability and whether this window would
+ * double-book them. Pure preview — nothing written, nothing blocked here.
  */
 export const listEligibleWorkersForShift = async (
     planId: string,
@@ -2859,9 +2516,7 @@ export const listEligibleWorkersForShift = async (
     const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / 60_000);
     const weekdayName = FULL_WEEKDAY_NAMES[day.getUTCDay()];
 
-    // Excludes today's own shift (if it already exists) from the conflict
-    // search — reassigning a currently-assigned worker to the same shift
-    // must never read back as a conflict against themselves.
+    // Excludes this shift itself — reassigning a worker to it is never a conflict.
     const existingShift = await Shift.findOne({ cleaning_plan: planId, date: day })
         .select('_id')
         .lean();
@@ -2909,20 +2564,10 @@ export const updateShiftStatus = async (
 };
 
 /**
- * Perceptual hashes of photos already accepted for this room, used to spot a
- * worker resubmitting an earlier photo. Scoped to the room and limited to the
- * last 60 days so the comparison stays cheap.
- */
-/**
- * Hashes to compare a new photo against, split by how strict the comparison
- * should be.
- *
- * A room cleaned to the same standard photographs almost identically every
- * day, so a near-match across days is the expected result, not evidence of
- * anything. Measured distances: an identical file scores 0, the same room
- * under different lighting scores 2, and a slightly moved camera scores 20+.
- * Only an exact match across days means a file was reused, whereas within one
- * shift a near-match means the same photo was submitted for two requirements.
+ * Perceptual hashes to check a new photo against, split by strictness: only
+ * an exact match across days means a reused file (same room photographed
+ * daily is naturally near-identical), but within one shift even a near-match
+ * means the same photo was submitted for two requirements.
  */
 const collectRoomPhotoHashes = async (
     roomId: Types.ObjectId | null | undefined,
@@ -2994,12 +2639,9 @@ const saveAiFields = async (
 };
 
 /**
- * Records a worker's photo submission for one task instance within one
- * shift, materializing the shift first if needed. `is_completed` on that
- * task entry is recomputed automatically from its photo requirements — for
- * a photo-required task there is no manual complete/approve step (see
- * docs/SHIFT_MANAGEMENT_DESIGN.md). Tasks with no photo requirement are
- * NOT completed by this function — see markShiftTaskComplete.
+ * Records a worker's photo submission for one task. is_completed recomputes
+ * automatically from photo requirements — no manual complete step for
+ * photo-required tasks. Non-photo tasks use markShiftTaskComplete instead.
  */
 export const uploadShiftTaskPhoto = async (
     workerId: string,
@@ -3048,8 +2690,7 @@ export const uploadShiftTaskPhoto = async (
 
     const gate = await PhotoAiService.checkPhotoByUrl(photoUrl, reuseCandidates);
 
-    // After max_attempts the photo is taken anyway and flagged, so a worker is
-    // never stranded on site. The rejected attempts stay on the record.
+    // After max_attempts, accept anyway (flagged) so a worker isn't stranded on site.
     const forced =
         gate.status === 'rejected' &&
         attempts >= photoAiConfig.gate.max_attempts;
@@ -3078,8 +2719,7 @@ export const uploadShiftTaskPhoto = async (
         );
     }
 
-    // Atomic, targeted write for the actual photo field — safe under
-    // concurrent uploads to different requirements/tasks on the same shift.
+    // Targeted write — safe under concurrent uploads to other requirements on this shift.
     await Shift.updateOne(
         { _id: shift._id },
         {
@@ -3103,8 +2743,7 @@ export const uploadShiftTaskPhoto = async (
         }
     );
 
-    // is_completed depends on the FULL set of that task's requirements, so
-    // it's recomputed from a fresh read rather than assumed from this write.
+    // Recomputed from a fresh read, not assumed from this single write.
     const refreshed = await Shift.findById(shift._id);
     if (!refreshed) throw new AppError(httpStatus.NOT_FOUND, 'Shift not found');
 
@@ -3126,8 +2765,7 @@ export const uploadShiftTaskPhoto = async (
 
     await maybeAutoCompleteShift(shift._id);
 
-    // Not awaited. The task is already complete and the response is on its way;
-    // this only adds flags for the manager's review queue.
+    // Not awaited — only adds flags for the manager's review queue.
     const roomId = shift.tasks[taskIndex].room?.toString();
     const room = shift.rooms.find((r) => r.room.toString() === roomId);
     void PhotoAiService.evaluatePhoto({
@@ -3197,13 +2835,7 @@ export const markShiftTaskComplete = async (
     return Shift.findById(shift._id);
 };
 
-/**
- * If every task on the shift is now is_completed, auto-advances the shift's
- * own status to 'completed' — atomically, and only from
- * 'upcoming'/'in_progress' (never re-triggers, and never revives a cancelled
- * shift). A shift with no tasks at all never auto-completes this way, since
- * there's nothing to judge completion by.
- */
+/** Auto-advances status to 'completed' once every task is done — never re-triggers or revives a cancelled shift. */
 const maybeAutoCompleteShift = async (shiftId: Types.ObjectId) => {
     const shift = await Shift.findById(shiftId)
         .select('tasks status cleaning_plan')
@@ -3217,9 +2849,7 @@ const maybeAutoCompleteShift = async (shiftId: Types.ObjectId) => {
         { $set: { status: 'completed' } }
     );
 
-    // Only the caller that actually flips the status fires the event — a
-    // shift already 'completed' (e.g. this ran again after another task
-    // update) must not re-notify everyone.
+    // Only the call that actually flips the status fires the event.
     if (updateResult.modifiedCount > 0) {
         const plan = await CleaningPlan.findById(shift.cleaning_plan)
             .select('client')
@@ -3236,13 +2866,7 @@ const maybeAutoCompleteShift = async (shiftId: Types.ObjectId) => {
 
 const GEOFENCE_RADIUS_METERS = 50;
 
-/**
- * Shared lookup + eligibility check for check-in/check-out. A worker is only
- * ever assigned once a manager has staffed that date's shift (see
- * assignWorkersToShift), so the shift is guaranteed to already exist by the
- * time a genuinely-assigned worker calls this — a plain lookup, not an
- * auto-materializing one.
- */
+// Shared lookup + eligibility check for check-in/check-out.
 const findAssignedShiftOrThrow = async (
     workerId: string,
     planId: string,
@@ -3261,12 +2885,7 @@ const findAssignedShiftOrThrow = async (
     return { shift, workerIndex };
 };
 
-/**
- * Validates the worker's submitted GPS position against the shift's frozen
- * location snapshot. No time-window restriction — valid any time on the
- * shift's date, only distance is enforced. A location with no configured
- * coordinates always fails closed (geofencing can't be skipped silently).
- */
+// Validates GPS against the shift's location snapshot; fails closed if no coordinates are configured.
 const assertWithinGeofence = (
     shift: { location: { coordinates: { coordinates: [number, number] } | null } },
     coordinates: [number, number]
@@ -3302,11 +2921,7 @@ export const checkInToShift = async (
         throw new AppError(httpStatus.BAD_REQUEST, 'Already checked in for this shift');
     }
 
-    // $elemMatch ties both conditions to the SAME array entry (a plain
-    // dot-path pair on an array can match across different elements) and
-    // makes the "not already checked in" check part of the atomic write
-    // itself — not just the read above — so two concurrent check-ins from
-    // the same worker can never both succeed.
+    // $elemMatch makes "not already checked in" part of the atomic write, not just the read above.
     const checkedInAt = new Date();
     const result = await Shift.findOneAndUpdate(
         {
@@ -3332,11 +2947,7 @@ export const checkInToShift = async (
         at: checkedInAt,
     });
 
-    // The first check-in on the shift moves it out of "upcoming". Gated on
-    // the shift's CURRENT status (not just "any check-in happened") so a
-    // later worker checking in doesn't reopen an already completed/cancelled
-    // shift, and gated atomically (status: 'upcoming' in the filter) so two
-    // workers' first check-ins racing each other can't double-transition it.
+    // First check-in moves the shift out of 'upcoming'; the status filter keeps this race-safe and one-way.
     if (result.status === 'upcoming') {
         const updated = await Shift.findOneAndUpdate(
             { _id: shift._id, status: 'upcoming' },
@@ -3350,25 +2961,108 @@ export const checkInToShift = async (
 
 const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
 
+/** Each worker is paid the lesser of their actual clocked time and their even split of the shift's scheduled hours. */
+const settlePayForWorkers = async (
+    shift: { _id: Types.ObjectId; duration_minutes: number },
+    workersWhoWorked: IShiftAssignedWorker[],
+    session: mongoose.ClientSession
+) => {
+    const scheduledShareHours = shift.duration_minutes / workersWhoWorked.length / 60;
+
+    const workerIds = workersWhoWorked.map((aw) => aw.worker);
+    const workerDocs = await Worker.find({ _id: { $in: workerIds } })
+        .select('hourly_rate')
+        .session(session);
+    const rateById = new Map(
+        workerDocs.map((w) => [w._id.toString(), w.hourly_rate])
+    );
+
+    const bulkOps = workersWhoWorked.flatMap((aw) => {
+        const workerIdStr = aw.worker.toString();
+        const hourlyRate = rateById.get(workerIdStr);
+        if (hourlyRate === undefined) {
+            // Worker record vanished mid-shift — skip paying a nonexistent account.
+            errorLogger.warn(
+                `settlePayForWorkers: worker ${workerIdStr} missing at settlement for shift ${shift._id.toString()}, skipped`
+            );
+            return [];
+        }
+        const actualHours = Math.max(
+            0,
+            ((aw.check_out_at as Date).getTime() - (aw.check_in_at as Date).getTime()) /
+                3_600_000
+        );
+        const payHours = Math.min(actualHours, scheduledShareHours);
+        const earnedAmount = roundToTwoDecimals(payHours * hourlyRate);
+        return [
+            {
+                updateOne: {
+                    filter: { _id: aw.worker },
+                    update: {
+                        $inc: {
+                            total_earning: earnedAmount,
+                            pending_amount: earnedAmount,
+                        },
+                    },
+                },
+            },
+        ];
+    });
+
+    if (bulkOps.length) {
+        await Worker.bulkWrite(bulkOps, { session });
+    }
+};
+
 /**
- * A worker leaving the shift. Anyone but the last one out can check out any
- * time once they've checked in — tasks don't have to be finished, since a
- * worker may have completed their own part, or been swapped out, while
- * others are still working. Only the LAST worker still on-site is gated on
- * the shift actually being done (every task's required photos uploaded —
- * see maybeAutoCompleteShift): the whole crew can't be marked "left" while
- * work remains unfinished and unattended.
- *
- * Pay is NOT credited per individual checkout. It's settled once, for
- * everyone, the moment the last person checks out — at that point the
- * final crew size is known, so shift.duration_minutes is split evenly
- * across every worker who actually checked in (a worker never removed from
- * the roster but who never showed up doesn't dilute anyone's share; a
- * worker removed from the roster via assignWorkersToShift after checking in
- * forfeits their share by design — see assignWorkersToShift). Settling
- * earlier, per checkout, was the old model, but it can't survive a crew
- * whose size changes mid-shift: whoever checked out first would lock in a
- * share based on a headcount that later turned out to be wrong.
+ * Marks one worker checked out, and settles pay for the crew if that was
+ * the last checkout pending. Shared by checkOutFromShift and the
+ * auto-checkout cron — safe either way, since each worker's check_out_at
+ * only ever transitions null -> set once.
+ */
+export const closeOutWorkerAndMaybeSettle = async (
+    shiftId: Types.ObjectId,
+    workerId: Types.ObjectId | string,
+    checkOutAt: Date,
+    coordinates: [number, number] | null,
+    session: mongoose.ClientSession
+) => {
+    const result = await Shift.findOneAndUpdate(
+        {
+            _id: shiftId,
+            assigned_workers: {
+                $elemMatch: {
+                    worker: workerId,
+                    check_in_at: { $ne: null },
+                    check_out_at: null,
+                },
+            },
+        },
+        {
+            $set: {
+                'assigned_workers.$.check_out_at': checkOutAt,
+                'assigned_workers.$.check_out_coordinates': coordinates,
+            },
+        },
+        { new: true, session }
+    );
+    if (!result) return null;
+
+    // No-shows don't count toward crew size or block settlement.
+    const workersWhoWorked = result.assigned_workers.filter((aw) => aw.check_in_at);
+    const everyoneSettled = workersWhoWorked.every((aw) => aw.check_out_at);
+
+    if (everyoneSettled && workersWhoWorked.length) {
+        await settlePayForWorkers(result, workersWhoWorked, session);
+    }
+
+    return result;
+};
+
+/**
+ * A worker leaving the shift. Anyone but the last one out can leave any
+ * time; the last one is gated on every task actually being done, so the
+ * crew can't walk off mid-work. Pay settles once, when the last checkout lands.
  */
 export const checkOutFromShift = async (
     workerId: string,
@@ -3405,78 +3099,15 @@ export const checkOutFromShift = async (
     session.startTransaction();
 
     try {
-        const result = await Shift.findOneAndUpdate(
-            {
-                _id: shift._id,
-                assigned_workers: {
-                    $elemMatch: {
-                        worker: workerId,
-                        check_in_at: { $ne: null },
-                        check_out_at: null,
-                    },
-                },
-            },
-            {
-                $set: {
-                    'assigned_workers.$.check_out_at': checkOutAt,
-                    'assigned_workers.$.check_out_coordinates': coordinates,
-                },
-            },
-            { new: true, session }
+        const result = await closeOutWorkerAndMaybeSettle(
+            shift._id,
+            workerId,
+            checkOutAt,
+            coordinates,
+            session
         );
         if (!result) {
             throw new AppError(httpStatus.BAD_REQUEST, 'Already checked out for this shift');
-        }
-
-        // Workers who never checked in (never showed, and were never
-        // removed from the roster) don't count toward the crew size and
-        // don't block settlement — only people who actually worked do.
-        const workersWhoWorked = result.assigned_workers.filter((aw) => aw.check_in_at);
-        const everyoneSettled = workersWhoWorked.every((aw) => aw.check_out_at);
-
-        if (everyoneSettled && workersWhoWorked.length) {
-            const shareHours = result.duration_minutes / workersWhoWorked.length / 60;
-
-            const workerIds = workersWhoWorked.map((aw) => aw.worker);
-            const workerDocs = await Worker.find({ _id: { $in: workerIds } })
-                .select('hourly_rate')
-                .session(session);
-            const rateById = new Map(
-                workerDocs.map((w) => [w._id.toString(), w.hourly_rate])
-            );
-
-            const bulkOps = workersWhoWorked.flatMap((aw) => {
-                const workerIdStr = aw.worker.toString();
-                const hourlyRate = rateById.get(workerIdStr);
-                if (hourlyRate === undefined) {
-                    // Worker record vanished between check-in and
-                    // settlement (deleted mid-shift) — skip paying a
-                    // nonexistent account rather than fail the whole
-                    // crew's settlement over it.
-                    errorLogger.warn(
-                        `checkOutFromShift: worker ${workerIdStr} missing at settlement for shift ${result._id.toString()}, skipped`
-                    );
-                    return [];
-                }
-                const earnedAmount = roundToTwoDecimals(shareHours * hourlyRate);
-                return [
-                    {
-                        updateOne: {
-                            filter: { _id: aw.worker },
-                            update: {
-                                $inc: {
-                                    total_earning: earnedAmount,
-                                    pending_amount: earnedAmount,
-                                },
-                            },
-                        },
-                    },
-                ];
-            });
-
-            if (bulkOps.length) {
-                await Worker.bulkWrite(bulkOps, { session });
-            }
         }
 
         await session.commitTransaction();
@@ -3497,25 +3128,8 @@ export const checkOutFromShift = async (
     }
 };
 
-/**
- * Records a manager's decision on one uploaded photo.
- *
- * Deliberately does NOT reopen the task or change is_completed: the work is
- * already finished and the worker has left. The verdict is a quality record,
- * used for reporting and to decide what to bill, and it is what the AI's
- * thresholds are tuned against.
- */
-/**
- * Makes an approved photo the reference for that requirement from now on.
- *
- * Showing the model a real approved photo is stronger than any written
- * description, and it is the only way a directional requirement like "left
- * photo" becomes checkable at all. Each client's own standard builds up this
- * way without anyone configuring it.
- *
- * Writes to the source Task so it carries into future shifts. The current
- * shift is left alone: its snapshot should stay as it was on the day.
- */
+/** Records a manager's decision on one photo — a quality record, doesn't reopen the task or touch is_completed. */
+/** Makes an approved photo the reference for future shifts — writes to the source Task, not this shift's snapshot. */
 const promoteApprovedPhotoToReference = async (
     taskId: string,
     title: string,
@@ -3570,8 +3184,7 @@ export const setPhotoVerdict = async (
                     new Types.ObjectId(managerId),
                 'tasks.$[t].photo_requirements.$[p].manager_verdict_at': new Date(),
                 'tasks.$[t].photo_requirements.$[p].manager_note': note ?? null,
-                // A decided photo leaves the queue, so it must not also be
-                // picked up later by the auto-accept sweep.
+                // Leaves the queue — must not be picked up by the auto-accept sweep later.
                 'tasks.$[t].photo_requirements.$[p].auto_accepted': false,
             },
         },
@@ -3655,18 +3268,11 @@ export interface PhotoReviewRow {
     uploaded_photos: PhotoReviewPhoto[];
 }
 
-/**
- * Queue position for one photo. The order is deliberate: a worker who could
- * not produce a usable photo after three tries, or a photo of the wrong place,
- * is more likely to be a real problem than a borderline score.
- */
+/** Queue position for one photo — forced-accepts and wrong-subject photos rank above borderline scores. */
 const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
     if (photo.manager_verdict) return 90;
     if (photo.auto_decided) return 85;
-    // A clean verdict settles it, however many attempts it took to get a
-    // usable photo. Retries usually mean poor light or a shaky hand, not poor
-    // work, and a manager should not be asked to re-check a photo the model
-    // scored highly.
+    // A clean AI pass settles it regardless of how many retries it took.
     if (photo.ai_status === 'passed') return 80;
     if (photo.forced_accept) return 1;
     if (photo.ai_subject_matches === false) return 2;
@@ -3678,12 +3284,7 @@ const photoReviewPriority = (photo: PhotoReviewPhoto): number => {
     return 8;
 };
 
-/**
- * Whether a photo still wants a human eye.
- *
- * A manager decision settles it, and so does a clean AI verdict — except when
- * the audit sampler pulled it, which is the whole point of that sample.
- */
+/** Whether a photo still needs a human eye — a clean AI verdict settles it unless the audit sampler pulled it. */
 const photoNeedsReview = (photo: PhotoReviewPhoto): boolean => {
     if (photo.manager_verdict) return false;
     if (photo.auto_decided) return photo.audit_sampled;
@@ -3810,8 +3411,7 @@ export const getPhotoReviewListFromDB = async (
         }
     }
 
-    // Most urgent first, then newest. A flat list sorted only by date buries
-    // the rows that actually need attention.
+    // Most urgent first, then newest.
     rows.sort(
         (a, b) =>
             a.review_priority - b.review_priority ||

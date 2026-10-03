@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 import { Request } from 'express';
 
 import AppError from '../../error/appError';
@@ -14,7 +12,7 @@ import {
 } from './manage.model';
 
 //! Privacy and policy
-const addPrivacyPolicy = async (payload: any) => {
+const addPrivacyPolicy = async (payload: Record<string, unknown>) => {
     const checkIsExist = await PrivacyPolicy.findOne();
     if (checkIsExist) {
         await PrivacyPolicy.findOneAndUpdate({}, payload, {
@@ -51,7 +49,7 @@ const deletePrivacyPolicy = async (id: string) => {
     return await PrivacyPolicy.findByIdAndDelete(id);
 };
 //! Partner
-const addPartner = async (payload: any) => {
+const addPartner = async (payload: Record<string, unknown>) => {
     const checkIsExist = await Partner.findOne();
     if (checkIsExist) {
         await Partner.findOneAndUpdate({}, payload, {
@@ -85,7 +83,7 @@ const deletePartner = async (id: string) => {
     return await Partner.findByIdAndDelete(id);
 };
 //! About us
-const addAboutUs = async (payload: any) => {
+const addAboutUs = async (payload: Record<string, unknown>) => {
     const checkIsExist = await AboutUs.findOne();
     if (checkIsExist) {
         await AboutUs.findOneAndUpdate({}, payload, {
@@ -119,7 +117,7 @@ const deleteAboutUs = async (id: string) => {
     return await AboutUs.findByIdAndDelete(id);
 };
 //! Terms Conditions
-const addTermsConditions = async (payload: any) => {
+const addTermsConditions = async (payload: Record<string, unknown>) => {
     const checkIsExist = await TermsConditions.findOne();
     if (checkIsExist) {
         await TermsConditions.findOneAndUpdate({}, payload, {
@@ -161,7 +159,7 @@ const deleteTermsConditions = async (id: string) => {
 };
 
 //! Contact Us
-const addContactUs = async (payload: any) => {
+const addContactUs = async (payload: Record<string, unknown>) => {
     return await ContactUs.create(payload);
 };
 const getContactUs = async () => {
@@ -186,7 +184,7 @@ const deleteContactUs = async (id: string) => {
     return await ContactUs.findByIdAndDelete(id);
 };
 //! FAQ
-const addFAQ = async (payload: any) => {
+const addFAQ = async (payload: Record<string, unknown>) => {
     return await FAQ.create(payload);
 };
 const getFAQ = async () => {
@@ -218,9 +216,7 @@ const addSlider = async (req: Request) => {
     const { files, body } = req;
 
     let image = undefined;
-    //@ts-ignore
-    if (files && files.image) {
-        //@ts-ignore
+    if (files?.image) {
         image = `/images/image/${files.image[0].filename}`;
     }
 
@@ -237,9 +233,7 @@ const editSlider = async (req: Request) => {
     const { files, body } = req;
     const { id } = req.params;
     let image = undefined;
-    //@ts-ignore
-    if (files && files.image) {
-        //@ts-ignore
+    if (files?.image) {
         image = `/images/image/${files.image[0].filename}`;
     }
 
@@ -248,7 +242,6 @@ const editSlider = async (req: Request) => {
         throw new AppError(404, 'Slider program not found');
     }
     const { ...updateData } = body;
-    // console.log(updateData);
     const result = await Slider.findOneAndUpdate(
         { _id: id },
         {

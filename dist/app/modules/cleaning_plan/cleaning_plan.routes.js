@@ -1,0 +1,20 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.cleaningPlanRoutes = void 0;
+const express_1 = require("express");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const user_constant_1 = require("../user/user.constant");
+const cleaning_plan_controller_1 = __importDefault(require("./cleaning_plan.controller"));
+const cleaning_plan_validation_1 = __importDefault(require("./cleaning_plan.validation"));
+const router = (0, express_1.Router)();
+router.get('/get-my-cleaning-plans', (0, auth_1.default)(user_constant_1.USER_ROLE.client), cleaning_plan_controller_1.default.getMyCleaningPlans);
+router.post('/create-cleaning-plan', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), (0, validateRequest_1.default)(cleaning_plan_validation_1.default.createCleaningPlanValidationSchema), cleaning_plan_controller_1.default.createCleaningPlan);
+router.patch('/update-cleaning-plan/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), (0, validateRequest_1.default)(cleaning_plan_validation_1.default.updateCleaningPlanValidationSchema), cleaning_plan_controller_1.default.updateCleaningPlan);
+router.delete('/delete-cleaning-plan/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), cleaning_plan_controller_1.default.deleteCleaningPlan);
+router.get('/all-cleaning-plans', (0, auth_1.default)(user_constant_1.USER_ROLE.manager), cleaning_plan_controller_1.default.getAllCleaningPlans);
+router.get('/single-cleaning-plan/:id', (0, auth_1.default)(user_constant_1.USER_ROLE.manager, user_constant_1.USER_ROLE.client), cleaning_plan_controller_1.default.getSingleCleaningPlan);
+exports.cleaningPlanRoutes = router;

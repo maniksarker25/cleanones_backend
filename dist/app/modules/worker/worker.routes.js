@@ -1,0 +1,21 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.workerRoutes = void 0;
+const express_1 = require("express");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const user_constant_1 = require("../user/user.constant");
+const worker_controller_1 = __importDefault(require("./worker.controller"));
+const worker_validation_1 = __importDefault(require("./worker.validation"));
+const router = (0, express_1.Router)();
+router.patch('/my-availability', (0, auth_1.default)(user_constant_1.USER_ROLE.worker), (0, validateRequest_1.default)(worker_validation_1.default.availabilityValidationSchema), worker_controller_1.default.updateMyAvailability);
+router.use((0, auth_1.default)(user_constant_1.USER_ROLE.manager));
+router.post('/create-worker', (0, validateRequest_1.default)(worker_validation_1.default.createWorkerValidationSchema), worker_controller_1.default.createWorker);
+router.patch('/update-worker/:id', (0, validateRequest_1.default)(worker_validation_1.default.updateWorkerValidationSchema), worker_controller_1.default.updateWorker);
+router.delete('/delete-worker/:id', worker_controller_1.default.deleteWorker);
+router.get('/all-workers', worker_controller_1.default.getAllWorkers);
+router.get('/single-worker/:id', worker_controller_1.default.getSingleWorker);
+exports.workerRoutes = router;

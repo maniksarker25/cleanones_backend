@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable no-unused-vars */
 import bcrypt from 'bcrypt';
 import httpStatus from 'http-status';
 import { JwtPayload } from 'jsonwebtoken';
@@ -97,11 +95,9 @@ const loginUserIntoDB = async (payload: TLoginUser) => {
         config.jwt_refresh_expires_in as string
     );
 
-    const obj: any = {};
     return {
         accessToken,
         refreshToken,
-        ...obj,
         role: user?.role,
     };
 };

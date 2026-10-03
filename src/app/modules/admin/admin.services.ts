@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import QueryBuilder from '../../builder/QueryBuilder';
 
@@ -176,7 +175,7 @@ const updateAdminStatus = async (id: string) => {
 
 // get all Admin
 
-const getAllAdminFromDB = async (query: Record<string, any>) => {
+const getAllAdminFromDB = async (query: Record<string, unknown>) => {
     const AdminQuery = new QueryBuilder(Admin.find(), query)
         .search(['storeName'])
         .fields()

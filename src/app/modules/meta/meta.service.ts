@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Client } from '../client/client.model';
 import { Worker } from '../worker/worker.model';
 
@@ -85,7 +84,7 @@ const getCustomerChartData = async (year: number) => {
         },
     ]);
 
-    const yearsDropdown = yearsResult.map((item: any) => item.year);
+    const yearsDropdown = yearsResult.map((item) => item.year);
 
     return {
         chartData: data,
@@ -162,7 +161,7 @@ const getProviderChartData = async (year: number) => {
         },
     ]);
 
-    const yearsDropdown = yearsResult.map((item: any) => item.year);
+    const yearsDropdown = yearsResult.map((item) => item.year);
 
     return {
         chartData: data,
@@ -170,7 +169,8 @@ const getProviderChartData = async (year: number) => {
     };
 };
 
-const getEarningChartData = async (year: number) => {
+// TODO: unimplemented — always returns empty/zeroed data regardless of year.
+const getEarningChartData = async (_year: number) => {
     return {
         chartData: [],
         totalEarning: 0,
@@ -239,10 +239,10 @@ const getActivities = async (query: Record<string, unknown>) => {
         };
 
         // Build filters
-        const currentFilter: any = currentStart
+        const currentFilter: Record<string, unknown> = currentStart
             ? { createdAt: { $gte: currentStart } }
             : {};
-        const previousFilter: any =
+        const previousFilter: Record<string, unknown> =
             previousStart && previousEnd
                 ? { createdAt: { $gte: previousStart, $lt: previousEnd } }
                 : {};

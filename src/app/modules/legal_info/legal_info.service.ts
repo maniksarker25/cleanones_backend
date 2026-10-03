@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ILegalInfo } from './legal_info.interface';
 import { LegalInfo } from './legal_info.model';
 

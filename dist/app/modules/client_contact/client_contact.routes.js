@@ -1,0 +1,20 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.clientContactRoutes = void 0;
+const express_1 = require("express");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const user_constant_1 = require("../user/user.constant");
+const client_contact_controller_1 = __importDefault(require("./client_contact.controller"));
+const client_contact_validation_1 = __importDefault(require("./client_contact.validation"));
+const router = (0, express_1.Router)();
+router.use((0, auth_1.default)(user_constant_1.USER_ROLE.manager));
+router.post('/create-client-contact', (0, validateRequest_1.default)(client_contact_validation_1.default.createClientContactValidationSchema), client_contact_controller_1.default.createClientContact);
+router.patch('/update-client-contact/:id', (0, validateRequest_1.default)(client_contact_validation_1.default.updateClientContactValidationSchema), client_contact_controller_1.default.updateClientContact);
+router.delete('/delete-client-contact/:id', client_contact_controller_1.default.deleteClientContact);
+router.get('/all-client-contacts', client_contact_controller_1.default.getAllClientContacts);
+router.get('/single-client-contact/:id', client_contact_controller_1.default.getSingleClientContact);
+exports.clientContactRoutes = router;

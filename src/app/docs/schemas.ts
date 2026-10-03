@@ -898,6 +898,14 @@ const schemas = {
                     $ref: '#/components/schemas/ObjectId',
                 },
             },
+            tasks: {
+                type: 'array',
+                items: {
+                    $ref: '#/components/schemas/ObjectId',
+                },
+                description:
+                    "The plan's own selected Task ids — each task's room must be one of `rooms`. Only these tasks are pulled into shifts built from this plan (not every active task under `rooms`), so two plans can cover the same room with different task subsets. Omit/empty to start with no tasks selected.",
+            },
             note: {
                 type: 'string',
                 nullable: true,
@@ -914,7 +922,7 @@ const schemas = {
             'location',
         ],
         description:
-            "A Cleaning Plan is a pure blueprint — client, location, rooms and (via the rooms' Tasks) the recurring checklist. It carries no schedule and no crew of its own: WHO works it and WHEN is decided per due date at the Shift level (see PATCH /shift/{planId}/{date}/assign-workers). manager is taken from the authenticated profile. Client must not be deleted and location must be active. max_estimated_duration is server-computed from the rooms' active tasks and cannot be set directly.",
+            "A Cleaning Plan is a pure blueprint — client, location, rooms and its own explicitly-selected tasks (a subset of the rooms' Tasks) forming the recurring checklist. It carries no schedule and no crew of its own: WHO works it and WHEN is decided per due date at the Shift level (see PATCH /shift/{planId}/{date}/assign-workers). manager is taken from the authenticated profile. Client must not be deleted and location must be active. Every task id in `tasks` must belong to a room in `rooms`. max_estimated_duration is server-computed from the plan's own selected tasks and cannot be set directly.",
     },
     CleaningPlanUpdate: {
         type: 'object',
@@ -935,6 +943,14 @@ const schemas = {
                     $ref: '#/components/schemas/ObjectId',
                 },
             },
+            tasks: {
+                type: 'array',
+                items: {
+                    $ref: '#/components/schemas/ObjectId',
+                },
+                description:
+                    "Replaces the plan's selected tasks. Each task's room must be one of the plan's (possibly also-updated) `rooms`. If `rooms` changes without `tasks` being provided in the same request, any previously-selected task whose room was removed is dropped automatically.",
+            },
             note: {
                 type: 'string',
                 nullable: true,
@@ -945,7 +961,7 @@ const schemas = {
             },
         },
         description:
-            'Partial update. Parent client/location cannot be changed through the documented update contract. max_estimated_duration is server-computed from the rooms\' active tasks whenever rooms changes. There is no schedule or crew to update here — see PATCH /shift/{planId}/{date}/assign-workers.',
+            "Partial update. Parent client/location cannot be changed through the documented update contract. max_estimated_duration is server-computed from the plan's own selected tasks whenever rooms or tasks changes. There is no schedule or crew to update here — see PATCH /shift/{planId}/{date}/assign-workers.",
     },
     AdditionalTaskCreate: {
         type: 'object',
@@ -1821,19 +1837,27 @@ const schemas = {
                                     type: 'array',
                                     items: { $ref: '#/components/schemas/Task' },
                                     description:
-                                        "This room's active Task documents, full detail. Only present on the single-plan read.",
+                                        "This room's active Task documents that are ALSO selected on the plan (plan.tasks) — not every active task the room has. Only present on the single-plan read.",
                                 },
                             },
                         },
                     ],
                 },
                 description:
-                    'ObjectIds on writes. The single-plan read populates full room documents (each with its active tasks[] populated); the list read omits this field entirely.',
+                    'ObjectIds on writes. The single-plan read populates full room documents (each with its plan-selected active tasks[] populated); the list read omits this field entirely.',
+            },
+            tasks: {
+                type: 'array',
+                items: {
+                    $ref: '#/components/schemas/ObjectId',
+                },
+                description:
+                    "The plan's own selected Task ids — only these are pulled into shifts built from this plan (see buildShiftSnapshot), not every active task under `rooms`. Each task's room is one of `rooms`.",
             },
             max_estimated_duration: {
                 type: 'number',
                 description:
-                    'Server-computed conservative upper bound (minutes) from the sum of duration_minutes across the plan rooms\' active tasks.',
+                    "Server-computed conservative upper bound (minutes) from the sum of duration_minutes across the plan's own selected tasks.",
             },
             note: {
                 type: 'string',
@@ -1886,7 +1910,7 @@ const schemas = {
             },
         },
         description:
-            "A pure blueprint — client, location, rooms and (via the rooms' Tasks) the recurring checklist. Carries no schedule and no crew of its own; see the Shift schema and PATCH /shift/{planId}/{date}/assign-workers for who works it and when.",
+            "A pure blueprint — client, location, rooms and its own explicitly-selected tasks (a subset of the rooms' Tasks) forming the recurring checklist. Carries no schedule and no crew of its own; see the Shift schema and PATCH /shift/{planId}/{date}/assign-workers for who works it and when.",
     },
     AdditionalTask: {
         type: 'object',

@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable no-unused-vars */
 
 import bcrypt from 'bcrypt';
 import httpStatus from 'http-status';
@@ -19,7 +16,7 @@ import { upsertDevice } from '../device/device.service';
 import SuperAdmin from '../superAdmin/superAdmin.model';
 import { USER_ROLE } from './user.constant';
 import { UpdateUserProfileDTO } from './user.dto';
-import { TUserRole } from './user.interface';
+import { TUser, TUserRole } from './user.interface';
 import { User } from './user.model';
 import { createToken } from './user.utils';
 import { updateUserProfileValidationSchema } from './user.validation';
@@ -30,12 +27,16 @@ const generateVerifyCode = (): number => {
 };
 
 export const registerUser = async (
-    payload: any & {
+    payload: Record<string, unknown> & {
         password: string;
         confirmPassword: string;
         role: 'worker' | 'client' | 'manager';
         playerId?: string;
         platform?: 'ios' | 'android' | 'web';
+        email?: string;
+        phone?: string;
+        name?: string;
+        userData?: { firstName?: string; lastName?: string };
     }
 ) => {
     const {
@@ -73,8 +74,8 @@ export const registerUser = async (
 
     const session = await mongoose.startSession();
 
-    let user: any;
-    let profile: any;
+    let user: mongoose.HydratedDocument<TUser> | null = null;
+    let profile: { _id: mongoose.Types.ObjectId } | null = null;
     let verifyCode: number;
 
     try {
@@ -159,26 +160,26 @@ export const registerUser = async (
                 );
             }
 
-            user.profileId = profile._id;
+            user!.profileId = profile!._id;
 
-            await user.save({ session });
+            await user!.save({ session });
         });
 
         if (playerId) {
-            await upsertDevice(user.profileId.toString(), playerId, platform);
+            await upsertDevice(user!.profileId.toString(), playerId, platform);
         }
 
         await sendEmail({
-            email: profileData.email,
+            email: profileData.email as string,
             subject: 'Activate Your Account',
             html: registrationSuccessEmail(profileData.name || 'User', verifyCode!),
         });
 
         return profile;
-    } catch (error: any) {
+    } catch (error) {
         throw new AppError(
             httpStatus.NOT_FOUND,
-            error?.message || 'Service unavailable'
+            error instanceof Error ? error.message : 'Service unavailable'
         );
     } finally {
         session.endSession();
@@ -229,16 +230,9 @@ const verifyCode = async (rawEmail: string, verifyCode: number) => {
         config.jwt_refresh_expires_in as string
     );
 
-    const obj: any = {};
-    if (user.role == USER_ROLE.worker) {
-        const worker = await Worker.findById(user.profileId);
-        // Add any worker specific checks here
-    }
-
     return {
         accessToken,
         refreshToken,
-        ...obj,
         role: user?.role,
     };
 };
@@ -385,8 +379,8 @@ const updateUserProfile = async (
             payload,
             { new: true, runValidators: true }
         );
-        if (payload.profile_image && (admin as any).profile_image) {
-            deleteFileFromS3((admin as any).profile_image);
+        if (payload.profile_image && admin.profile_image) {
+            deleteFileFromS3(admin.profile_image);
         }
 
         return result;
@@ -421,8 +415,8 @@ const changeUserStatus = async (id: string) => {
     return result;
 };
 
-// upgrade account - simplified without customer/provider logic
-const upgradeAccount = async (userData: JwtPayload) => {
+// TODO: unimplemented.
+const upgradeAccount = async (_userData: JwtPayload) => {
     throw new AppError(
         httpStatus.BAD_REQUEST,
         'Upgrading account is not supported yet'

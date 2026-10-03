@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Types } from 'mongoose';
 import {
     ENUM_NOTIFICATION_TYPE,
@@ -19,7 +18,7 @@ export interface INotification {
         action: (typeof NOTIFICATION_ACTION)[keyof typeof NOTIFICATION_ACTION]; // VIEW | LIST
         entityId?: Types.ObjectId;
 
-        meta?: Record<string, any>;
+        meta?: Record<string, unknown>;
     };
 
     isRead: boolean;

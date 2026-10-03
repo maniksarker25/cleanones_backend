@@ -1,13 +1,13 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable no-console */
+import { Socket } from 'socket.io';
+
 export type SocketError = {
     code: number;
     message: string;
     type: 'validation' | 'database' | 'auth' | 'general' | 'server';
-    details?: any;
+    details?: unknown;
 };
-//emit error-------------
-export const emitError = (socket: any, error: SocketError) => {
+
+export const emitError = (socket: Socket, error: SocketError) => {
     console.error(`Socket Error [${error.type}]:`, error);
     socket.emit('socket-error', error);
 };

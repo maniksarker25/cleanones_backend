@@ -7,7 +7,7 @@ export interface TWorker {
     phone?: string;
     user: Types.ObjectId;
     isagree_condition?: boolean;
-    dob?: any;
+    dob?: Date | string;
     nationality?: string;
     worker_type: WorkerType;
     profile_image?: string;

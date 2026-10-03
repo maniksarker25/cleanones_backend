@@ -7,9 +7,12 @@ export type CleaningPlanStatus =
 
 
 // A blueprint only: WHAT needs cleaning and WHERE, on what recurring
-// checklist (via its rooms' Tasks) — no schedule and no crew of its own.
-// WHO does it and WHEN is decided per due date, at the Shift level (see
-// assignWorkersToShift in shift.services.ts).
+// checklist (its own explicitly-selected `tasks`, a subset of the active
+// Tasks under `rooms`) — no schedule and no crew of its own. Different plans
+// may cover different tasks within the SAME room (e.g. one plan for
+// vacuum+dust, another for bathroom+trash in that same room), each staffed
+// and scheduled independently. WHO does it and WHEN is decided per due date,
+// at the Shift level (see assignWorkersToShift in shift.services.ts).
 export interface ICleaningPlan {
     title: string;
     description:string;
@@ -18,6 +21,10 @@ export interface ICleaningPlan {
     client: Types.ObjectId;
     location: Types.ObjectId;
     rooms: Types.ObjectId[];
+    // Selected Task ids (each Task's own `room` must be one of `rooms`) —
+    // only these tasks are pulled into shifts built from this plan, not
+    // every active task under `rooms`. See buildShiftSnapshot.
+    tasks: Types.ObjectId[];
     max_estimated_duration: number;
     note?: string | null;
     status: CleaningPlanStatus;

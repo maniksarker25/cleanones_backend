@@ -3,13 +3,7 @@ import { timeWindowsOverlap } from '../cleaning_plan/availability.util';
 import { ConflictReason, IWorkerConflict } from './shift.interface';
 import { Shift } from './shift.model';
 
-/**
- * Single-date conflict check for staffing one shift occurrence: does this
- * worker already have another staffed (materialized) shift on the same date
- * whose time window overlaps? A CleaningPlan carries no schedule of its own
- * (see cleaning_plan.interface.ts), so nothing has a time to conflict with
- * until it's actually staffed — only real Shift documents are ever checked.
- */
+/** Does this worker already have another staffed shift the same date with an overlapping time window? */
 export const findWorkerConflictOnDate = async (
     workerId: Types.ObjectId | string,
     date: Date,

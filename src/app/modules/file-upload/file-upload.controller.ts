@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import httpStatus from 'http-status';
 import AppError from '../../error/appError';
 import { deleteFileFromS3 } from '../../helper/deleteFromS3';
@@ -13,20 +12,14 @@ const uploadConversationFiles = catchAsync(async (req, res) => {
     let videos: string[] = [];
     let pdfs: string[] = [];
     if (req.files?.conversation_image) {
-        images = req.files.conversation_image.map((file: any) => {
-            return getCloudFrontUrl(file.key);
-        });
+        images = req.files.conversation_image.map((file) => getCloudFrontUrl(file.key));
     }
 
     if (req.files?.conversation_video) {
-        videos = req.files.conversation_video.map((file: any) => {
-            return getCloudFrontUrl(file.key);
-        });
+        videos = req.files.conversation_video.map((file) => getCloudFrontUrl(file.key));
     }
     if (req.files?.conversation_pdf) {
-        pdfs = req.files.conversation_pdf.map((file: any) => {
-            return getCloudFrontUrl(file.key);
-        });
+        pdfs = req.files.conversation_pdf.map((file) => getCloudFrontUrl(file.key));
     }
 
     sendResponse(res, {

@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { JwtPayload } from 'jsonwebtoken';
-import { Types } from 'mongoose';
+import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
 import {
     ENUM_NOTIFICATION_TYPE,
@@ -59,7 +58,7 @@ const getAllSupport = async (query: Record<string, unknown>) => {
         }
     });
 
-    const pipeline: any[] = [
+    const pipeline: PipelineStage[] = [
         {
             $match: filters,
         },
@@ -213,7 +212,7 @@ const updateStatus = async (id: string, status: string) => {
 };
 
 const getSingle = async (id: string) => {
-    const pipeline: any[] = [
+    const pipeline: PipelineStage[] = [
         {
             $match: {
                 _id: new Types.ObjectId(id),

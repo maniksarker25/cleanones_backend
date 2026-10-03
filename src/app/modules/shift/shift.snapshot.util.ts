@@ -20,6 +20,7 @@ import {
 interface PlanLike {
     location: Types.ObjectId | string;
     rooms: (Types.ObjectId | string)[];
+    tasks: (Types.ObjectId | string)[];
     createdAt: Date;
 }
 
@@ -50,23 +51,20 @@ export const pickRandom = <T>(pool: T[], n: number): T[] => {
 };
 
 /**
- * Builds everything a Shift needs from a plan's CURRENT state in one pass —
- * a single fetch each for Rooms, active Tasks, and Workers, reused for the
- * rooms/tasks/assigned_workers snapshots, the total duration, AND the
- * recurrence patterns (which occurrence-checking needs) — rather than the
- * duration and patterns being computed via separate redundant queries.
- *
- * This is the ONLY place that shapes a Shift's content, called by every read
- * (virtual preview) and write (materialization) path, so all of them stay
- * identical by construction.
+ * Builds everything a Shift needs from a plan's current state in one pass —
+ * the single source of truth for both preview and materialization paths.
+ * Tasks are scoped to plan.tasks, not every task under plan.rooms, so two
+ * plans sharing a room never leak each other's tasks.
  */
 export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot> => {
+    // Guards a legacy plan document that predates the `tasks` field.
+    const taskIds = plan.tasks ?? [];
     const [location, rooms, tasks] = await Promise.all([
         Location.findById(plan.location).select('name location').lean(),
         Room.find({ _id: { $in: plan.rooms } })
             .select('name room_type')
             .lean(),
-        Task.find({ room: { $in: plan.rooms }, is_active: true })
+        Task.find({ _id: { $in: taskIds }, is_active: true })
             .select(
                 'room name frequency_type days_of_week days_of_month duration_minutes is_photo_required photo_requirements required_photo_count createdAt'
             )
@@ -89,8 +87,7 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
     }));
 
     const taskSnapshots: IShiftTask[] = tasks.map((t) => {
-        // Randomly require `required_photo_count` titles out of the full
-        // photo_requirements pool for this occurrence.
+        // Randomly picks required_photo_count titles from the full pool.
         const selected = t.is_photo_required
             ? pickRandom(t.photo_requirements ?? [], t.required_photo_count ?? 0)
             : [];
@@ -108,18 +105,14 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
             duration_minutes: t.duration_minutes ?? 0,
             is_photo_required: t.is_photo_required,
             photo_requirements: photoRequirements,
-            // Never auto-completed on creation, even for tasks with no photo
-            // requirement — those are completed by the worker explicitly
-            // hitting the mark-complete endpoint (see markShiftTaskComplete).
+            // Non-photo tasks are completed explicitly via markShiftTaskComplete, not on creation.
             is_completed: false,
             completed_at: null,
             source: 'plan_task' as const,
         };
     });
 
-    // A CleaningPlan carries no crew of its own — a freshly-built snapshot
-    // always starts unstaffed. Workers are staffed directly onto the Shift
-    // afterward, at the manager's own staffing action (assignWorkersToShift).
+    // A plan carries no crew of its own — a fresh snapshot always starts unstaffed.
     const assignedWorkers: IShiftAssignedWorker[] = [];
 
     const durationMinutes = tasks.reduce(
@@ -127,11 +120,7 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
         0
     );
 
-    // Anchored on whichever is later: the task's own createdAt, or the
-    // plan's — a task is never "due" for this plan before it existed itself,
-    // NOR before the plan itself existed (a task can predate the plan when
-    // its room is reused from/added to an existing plan later). No end
-    // bound: a task recurs indefinitely until deactivated.
+    // Anchored on whichever is later — the task's own createdAt or the plan's.
     const patterns = tasks.map((t) =>
         taskToPattern(t, laterOf(t.createdAt, plan.createdAt), null)
     );
@@ -146,23 +135,14 @@ export const buildShiftSnapshot = async (plan: PlanLike): Promise<ShiftSnapshot>
     };
 };
 
-/**
- * The subset of a snapshot's tasks actually due on `day` — each task's own
- * frequency/anchor (snapshot.patterns, built parallel to snapshot.tasks by
- * buildShiftSnapshot) is checked individually, since a plan mixes daily,
- * weekly and monthly tasks that don't all recur on the same days.
- */
+/** Subset of a snapshot's tasks actually due on `day`, checked per-task since a plan mixes daily/weekly/monthly tasks. */
 export const tasksOccurringOnDate = (
     snapshot: Pick<ShiftSnapshot, 'tasks' | 'patterns'>,
     day: Date
 ): IShiftTask[] =>
     snapshot.tasks.filter((_, i) => occursOnDate(day, snapshot.patterns[i]));
 
-/**
- * The subset of a snapshot's rooms that have at least one task among
- * `dueTasks` (the result of tasksOccurringOnDate) — a room with nothing due
- * on this date shouldn't be listed on the shift either.
- */
+/** Rooms with at least one task among `dueTasks` — a room with nothing due shouldn't be listed either. */
 export const roomsWithDueTasks = (
     rooms: IShiftRoom[],
     dueTasks: IShiftTask[]
@@ -209,9 +189,7 @@ export const toShiftTaskFromAdditionalTask = (additionalTask: {
     name: additionalTask.name,
     duration_minutes: additionalTask.duration_minutes ?? 0,
     is_photo_required: additionalTask.is_photo_required,
-    // Unlike plan tasks (pickRandom over a pool), an AdditionalTask's
-    // photo_requirements are already the exact fixed set the client
-    // configured — every one of them is required, copied as-is.
+    // Already the exact fixed set the client configured — copied as-is, no random pick.
     photo_requirements: (additionalTask.photo_requirements ?? []).map((pr) => ({
         title: pr.title,
         description: pr.description ?? null,
@@ -224,12 +202,7 @@ export const toShiftTaskFromAdditionalTask = (additionalTask: {
     source: 'additional_task',
 });
 
-/**
- * Approved AdditionalTasks for `planId` whose own date_time falls on `day`
- * (a UTC calendar date), shaped as IShiftTask entries ready to fold into a
- * materializing (or previewed) shift's tasks[]. Used by getOrCreateShift,
- * buildVirtualShift, and the today-shift resync path in shift.services.ts.
- */
+/** Approved AdditionalTasks for `planId` on `day`, shaped as IShiftTask entries ready to fold into a shift. */
 export const buildAdditionalTaskEntriesForDay = async (
     planId: Types.ObjectId | string,
     day: Date
@@ -251,12 +224,7 @@ export const buildAdditionalTaskEntriesForDay = async (
     return { tasks, durationMinutes };
 };
 
-/**
- * Same as buildAdditionalTaskEntriesForDay, but for every day in
- * [fromDay, toDay] in a single query — grouped by day (UTC-midnight ISO
- * string key) — for listShiftsInRange's virtual-preview loop, which would
- * otherwise need one query per previewed day.
- */
+/** Same as buildAdditionalTaskEntriesForDay, but for a whole range in one query, grouped by day. */
 export const buildAdditionalTaskEntriesByDay = async (
     planId: Types.ObjectId | string,
     fromDay: Date,

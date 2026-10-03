@@ -1,0 +1,124 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createOpenApiDocument = void 0;
+const chat_socket_events_1 = __importStar(require("./chat.socket-events"));
+const paths_1 = __importDefault(require("./paths"));
+const schemas_1 = __importDefault(require("./schemas"));
+const chat_socket_docs_1 = __importDefault(require("./chat.socket-docs"));
+function createOpenApiDocument(serverUrl = '/api/v1') {
+    return {
+        openapi: '3.0.3',
+        info: {
+            title: 'cleanones-backend API',
+            version: '1.0.0',
+            description: [
+                'API reference for the implemented HTTP routes in the current, unfinished cleanones-backend.',
+                '**Getting started:** log in, copy data.accessToken, then use Authorize with the token only. Create client → location → room → task.',
+                '**Authentication:** Bearer JWT for protected routes. Refresh uses the HttpOnly refreshToken cookie. Required roles are listed per operation.',
+                '**Responses:** HTTP 200 for successful creates, updates and deletes. Lists use data.meta and data.result. IDs are MongoDB ObjectIds; dates are ISO 8601.',
+                '**Limits:** global API limit 60 requests/minute per IP; sensitive authentication routes share 3 requests/minute per email or IP. A 429 response includes Retry-After.',
+                '**Current limitations:** manager/admin profile lookup in auth.ts is unfinished. Zod validation failures currently return HTTP 500. These docs describe contracts and do not certify backend readiness.',
+                '**Coverage:** authentication, users, clients, locations, rooms, tasks, administration, website content, notifications, files, legal information, chats/messages and implemented dashboard operations. User registration has a validation/service payload mismatch; account upgrade is not implemented. These limitations are documented on their endpoints. The super-admin module and placeholder earnings chart remain excluded; testimonials are empty. Chat messages are created only via Socket.IO, not REST — see the Chats/Chat messages tags and docs/CHAT_SOCKET_EVENTS.md for the realtime event contract (not representable as OpenAPI paths, so it is summarized below and also exposed machine-readably as the x-socket-events root extension in /api-docs.json).',
+                '**Standalone preview:** this server hosts documentation only. API requests require a running backend; configure DOCS_API_URL with its full URL ending in /api/v1.',
+                '## Chat — Socket.IO events',
+                (0, chat_socket_events_1.renderChatSocketEventsMarkdown)(),
+            ].join('\n\n'),
+        },
+        servers: [
+            {
+                url: serverUrl,
+                description: serverUrl === '/api/v1'
+                    ? 'Current backend'
+                    : 'Configured backend',
+            },
+        ],
+        tags: [
+            ['Chat', 'Group and direct chat HTTP APIs. See Chat sockets for realtime messaging.'],
+            ['Chat sockets', chat_socket_docs_1.default],
+            ['Question suggestions', 'Public questions and answers managed by managers.'],
+            ['Issue reports', 'Worker-reported issues managed by managers.'],
+            [
+                'Chats',
+                'Group chats (one per cleaning plan), 1:1 direct chats between a client and a worker, worker↔managers chats (one per worker, auto-created with the worker profile), and client↔managers chats (one per client, auto-created with the client profile). Membership and metadata only — messages are created via Socket.IO, not REST. See docs/CHAT_SOCKET_EVENTS.md.',
+            ],
+            [
+                'Chat messages',
+                'Reading and soft-deleting chat messages. Creation happens only via Socket.IO. See docs/CHAT_SOCKET_EVENTS.md.',
+            ],
+            ['Authentication', 'Login, tokens and password recovery.'],
+            ['Users', 'Registration, verification, profiles and account management.'],
+            ['Clients', 'Manager-managed customer accounts.'],
+            ['Client contacts', 'Manager-only contact creation, updates, deletion and retrieval.'],
+            ['Locations', 'Client sites and room counts.'],
+            ['Rooms', 'Rooms within a location and task counts.'],
+            ['Tasks', 'Daily, weekly and monthly task definitions.'],
+            ['Workers', 'Manager-managed worker profiles and availability.'],
+            [
+                'Cleaning plans',
+                'Manager-scheduled cleaning plans with assigned workers.',
+            ],
+            [
+                'Additional tasks',
+                'Extra tasks created by clients or managers. Manager-created tasks are automatically approved.',
+            ],
+            ['Administration', 'Administrator account management.'],
+            [
+                'Website content',
+                'Public content reads and superAdmin content management.',
+            ],
+            ['Notifications', 'Notifications for the authenticated receiver.'],
+            ['Files', 'S3 conversation attachments.'],
+            ['Legal information', 'Shared company and platform information.'],
+            [
+                'Dashboard',
+                'Counts and reporting; limitations are noted per operation.',
+            ],
+        ].map(([name, description]) => ({ name, description })),
+        components: {
+            securitySchemes: {
+                bearerAuth: {
+                    type: 'http',
+                    scheme: 'bearer',
+                    bearerFormat: 'JWT',
+                    description: 'Paste the access token without the Bearer prefix.',
+                },
+                refreshCookie: {
+                    type: 'apiKey',
+                    in: 'cookie',
+                    name: 'refreshToken',
+                    description: 'Set by login. Browsers manage this HttpOnly cookie; Swagger cannot set it manually.',
+                },
+            },
+            schemas: schemas_1.default,
+        },
+        paths: paths_1.default,
+        'x-socket-events': chat_socket_events_1.default,
+    };
+}
+exports.createOpenApiDocument = createOpenApiDocument;

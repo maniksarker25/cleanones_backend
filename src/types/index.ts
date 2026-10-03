@@ -1,31 +1,23 @@
-/* eslint-disable no-undef */
-/* eslint-disable @typescript-eslint/no-namespace */
-/* eslint-disable no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-// types/express.d.ts or a similar file in your project--
-//
+// Augmenting Express's own global Request type requires the `namespace` form —
+// there's no ES2015-module equivalent for extending a third-party global namespace.
+/* eslint-disable-next-line @typescript-eslint/no-namespace, @typescript-eslint/no-unused-vars */
 declare namespace Express {
     export interface Request {
         files?: {
-            product_image?: File[]; // Add more fields as needed, e.g. category_image, profile_image
-            // Add other fields you might expect to receive---
-            profile_image?: File[];
-            course_banner?: File[];
-            banner?: File[];
-            class_banner?: File[];
-            category_image?: File[];
-            task_attachments?: File[];
-            service_image?: File[];
-            question_image?: File[];
-            reject_evidence?: File[];
-            conversation_image?: File[];
-            conversation_video?: File[];
-            conversation_pdf?: File[];
-            identification_document?: File[];
-            beforeImages?: File[];
-            afterImages?: File[];
-            cancellationEvidence?: File[];
-            report_evidence?: File[];
+            image?: MulterS3.File[];
+            profile_image?: MulterS3.File[];
+            category_image?: MulterS3.File[];
+            task_attachments?: MulterS3.File[];
+            service_image?: MulterS3.File[];
+            question_image?: MulterS3.File[];
+            reject_evidence?: MulterS3.File[];
+            conversation_image?: MulterS3.File[];
+            conversation_video?: MulterS3.File[];
+            conversation_pdf?: MulterS3.File[];
+            identification_document?: MulterS3.File[];
+            beforeImages?: MulterS3.File[];
+            afterImages?: MulterS3.File[];
+            report_evidence?: MulterS3.File[];
         };
     }
 }

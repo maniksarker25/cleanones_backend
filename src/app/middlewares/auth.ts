@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable no-unused-vars */
 import { NextFunction, Request, Response } from 'express';
 import httpStatus from 'http-status';
 import jwt, { JwtPayload } from 'jsonwebtoken';
@@ -15,12 +13,19 @@ import { USER_ROLE } from '../modules/user/user.constant';
 import { TUserRole } from '../modules/user/user.interface';
 import catchAsync from '../utilities/catchasync';
 
-// make costume interface
+interface AuthProfileData {
+    _id: mongoose.Types.ObjectId;
+    user: {
+        isDeleted?: boolean;
+        isBlocked?: boolean;
+        isVerified?: boolean;
+        isActive?: boolean;
+    } | null;
+}
 
 const auth = (...requiredRoles: TUserRole[]) => {
     return catchAsync(
         async (req: Request, res: Response, next: NextFunction) => {
-            // check if the token is sent from client -----
             let token = req?.headers?.authorization;
 
             if (!token) {
@@ -45,16 +50,13 @@ const auth = (...requiredRoles: TUserRole[]) => {
                 throw new AppError(httpStatus.UNAUTHORIZED, 'Token is expired');
             }
 
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { id, role, email, profileId, iat } = decoded;
+            const { id, role } = decoded;
 
             if (!decoded) {
                 throw new AppError(httpStatus.UNAUTHORIZED, 'Token is expired');
             }
 
-            // get the user if that here ---------
-            // const user = await User.findById(id);
-            let profileData: any;
+            let profileData: AuthProfileData | null = null;
             if (role == USER_ROLE.admin) {
                 profileData = await Admin.findOne({ user: id })
                     .select('_id user')
@@ -128,15 +130,6 @@ const auth = (...requiredRoles: TUserRole[]) => {
                 );
             }
 
-            // if (
-            //   user?.passwordChangedAt &&
-            //   (await User.isJWTIssuedBeforePasswordChange(
-            //     user?.passwordChangedAt,
-            //     iat as number,
-            //   ))
-            // ) {
-            //   throw new AppError(httpStatus.FORBIDDEN, 'You are not authorized 2');
-            // }
             if (requiredRoles && !requiredRoles.includes(role)) {
                 throw new AppError(
                     httpStatus.UNAUTHORIZED,
