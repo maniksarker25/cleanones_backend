@@ -46,9 +46,6 @@ export default {
         app_id: process.env.ONESIGNAL_APP_ID,
         api_key: process.env.ONESIGNAL_API_KEY,
     },
-    mocean: {
-        api_token: process.env.MOCEAN_API_TOKEN,
-    },
     docs: {
         port: process.env.DOCS_PORT,
         api_url: process.env.DOCS_API_URL,
