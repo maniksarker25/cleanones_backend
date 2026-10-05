@@ -99,19 +99,19 @@ export const registrationSuccessEmail = (
     <body>
       <div class="container">
         <div class="header">
-          <h1>SnowOut</h1>
+          <h1>CleanOnes</h1>
         </div>
         <div class="content">
-          <h2>Welcome to the SnowOut, ${name}!</h2>
+          <h2>Welcome to the CleanOnes, ${name}!</h2>
 
-          <p>We're excited to have you on board. To get started with <strong>SnowOut</strong>, please verify your account using the activation code below:</p>
+          <p>We're excited to have you on board. To get started with <strong>CleanOnes</strong>, please verify your account using the activation code below:</p>
           
           <div class="activation-card">
             <div class="activation-code">${activationCode || 'XXXXXX'}</div>
           </div>
 
           <div class="button-container">
-            <a href="https://snowout-app.com/activate" class="button">
+            <a href="https://CleanOnes-app.com/activate" class="button">
               Verify Account
             </a>
           </div>
@@ -120,13 +120,13 @@ export const registrationSuccessEmail = (
             Note: This code expires in 10 minutes. For security, unverified accounts are automatically cleared from our system after this window.
           </p>
           
-          <p>If you have any trouble, reach out to our team at <a href="mailto:support@snowout-app.com">support@snowout-app.com</a>.</p>
+          <p>If you have any trouble, reach out to our team at <a href="mailto:support@CleanOnes-app.com">support@CleanOnes-app.com</a>.</p>
         </div>
         <div class="footer">
-          <p>&copy; ${new Date().getFullYear()} SnowOut. All rights reserved.</p>
+          <p>&copy; ${new Date().getFullYear()} CleanOnes. All rights reserved.</p>
           <p>
-            <a href="https://snowout-app.com/privacy">Privacy Policy</a> | 
-            <a href="https://snowout-app.com/contact">Support</a>
+            <a href="https://CleanOnes-app.com/privacy">Privacy Policy</a> | 
+            <a href="https://CleanOnes-app.com/contact">Support</a>
           </p>
         </div>
       </div>
