@@ -9,6 +9,7 @@ import {
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import cleaningPlanServices from '../cleaning_plan/cleaning_plan.services';
 import { resyncTodayShiftAdditionalTaskIfDue } from '../shift/shift.services';
+import { Shift } from '../shift/shift.model';
 import { buildShiftSnapshot } from '../shift/shift.snapshot.util';
 import { IAdditionalTask, TAdditionalTaskStatus } from './additional_task.interface';
 import { AdditionalTask } from './additional_task.model';
@@ -36,6 +37,26 @@ const ensureClientOwnsAdditionalTask = async (
     const plan = await CleaningPlan.findById(cleaningPlanId).select('client').lean();
     if (!plan || plan.client.toString() !== requester.profileId) {
         throw new AppError(httpStatus.NOT_FOUND, notFoundMessage);
+    }
+};
+
+// A started or finished shift never picks up new additional tasks (resync only
+// folds into 'upcoming' shifts), so one added for that day would sit approved
+// but never reach the crew or the shift's pay cap. Refuse it up front.
+const assertShiftNotStartedForDay = async (
+    planId: Types.ObjectId | string,
+    dateTime: Date
+) => {
+    const started = await Shift.exists({
+        cleaning_plan: planId,
+        date: normalizeToUTCDateOnly(dateTime),
+        status: { $in: ['in_progress', 'completed'] },
+    });
+    if (started) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'The shift for this date has already started or completed, so an additional task cannot be added to it'
+        );
     }
 };
 
@@ -72,6 +93,8 @@ const createAdditionalTaskIntoDB = async (
             'This cleaning plan has no occurrence on the given date'
         );
     }
+
+    await assertShiftNotStartedForDay(plan._id, payload.date_time);
 
     const task = await AdditionalTask.create({
         ...payload,
@@ -114,6 +137,10 @@ const updateAdditionalTaskIntoDB = async (
     delete payload.status;
     delete payload.reject_reason;
 
+    if (payload.date_time) {
+        await assertShiftNotStartedForDay(task.cleaning_plan_id, payload.date_time);
+    }
+
     const result = await AdditionalTask.findByIdAndUpdate(id, payload, {
         new: true,
         runValidators: true,
@@ -139,6 +166,10 @@ const approveAdditionalTaskIntoDB = async (
     const task = await AdditionalTask.findById(id);
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
+
+    if (status === 'Approved' && task.status !== 'Approved') {
+        await assertShiftNotStartedForDay(task.cleaning_plan_id, task.date_time);
+    }
 
     const result = await AdditionalTask.findByIdAndUpdate(
         id,

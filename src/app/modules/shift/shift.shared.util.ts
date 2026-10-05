@@ -20,6 +20,26 @@ export const FULL_WEEKDAY_NAMES = [
 
 export const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
 
+export const MS_PER_HOUR = 3_600_000;
+
+/**
+ * Credited work time for one worker on one shift, in ms:
+ * min(check_out - check_in, scheduled duration / assigned worker count).
+ * Missing check-in/out (or an inverted pair) counts as 0. Single source of
+ * truth for both pay settlement and the worker work-hours stats.
+ */
+export const calcWorkedMs = (
+    entry: { check_in_at?: Date | null; check_out_at?: Date | null },
+    durationMinutes: number,
+    assignedWorkerCount: number
+) => {
+    if (!entry.check_in_at || !entry.check_out_at) return 0;
+    const actualMs = entry.check_out_at.getTime() - entry.check_in_at.getTime();
+    if (actualMs <= 0) return 0;
+    const shareMs = (durationMinutes * 60_000) / Math.max(assignedWorkerCount, 1);
+    return Math.min(actualMs, shareMs);
+};
+
 // end_time is required now, but shifts from before the field existed have none — fall back to date_time + duration.
 export const resolveShiftEndTime = (shift: {
     date_time: Date;

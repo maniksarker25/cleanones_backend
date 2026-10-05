@@ -4,6 +4,7 @@ import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
 import chatServices from '../chat/chat.services';
 import { Shift } from '../shift/shift.model';
+import { calcWorkedMs, MS_PER_HOUR } from '../shift/shift.shared.util';
 import { PROFILE_MODEL_BY_ROLE, USER_ROLE } from '../user/user.constant';
 import { User } from '../user/user.model';
 import { Worker } from './worker.model';
@@ -193,26 +194,6 @@ const deleteWorkerFromDB = async (id: string) => {
 };
 
 const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
-
-const MS_PER_MINUTE = 60_000;
-const MS_PER_HOUR = 3_600_000;
-
-/**
- * Credited work time for one worker on one shift, in ms:
- * min(check_out - check_in, scheduled duration / assigned worker count).
- * Missing check-in/out (or an inverted pair) counts as 0.
- */
-const calcWorkedMs = (
-    entry: { check_in_at?: Date | null; check_out_at?: Date | null },
-    durationMinutes: number,
-    workerCount: number
-) => {
-    if (!entry.check_in_at || !entry.check_out_at) return 0;
-    const actualMs = entry.check_out_at.getTime() - entry.check_in_at.getTime();
-    if (actualMs <= 0) return 0;
-    const shareMs = (durationMinutes * MS_PER_MINUTE) / Math.max(workerCount, 1);
-    return Math.min(actualMs, shareMs);
-};
 
 const SHIFT_HOURS_SELECT =
     'duration_minutes assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at';
