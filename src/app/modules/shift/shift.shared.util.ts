@@ -4,6 +4,7 @@ import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
 import { normalizeToUTCDateOnly } from '../cleaning_plan/availability.util';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
+import { Worker } from '../worker/worker.model';
 import { IShift } from './shift.interface';
 import { Shift } from './shift.model';
 
@@ -25,6 +26,43 @@ export const resolveShiftEndTime = (shift: {
     end_time?: Date | null;
     duration_minutes: number;
 }): Date => shift.end_time ?? new Date(shift.date_time.getTime() + shift.duration_minutes * 60_000);
+
+/** Current names for a set of workers, in one query. Missing/deleted workers are simply absent from the map. */
+export const getWorkerNameMap = async (
+    workerIds: Array<Types.ObjectId | string>
+): Promise<Map<string, string>> => {
+    const uniqueIds = [...new Set(workerIds.map((id) => id.toString()))];
+    if (!uniqueIds.length) return new Map();
+    const workers = await Worker.find({ _id: { $in: uniqueIds } })
+        .select('name')
+        .lean();
+    return new Map(workers.map((w) => [w._id.toString(), w.name]));
+};
+
+type WithAssignedWorkers = { assigned_workers: Array<{ worker: Types.ObjectId }> };
+type WithWorkerNames<T extends WithAssignedWorkers> = Omit<T, 'assigned_workers'> & {
+    assigned_workers: Array<T['assigned_workers'][number] & { name: string }>;
+};
+
+/**
+ * Shifts store only the worker ref — the name lives on Worker so a rename is
+ * reflected everywhere. Display paths call this to resolve each crew entry's
+ * current name (batched: one Worker query for all the shifts passed in).
+ */
+export const attachWorkerNames = async <T extends WithAssignedWorkers>(
+    shifts: T[]
+): Promise<WithWorkerNames<T>[]> => {
+    const nameById = await getWorkerNameMap(
+        shifts.flatMap((s) => s.assigned_workers.map((aw) => aw.worker))
+    );
+    return shifts.map((shift) => ({
+        ...shift,
+        assigned_workers: shift.assigned_workers.map((aw) => ({
+            ...aw,
+            name: nameById.get(aw.worker.toString()) ?? '',
+        })),
+    }));
+};
 
 // .lean() — every caller only reads plan fields (location, rooms, is_active,
 // _id) to build a snapshot or check state; none of them save this doc back.

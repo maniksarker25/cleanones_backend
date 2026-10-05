@@ -21,6 +21,7 @@ import { Task } from '../task/task.model';
 import { AdditionalTask } from '../additional_task/additional_task.model';
 import '../worker/worker.model';
 import { TRosterView, getPlanGroupedRosterFromDB } from '../shift/shift.services';
+import { attachWorkerNames } from '../shift/shift.shared.util';
 
 const createClientIntoDB = async (
     managerId: string,
@@ -721,7 +722,7 @@ async function getClientScheduleRosterFromDB(
         const workers = shift.assigned_workers || [];
         const isStaffed = workers.length > 0;
         const assignedWorkers = workers.map((w) => ({
-            name: w.name || (w.worker as unknown as PopulatedWorkerRef)?.name || 'Specialist',
+            name: (w.worker as unknown as PopulatedWorkerRef)?.name || 'Specialist',
             role: w.role || 'Specialist',
         }));
 
@@ -752,10 +753,10 @@ async function getClientScheduleRosterFromDB(
         } else {
             for (const aw of workers) {
                 const populatedWorker = aw.worker as unknown as PopulatedWorkerRef;
-                const workerName = aw.name || populatedWorker?.name || 'Specialist';
+                const workerName = populatedWorker?.name || 'Specialist';
                 teamMembersSet.add(workerName);
                 rosterShifts.push({
-                    id: `${shift._id}_${populatedWorker?._id || aw.name}`,
+                    id: `${shift._id}_${populatedWorker?._id || workerName}`,
                     shiftId: shift._id.toString(),
                     planId,
                     planTitle,
@@ -885,10 +886,12 @@ const getClientActiveProgressFromDB = async (clientId: string) => {
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
-    const todaysShifts = await Shift.find({
-        cleaning_plan: { $in: clientPlanIds },
-        date: { $gte: todayStart, $lte: todayEnd },
-    }).lean();
+    const todaysShifts = await attachWorkerNames(
+        await Shift.find({
+            cleaning_plan: { $in: clientPlanIds },
+            date: { $gte: todayStart, $lte: todayEnd },
+        }).lean()
+    );
 
     const now = new Date();
 

@@ -69,6 +69,9 @@ const loginUserIntoDB = async (payload: TLoginUser) => {
             `${payload.role} account not found`
         );
     }
+    console.log("payload",payload);
+
+    console.log('user?.password', user?.password, "payload?.password", payload?.password);
     if (!(await User.isPasswordMatched(payload?.password, user?.password))) {
         throw new AppError(httpStatus.FORBIDDEN, 'Invalid credentials');
     }

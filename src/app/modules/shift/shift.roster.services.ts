@@ -14,7 +14,7 @@ import { WorkerType } from '../worker/worker.constant';
 import { Worker } from '../worker/worker.model';
 import { IShift } from './shift.interface';
 import { Shift } from './shift.model';
-import { resolveShiftEndTime, roundToTwoDecimals } from './shift.shared.util';
+import { attachWorkerNames, resolveShiftEndTime, roundToTwoDecimals } from './shift.shared.util';
 
 export type TRosterView = 'day' | 'week' | 'month';
 
@@ -333,7 +333,9 @@ export const getPlanGroupedRosterFromDB = async (
         Shift.find({
             cleaning_plan: { $in: planIds },
             date: { $gte: start, $lt: end },
-        }).lean(),
+        })
+            .lean()
+            .then(attachWorkerNames),
     ]);
 
     const tasksById = new Map(tasks.map((t) => [t._id.toString(), t]));

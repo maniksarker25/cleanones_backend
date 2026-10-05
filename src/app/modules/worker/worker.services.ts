@@ -194,7 +194,30 @@ const deleteWorkerFromDB = async (id: string) => {
 
 const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
 
-// Lifetime sum of (check_out_at - check_in_at) per worker, in hours.
+const MS_PER_MINUTE = 60_000;
+const MS_PER_HOUR = 3_600_000;
+
+/**
+ * Credited work time for one worker on one shift, in ms:
+ * min(check_out - check_in, scheduled duration / assigned worker count).
+ * Missing check-in/out (or an inverted pair) counts as 0.
+ */
+const calcWorkedMs = (
+    entry: { check_in_at?: Date | null; check_out_at?: Date | null },
+    durationMinutes: number,
+    workerCount: number
+) => {
+    if (!entry.check_in_at || !entry.check_out_at) return 0;
+    const actualMs = entry.check_out_at.getTime() - entry.check_in_at.getTime();
+    if (actualMs <= 0) return 0;
+    const shareMs = (durationMinutes * MS_PER_MINUTE) / Math.max(workerCount, 1);
+    return Math.min(actualMs, shareMs);
+};
+
+const SHIFT_HOURS_SELECT =
+    'duration_minutes assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at';
+
+// Lifetime credited hours per worker (see calcWorkedMs). Cancelled shifts are excluded.
 const getTotalCompletedWorkHoursByWorker = async (
     workerIds: mongoose.Types.ObjectId[]
 ) => {
@@ -203,28 +226,25 @@ const getTotalCompletedWorkHoursByWorker = async (
 
     const shifts = await Shift.find({
         'assigned_workers.worker': { $in: workerIds },
+        status: { $ne: 'cancelled' },
     })
-        .select('assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at')
+        .select(SHIFT_HOURS_SELECT)
         .lean();
 
     const idSet = new Set(workerIds.map((id) => id.toString()));
     const msByWorker = new Map<string, number>();
     for (const shift of shifts) {
+        const workerCount = shift.assigned_workers.length;
         for (const entry of shift.assigned_workers) {
             const workerId = entry.worker.toString();
             if (!idSet.has(workerId)) continue;
-            if (entry.check_in_at && entry.check_out_at) {
-                msByWorker.set(
-                    workerId,
-                    (msByWorker.get(workerId) ?? 0) +
-                        (entry.check_out_at.getTime() - entry.check_in_at.getTime())
-                );
-            }
+            const ms = calcWorkedMs(entry, shift.duration_minutes, workerCount);
+            if (ms > 0) msByWorker.set(workerId, (msByWorker.get(workerId) ?? 0) + ms);
         }
     }
 
     for (const [workerId, ms] of msByWorker) {
-        hoursByWorker.set(workerId, roundToTwoDecimals(ms / 3_600_000));
+        hoursByWorker.set(workerId, roundToTwoDecimals(ms / MS_PER_HOUR));
     }
     return hoursByWorker;
 };
@@ -261,13 +281,12 @@ const getWorkerShiftStatsByWorker = async (
         'assigned_workers.worker': { $in: workerIds },
         status: { $ne: 'cancelled' },
     })
-        .select(
-            'date date_time assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at'
-        )
+        .select(`date date_time ${SHIFT_HOURS_SELECT}`)
         .lean();
 
     const msByWorker = new Map<string, number>();
     for (const shift of shifts) {
+        const workerCount = shift.assigned_workers.length;
         for (const aw of shift.assigned_workers) {
             const workerId = aw.worker.toString();
             if (!idSet.has(workerId)) continue;
@@ -285,12 +304,9 @@ const getWorkerShiftStatsByWorker = async (
 
             stats.total_shift += 1;
 
-            if (aw.check_in_at && aw.check_out_at) {
-                msByWorker.set(
-                    workerId,
-                    (msByWorker.get(workerId) ?? 0) +
-                        (aw.check_out_at.getTime() - aw.check_in_at.getTime())
-                );
+            const workedMs = calcWorkedMs(aw, shift.duration_minutes, workerCount);
+            if (workedMs > 0) {
+                msByWorker.set(workerId, (msByWorker.get(workerId) ?? 0) + workedMs);
             }
 
             if (aw.check_in_at) {
@@ -307,7 +323,7 @@ const getWorkerShiftStatsByWorker = async (
 
     for (const [workerId, ms] of msByWorker) {
         const stats = statsByWorker.get(workerId);
-        if (stats) stats.total_completed_work_hours = roundToTwoDecimals(ms / 3_600_000);
+        if (stats) stats.total_completed_work_hours = roundToTwoDecimals(ms / MS_PER_HOUR);
     }
 
     return statsByWorker;
