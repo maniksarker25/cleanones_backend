@@ -30,7 +30,7 @@ import {
     roomsWithDueTasks,
     tasksOccurringOnDate,
 } from './shift.snapshot.util';
-import { attachWorkerNames, ensureActivePlan, FULL_WEEKDAY_NAMES, getShiftOrThrow, maybeAutoCompleteShift, roundToTwoDecimals } from './shift.shared.util';
+import { attachWorkerNames, calcWorkedMs, ensureActivePlan, FULL_WEEKDAY_NAMES, getShiftOrThrow, maybeAutoCompleteShift, MS_PER_HOUR, roundToTwoDecimals } from './shift.shared.util';
 
 const MONGO_DUPLICATE_KEY_ERROR = 11000;
 
@@ -710,64 +710,41 @@ export const checkInToShift = async (
     return result;
 };
 
-/** Each worker is paid the lesser of their actual clocked time and their even split of the shift's scheduled hours. */
-const settlePayForWorkers = async (
-    shift: { _id: Types.ObjectId; duration_minutes: number },
-    workersWhoWorked: IShiftAssignedWorker[],
+/**
+ * Pays one worker the lesser of their actual clocked time and their fixed share
+ * of the shift (scheduled duration / assigned worker count, whoever shows up).
+ */
+const settlePayForWorker = async (
+    shift: { _id: Types.ObjectId; duration_minutes: number; assigned_workers: IShiftAssignedWorker[] },
+    entry: IShiftAssignedWorker,
     session: mongoose.ClientSession
 ) => {
-    const scheduledShareHours = shift.duration_minutes / workersWhoWorked.length / 60;
-
-    const workerIds = workersWhoWorked.map((aw) => aw.worker);
-    const workerDocs = await Worker.find({ _id: { $in: workerIds } })
-        .select('hourly_rate')
-        .session(session);
-    const rateById = new Map(
-        workerDocs.map((w) => [w._id.toString(), w.hourly_rate])
-    );
-
-    const bulkOps = workersWhoWorked.flatMap((aw) => {
-        const workerIdStr = aw.worker.toString();
-        const hourlyRate = rateById.get(workerIdStr);
-        if (hourlyRate === undefined) {
-            // Worker record vanished mid-shift — skip paying a nonexistent account.
-            errorLogger.warn(
-                `settlePayForWorkers: worker ${workerIdStr} missing at settlement for shift ${shift._id.toString()}, skipped`
-            );
-            return [];
-        }
-        const actualHours = Math.max(
-            0,
-            ((aw.check_out_at as Date).getTime() - (aw.check_in_at as Date).getTime()) /
-                3_600_000
+    const workerDoc = await Worker.findById(entry.worker).select('hourly_rate').session(session);
+    if (!workerDoc) {
+        // Worker record vanished mid-shift — skip paying a nonexistent account.
+        errorLogger.warn(
+            `settlePayForWorker: worker ${entry.worker.toString()} missing at settlement for shift ${shift._id.toString()}, skipped`
         );
-        const payHours = Math.min(actualHours, scheduledShareHours);
-        const earnedAmount = roundToTwoDecimals(payHours * hourlyRate);
-        return [
-            {
-                updateOne: {
-                    filter: { _id: aw.worker },
-                    update: {
-                        $inc: {
-                            total_earning: earnedAmount,
-                            pending_amount: earnedAmount,
-                        },
-                    },
-                },
-            },
-        ];
-    });
-
-    if (bulkOps.length) {
-        await Worker.bulkWrite(bulkOps, { session });
+        return;
     }
+
+    const payHours =
+        calcWorkedMs(entry, shift.duration_minutes, shift.assigned_workers.length) / MS_PER_HOUR;
+    const earnedAmount = roundToTwoDecimals(payHours * workerDoc.hourly_rate);
+    if (earnedAmount <= 0) return;
+
+    await Worker.updateOne(
+        { _id: entry.worker },
+        { $inc: { total_earning: earnedAmount, pending_amount: earnedAmount } },
+        { session }
+    );
 };
 
 /**
- * Marks one worker checked out, and settles pay for the crew if that was
- * the last checkout pending. Shared by checkOutFromShift and the
- * auto-checkout cron — safe either way, since each worker's check_out_at
- * only ever transitions null -> set once.
+ * Marks one worker checked out and pays that worker right away. Shared by
+ * checkOutFromShift and the auto-checkout cron — safe either way, since each
+ * worker's check_out_at only ever transitions null -> set once, so pay is
+ * never applied twice.
  */
 export const closeOutWorkerAndMaybeSettle = async (
     shiftId: Types.ObjectId,
@@ -797,13 +774,8 @@ export const closeOutWorkerAndMaybeSettle = async (
     );
     if (!result) return null;
 
-    // No-shows don't count toward crew size or block settlement.
-    const workersWhoWorked = result.assigned_workers.filter((aw) => aw.check_in_at);
-    const everyoneSettled = workersWhoWorked.every((aw) => aw.check_out_at);
-
-    if (everyoneSettled && workersWhoWorked.length) {
-        await settlePayForWorkers(result, workersWhoWorked, session);
-    }
+    const entry = result.assigned_workers.find((aw) => aw.worker.toString() === workerId.toString());
+    if (entry) await settlePayForWorker(result, entry, session);
 
     return result;
 };
@@ -811,7 +783,7 @@ export const closeOutWorkerAndMaybeSettle = async (
 /**
  * A worker leaving the shift. Anyone but the last one out can leave any
  * time; the last one is gated on every task actually being done, so the
- * crew can't walk off mid-work. Pay settles once, when the last checkout lands.
+ * crew can't walk off mid-work. Each worker is paid at their own checkout.
  */
 export const checkOutFromShift = async (
     workerId: string,
