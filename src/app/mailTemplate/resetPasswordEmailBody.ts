@@ -81,12 +81,12 @@ export const resetPasswordEmailBody = (name: string, resetCode: number) => `
     <body>
       <div class="container">
         <div class="header">
-          <h1>SnowOut</h1>
+          <h1>CleanOnes</h1>
         </div>
         <div class="content">
           <h2>Password Reset</h2>
           <p>Hi ${name},</p>
-          <p>We received a request to reset the password for your SnowOut account. Use the following code to complete the process:</p>
+          <p>We received a request to reset the password for your CleanOnes account. Use the following code to complete the process:</p>
           
           <div class="reset-card">
             <div class="reset-code">${resetCode || 'XXXXXX'}</div>
@@ -94,13 +94,13 @@ export const resetPasswordEmailBody = (name: string, resetCode: number) => `
 
           <p>This code is valid for <strong>10 minutes</strong>. If you didn't request this change, you can safely ignore this email—your password will remain exactly as it is.</p>
           
-          <p>Need a hand? Contact us at <a href="mailto:support@snowout-app.com" class="support-link">support@snowout-app.com</a>.</p>
+          <p>Need a hand? Contact us at <a href="mailto:support@CleanOnes-app.com" class="support-link">support@CleanOnes-app.com</a>.</p>
         </div>
         <div class="footer">
-          <p>&copy; ${new Date().getFullYear()} SnowOut. All rights reserved.</p>
+          <p>&copy; ${new Date().getFullYear()} CleanOnes. All rights reserved.</p>
           <p>
-            <a href="https://snowout-app.com/privacy">Privacy Policy</a> | 
-            <a href="https://snowout-app.com/contact">Contact Us</a>
+            <a href="https://CleanOnes-app.com/privacy">Privacy Policy</a> | 
+            <a href="https://CleanOnes-app.com/contact">Contact Us</a>
           </p>
         </div>
       </div>
