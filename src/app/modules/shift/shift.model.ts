@@ -130,7 +130,6 @@ const shiftTaskSchema = new Schema(
 const shiftAssignedWorkerSchema = new Schema(
     {
         worker: { type: Schema.Types.ObjectId, ref: 'Worker', required: true },
-        name: { type: String, required: true },
         role: {
             type: String,
             enum: ['Team leader', 'Co-leader', 'Normal worker'],

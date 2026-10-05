@@ -2675,7 +2675,7 @@ const schemas = {
                         name: {
                             type: 'string',
                             description:
-                                "Frozen snapshot of the worker's name at assignment time — immune to later profile edits.",
+                                "The worker's current name, resolved from the Worker record at read time (not stored on the shift), so profile edits are reflected immediately.",
                         },
                         role: {
                             type: 'string',

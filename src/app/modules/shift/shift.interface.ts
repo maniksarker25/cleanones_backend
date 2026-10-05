@@ -65,7 +65,6 @@ export interface IShiftTask {
 
 export interface IShiftAssignedWorker {
     worker: Types.ObjectId;
-    name: string;
     role: 'Team leader' | 'Co-leader' | 'Normal worker';
     assigned_with_conflict: boolean;
 

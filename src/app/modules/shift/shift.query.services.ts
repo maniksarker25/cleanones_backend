@@ -7,7 +7,12 @@ import { Client } from '../client/client.model';
 import { IAssignedWorker, IShift } from './shift.interface';
 import { Shift } from './shift.model';
 import { buildShiftSnapshot, roomsWithDueTasks, tasksOccurringOnDate } from './shift.snapshot.util';
-import { ensureActivePlan, resolveShiftEndTime } from './shift.shared.util';
+import {
+    attachWorkerNames,
+    ensureActivePlan,
+    getWorkerNameMap,
+    resolveShiftEndTime,
+} from './shift.shared.util';
 
 export const getShiftForDate = async (
     planId: string,
@@ -19,7 +24,8 @@ export const getShiftForDate = async (
 
     let result: (Record<string, unknown> & { assigned_workers: IAssignedWorker[] }) | null;
     if (existing) {
-        result = { ...existing, end_time: resolveShiftEndTime(existing), is_virtual: false };
+        const [withNames] = await attachWorkerNames([existing]);
+        result = { ...withNames, end_time: resolveShiftEndTime(existing), is_virtual: false };
     } else {
         const plan = await ensureActivePlan(planId);
         const snapshot = await buildShiftSnapshot(plan);
@@ -72,10 +78,12 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
 
     const snapshot = await buildShiftSnapshot(plan);
 
-    const existingShifts = await Shift.find({
-        cleaning_plan: planId,
-        date: { $gte: fromDay, $lte: toDay },
-    }).lean();
+    const existingShifts = await attachWorkerNames(
+        await Shift.find({
+            cleaning_plan: planId,
+            date: { $gte: fromDay, $lte: toDay },
+        }).lean()
+    );
     const existingByDate = new Map(existingShifts.map((s) => [s.date.toISOString(), s]));
 
     const results: Array<Record<string, unknown>> = [];
@@ -114,13 +122,15 @@ export const listShiftsInRange = async (planId: string, from: Date, to: Date) =>
  */
 export const listWorkerShiftsForDate = async (workerId: string, date: Date) => {
     const day = normalizeToUTCDateOnly(date);
-    const shifts = await Shift.find({
-        date: day,
-        'assigned_workers.worker': workerId,
-        status: { $ne: 'cancelled' },
-    })
-        .sort({ date_time: 1 })
-        .lean();
+    const shifts = await attachWorkerNames(
+        await Shift.find({
+            date: day,
+            'assigned_workers.worker': workerId,
+            status: { $ne: 'cancelled' },
+        })
+            .sort({ date_time: 1 })
+            .lean()
+    );
     return shifts.map((shift) => ({
         ...shift,
         end_time: resolveShiftEndTime(shift),
@@ -166,17 +176,21 @@ const attachProgress = (shift: IShift & { _id: Types.ObjectId }) => {
     };
 };
 
-/** Client-facing "what's happening now": every in_progress shift across this client's plans, with live progress. */
+/**
+ * Client-facing "what's happening now": every in_progress shift across this
+ * client's plans, with live progress. Deliberately NOT filtered on the plan's
+ * is_active — deleting a plan cancels only its upcoming shifts, so a shift
+ * already underway keeps running and must stay visible until it finishes.
+ */
 export const getClientLiveShiftsFromDB = async (clientId: string) => {
-    const planIds = await CleaningPlan.find({
-        client: clientId,
-        is_active: true,
-    }).distinct('_id');
+    const planIds = await CleaningPlan.find({ client: clientId }).distinct('_id');
 
-    const shifts = await Shift.find({
-        cleaning_plan: { $in: planIds },
-        status: 'in_progress',
-    }).lean();
+    const shifts = await attachWorkerNames(
+        await Shift.find({
+            cleaning_plan: { $in: planIds },
+            status: 'in_progress',
+        }).lean()
+    );
 
     return shifts.map((shift) => {
         const { tasks, ...withoutTasks } = attachProgress(shift);
@@ -245,21 +259,25 @@ export const getTodayLiveShiftMetaFromDB = async () => {
         .lean();
     const shifts = allShifts.filter((s) => s.status !== 'cancelled');
 
-    const absentWorkers = new Map<string, string>();
-    const lateWorkers = new Map<string, string>();
+    const absentWorkerIds = new Set<string>();
+    const lateWorkerIds = new Set<string>();
     shifts.forEach((shift) => {
         shift.assigned_workers.forEach((aw) => {
             const workerId = aw.worker.toString();
             if (!aw.check_in_at) {
-                if (shift.date_time <= now) absentWorkers.set(workerId, aw.name);
+                if (shift.date_time <= now) absentWorkerIds.add(workerId);
             } else if (aw.check_in_at > shift.date_time) {
-                lateWorkers.set(workerId, aw.name);
+                lateWorkerIds.add(workerId);
             }
         });
     });
 
-    const toWorkerRows = (workers: Map<string, string>) =>
-        Array.from(workers, ([worker_id, name]) => ({ worker_id, name }));
+    const nameById = await getWorkerNameMap([...absentWorkerIds, ...lateWorkerIds]);
+    const toWorkerRows = (workerIds: Set<string>) =>
+        Array.from(workerIds, (worker_id) => ({
+            worker_id,
+            name: nameById.get(worker_id) ?? '',
+        }));
 
     return {
         today_total_shift: shifts.length,
@@ -272,10 +290,10 @@ export const getTodayLiveShiftMetaFromDB = async () => {
         today_total_pending_shift: shifts.filter(
             (s) => s.status === 'upcoming'
         ).length,
-        total_absent: absentWorkers.size,
-        total_late: lateWorkers.size,
-        absent_workers: toWorkerRows(absentWorkers),
-        late_workers: toWorkerRows(lateWorkers),
+        total_absent: absentWorkerIds.size,
+        total_late: lateWorkerIds.size,
+        absent_workers: toWorkerRows(absentWorkerIds),
+        late_workers: toWorkerRows(lateWorkerIds),
     };
 };
 
@@ -433,6 +451,7 @@ export const getSingleLiveShiftFromDB = async (id: string) => {
         throw new AppError(httpStatus.NOT_FOUND, 'Shift not found');
     }
 
-    const [result] = await attachPlanAndClient([attachProgress(shift)]);
+    const [shiftWithNames] = await attachWorkerNames([shift]);
+    const [result] = await attachPlanAndClient([attachProgress(shiftWithNames)]);
     return result;
 };

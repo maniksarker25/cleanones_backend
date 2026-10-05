@@ -30,7 +30,7 @@ import {
     roomsWithDueTasks,
     tasksOccurringOnDate,
 } from './shift.snapshot.util';
-import { ensureActivePlan, FULL_WEEKDAY_NAMES, getShiftOrThrow, maybeAutoCompleteShift, roundToTwoDecimals } from './shift.shared.util';
+import { attachWorkerNames, ensureActivePlan, FULL_WEEKDAY_NAMES, getShiftOrThrow, maybeAutoCompleteShift, roundToTwoDecimals } from './shift.shared.util';
 
 const MONGO_DUPLICATE_KEY_ERROR = 11000;
 
@@ -179,16 +179,6 @@ export const assignWorkersToShift = async (
         );
     }
 
-    // Resolve the display-name snapshot server-side; existing entries keep theirs.
-    const workerDocs = newlyAddedWorkers.length
-        ? await Worker.find({
-              _id: { $in: newlyAddedWorkers.map((aw) => aw.worker) },
-          })
-              .select('name')
-              .lean()
-        : [];
-    const nameById = new Map(workerDocs.map((w) => [w._id.toString(), w.name]));
-
     const previousWorkerIds = [...existingByWorkerId.keys()];
 
     const nextAssignedWorkers = assignedWorkers.map((aw) => {
@@ -199,7 +189,6 @@ export const assignWorkersToShift = async (
             // Attendance state is never rewritten by a roster edit — only role is editable.
             return {
                 worker: existing.worker,
-                name: existing.name,
                 role: aw.role,
                 assigned_with_conflict: existing.assigned_with_conflict,
                 check_in_at: existing.check_in_at ?? null,
@@ -211,7 +200,6 @@ export const assignWorkersToShift = async (
 
         return {
             worker: aw.worker,
-            name: nameById.get(workerIdStr) ?? '',
             role: aw.role,
             assigned_with_conflict: conflictEntries.has(workerIdStr),
             check_in_at: null,
@@ -268,7 +256,8 @@ export const assignWorkersToShift = async (
         await chatServices.syncChatGroupWorkers(planId, unionWorkerIds);
     }
 
-    return result;
+    const [resultWithNames] = await attachWorkerNames([result.toObject()]);
+    return resultWithNames;
 };
 
 export interface EligibleWorkerRow {
