@@ -29,15 +29,6 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
     const { password, confirmPassword, ...workerData } =
         workerValidations.createWorkerBody.parse(payload);
-    if (
-        workerData.working_days !== undefined &&
-        workerData.worker_type !== WorkerType.Employee
-    ) {
-        throw new AppError(
-            httpStatus.FORBIDDEN,
-            'Only the manager can set working days for employees. Freelancers manage their own availability'
-        );
-    }
     const session = await mongoose.startSession();
     let worker;
     try {
@@ -105,17 +96,6 @@ const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
             }).session(session);
             if (!worker)
                 throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
-            // Manager can only set working_days for Employee-type workers.
-            // Freelancers manage their own availability via /my-availability.
-            if (
-                data.working_days !== undefined &&
-                worker.worker_type !== WorkerType.Employee
-            ) {
-                throw new AppError(
-                    httpStatus.FORBIDDEN,
-                    'Managers can only set working days for employees. Freelancers manage their own availability'
-                );
-            }
             const contactFilters = [];
             if (data.email !== undefined)
                 contactFilters.push({ email: data.email });
@@ -421,20 +401,37 @@ const updateMyAvailabilityIntoDB = async (
 ) => {
     const data = workerValidations.availabilityBody.parse(payload);
     const worker = await Worker.findOneAndUpdate(
-        { user: userId, worker_type: WorkerType.Freelancer, ...activeWorker },
+        { user: userId, ...activeWorker },
         { $set: { working_days: data.working_days } },
         { new: true, runValidators: true }
     );
     if (!worker) {
         throw new AppError(
-            httpStatus.FORBIDDEN,
-            'Only active freelancers can update their own availability'
+            httpStatus.NOT_FOUND,
+            'Active worker profile not found'
         );
     }
     return worker;
 };
 
+const getMyAvailabilityFromDB = async (userId: string) => {
+    const worker = await Worker.findOne({ user: userId, ...activeWorker })
+        .select('working_days worker_type')
+        .lean();
+    if (!worker) {
+        throw new AppError(
+            httpStatus.NOT_FOUND,
+            'Active worker profile not found'
+        );
+    }
+    return {
+        working_days: worker.working_days ?? [],
+        worker_type: worker.worker_type,
+    };
+};
+
 export default {
+    getMyAvailabilityFromDB,
     updateMyAvailabilityIntoDB,
     createWorkerIntoDB,
     updateWorkerIntoDB,

@@ -20,6 +20,11 @@ const invoiceSchema = new Schema<TInvoice>(
             required: true,
             min: 0,
         },
+        hours: {
+            type: Number,
+            default: null,
+            min: 0,
+        },
         payment_method: {
             type: String,
             required: true,

@@ -56,6 +56,18 @@ const getSingleWorker = catchAsync(async (req, res) => {
     });
 });
 
+const getMyAvailability = catchAsync(async (req, res) => {
+    const result = await workerServices.getMyAvailabilityFromDB(
+        req.user.id as string
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: 'Availability retrieved successfully',
+        data: result,
+    });
+});
+
 const updateMyAvailability = catchAsync(async (req, res) => {
     const result = await workerServices.updateMyAvailabilityIntoDB(
         req.user.id as string,
@@ -70,6 +82,7 @@ const updateMyAvailability = catchAsync(async (req, res) => {
 });
 
 export default {
+    getMyAvailability,
     updateMyAvailability,
     createWorker,
     updateWorker,

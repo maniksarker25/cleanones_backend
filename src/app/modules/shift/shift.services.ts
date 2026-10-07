@@ -731,11 +731,20 @@ const settlePayForWorker = async (
     const payHours =
         calcWorkedMs(entry, shift.duration_minutes, shift.assigned_workers.length) / MS_PER_HOUR;
     const earnedAmount = roundToTwoDecimals(payHours * workerDoc.hourly_rate);
+    const earnedHours = roundToTwoDecimals(payHours);
     if (earnedAmount <= 0) return;
 
     await Worker.updateOne(
         { _id: entry.worker },
-        { $inc: { total_earning: earnedAmount, pending_amount: earnedAmount } },
+        {
+            $inc: {
+                total_earning: earnedAmount,
+                pending_amount: earnedAmount,
+                // Hours move in lockstep with the money so paid/unpaid hours stay derivable.
+                total_working_hours: earnedHours,
+                total_unpaid_hours: earnedHours,
+            },
+        },
         { session }
     );
 };
