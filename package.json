@@ -17,6 +17,8 @@
         "migrate:timestamps:dry-run": "ts-node src/scripts/migrate-timestamps-to-camelcase.ts --dry-run",
         "migrate:plan-tasks": "ts-node src/scripts/backfill-cleaning-plan-tasks.ts",
         "migrate:plan-tasks:dry-run": "ts-node src/scripts/backfill-cleaning-plan-tasks.ts --dry-run",
+        "migrate:worker-hours": "ts-node src/scripts/backfill-worker-hours.ts",
+        "migrate:worker-hours:dry-run": "ts-node src/scripts/backfill-worker-hours.ts --dry-run",
         "docs:dev": "ts-node src/docs-server.ts",
         "docs:check": "node --test scripts/check-docs.cjs",
         "docs:typecheck": "tsc --noEmit --esModuleInterop --skipLibCheck --strict --target es2016 --module commonjs src/docs-server.ts",

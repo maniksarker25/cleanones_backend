@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
+import { roundToTwoDecimals } from '../shift/shift.shared.util';
 import { Worker } from '../worker/worker.model';
 import { TInvoice } from './invoice.interface';
 import { Invoice } from './invoice.model';
@@ -18,34 +19,74 @@ const createInvoiceIntoDB = async (
     managerId: string,
     payload: Omit<TInvoice, 'manager'>
 ) => {
-    const worker = await ensureWorkerExists(payload.worker);
+    await ensureWorkerExists(payload.worker);
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-        // Conditioned on pending_amount in the filter (not just the read
-        // above) so two concurrent invoices for the same worker can't both
-        // pass the check and jointly overdraw the pending balance.
-        const updatedWorker = await Worker.findOneAndUpdate(
-            { _id: payload.worker, pending_amount: { $gte: payload.amount } },
-            {
-                $inc: {
-                    total_paid: payload.amount,
-                    pending_amount: -payload.amount,
+        // Optimistic concurrency: the update only applies if the worker's pending
+        // balance and unpaid hours are still what we read, so a concurrent invoice or
+        // check-out can't make us overdraw pending or settle the wrong share of hours.
+        let paidHours = 0;
+        let applied = false;
+        for (let attempt = 0; attempt < 3 && !applied; attempt++) {
+            const current = await Worker.findOne({
+                _id: payload.worker,
+                isDeleted: false,
+            }).session(session);
+            if (!current) {
+                throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
+            }
+            if (current.pending_amount < payload.amount) {
+                throw new AppError(
+                    httpStatus.BAD_REQUEST,
+                    `Insufficient pending amount for this worker (pending: ${current.pending_amount}, requested: ${payload.amount})`
+                );
+            }
+            // Paying off the whole balance clears all unpaid hours exactly; otherwise
+            // hours are settled in proportion to the share of pending money paid.
+            const unpaidHours = current.total_unpaid_hours ?? 0;
+            const settlesAll =
+                Math.abs(current.pending_amount - payload.amount) < 0.005;
+            paidHours = settlesAll
+                ? unpaidHours
+                : roundToTwoDecimals(
+                      unpaidHours * (payload.amount / current.pending_amount)
+                  );
+            const updated = await Worker.findOneAndUpdate(
+                {
+                    _id: payload.worker,
+                    pending_amount: current.pending_amount,
+                    total_unpaid_hours: unpaidHours,
                 },
-            },
-            { new: true, session }
-        );
-        if (!updatedWorker) {
+                {
+                    $inc: {
+                        total_paid: payload.amount,
+                        pending_amount: -payload.amount,
+                    },
+                    $set: {
+                        total_paid_hours: roundToTwoDecimals(
+                            (current.total_paid_hours ?? 0) + paidHours
+                        ),
+                        total_unpaid_hours: roundToTwoDecimals(
+                            unpaidHours - paidHours
+                        ),
+                    },
+                },
+                { new: true, session }
+            );
+            applied = !!updated;
+        }
+        if (!applied) {
             throw new AppError(
-                httpStatus.BAD_REQUEST,
-                `Insufficient pending amount for this worker (pending: ${worker.pending_amount}, requested: ${payload.amount})`
+                httpStatus.CONFLICT,
+                'Worker balance changed while recording the payment, please retry'
             );
         }
 
         const [invoice] = await Invoice.create(
-            [{ ...payload, manager: managerId }],
+            [{ ...payload, manager: managerId, hours: paidHours }],
             { session }
         );
 

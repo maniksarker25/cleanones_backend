@@ -731,12 +731,33 @@ const schemas = {
                     ],
                 },
                 description:
-                    'Only meaningful for Employee-type workers. Freelancers set this through /worker/my-availability.',
+                    'Days the worker is available. The manager, or the worker themselves via /worker/my-availability, can set this for any worker type.',
             },
             hourly_rate: {
                 type: 'number',
                 minimum: 0,
                 example: 25,
+            },
+            total_working_hours: {
+                type: 'number',
+                default: 0,
+                readOnly: true,
+                description:
+                    'Lifetime credited hours. Increases at each shift check-out by the same hours used to compute the earning. Always equals total_paid_hours + total_unpaid_hours. Not directly settable.',
+            },
+            total_paid_hours: {
+                type: 'number',
+                default: 0,
+                readOnly: true,
+                description:
+                    'Hours settled by invoices so far. Each invoice settles total_unpaid_hours in proportion to the share of pending_amount it pays (paying the whole balance clears all unpaid hours).',
+            },
+            total_unpaid_hours: {
+                type: 'number',
+                default: 0,
+                readOnly: true,
+                description:
+                    'Hours worked but not yet covered by an invoice. Rises at check-out, falls when an invoice is created.',
             },
             is_profile_completed: {
                 type: 'boolean',
@@ -3891,6 +3912,13 @@ const schemas = {
         properties: {
             _id: {
                 $ref: '#/components/schemas/ObjectId',
+            },
+            hours: {
+                type: 'number',
+                nullable: true,
+                readOnly: true,
+                description:
+                    'Worker hours this payment settled (computed server-side). Null on invoices created before hours were tracked.',
             },
             manager: {
                 oneOf: [

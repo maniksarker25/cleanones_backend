@@ -21,6 +21,9 @@ export interface TWorker {
     total_earning: number;
     total_paid: number;
     pending_amount: number;
+    total_working_hours: number;
+    total_paid_hours: number;
+    total_unpaid_hours: number;
     is_profile_completed: boolean;
     id_card_front?: string;
     id_card_back?: string;

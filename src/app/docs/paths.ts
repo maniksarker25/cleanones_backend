@@ -1574,13 +1574,51 @@ const paths = {
         },
     },
     '/worker/my-availability': {
+        get: {
+            tags: ['Workers'],
+            summary: "Get the caller's availability",
+            operationId: 'getWorkerMyAvailability',
+            description:
+                "Returns the caller's own working_days and worker_type. Any active worker (Employee or Freelancer).\n\nRequired role: worker.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['worker'],
+            parameters: [],
+            responses: {
+                ...errors,
+                '200': {
+                    description: 'Successful request.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string' },
+                                    data: {
+                                        type: 'object',
+                                        properties: {
+                                            working_days: {
+                                                type: 'array',
+                                                items: { type: 'string' },
+                                            },
+                                            worker_type: { type: 'string' },
+                                        },
+                                    },
+                                },
+                                required: ['success', 'message'],
+                            },
+                        },
+                    },
+                },
+            },
+        },
         patch: {
             ...{
                 tags: ['Workers'],
                 summary: "Update the caller's availability",
                 operationId: 'patchWorkerMyAvailability',
                 description:
-                    'Only active Freelancer-type workers can update their own availability; other workers receive 403.\n\nRequired role: worker.',
+                    'Any active worker (Employee or Freelancer) can update their own availability. The manager can also set it via create/update worker.\n\nRequired role: worker.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['worker'],
                 parameters: [],
@@ -1649,7 +1687,7 @@ const paths = {
                 summary: 'Create worker',
                 operationId: 'postWorkerCreateWorker',
                 description:
-                    'Creates a user and worker profile in a MongoDB transaction. Rejects duplicate email or phone. working_days may only be supplied for Employee-type workers.\n\nRequired role: manager.',
+                    'Creates a user and worker profile in a MongoDB transaction. Rejects duplicate email or phone. working_days may be supplied for any worker type (Employee or Freelancer).\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [],
@@ -1700,7 +1738,7 @@ const paths = {
                 summary: 'Update worker',
                 operationId: 'patchWorkerUpdateWorkerId',
                 description:
-                    'Partial update. Rejects duplicate email or phone. working_days may only be set when the target worker is Employee-type.\n\nRequired role: manager.',
+                    'Partial update. Rejects duplicate email or phone. working_days may be set for any worker type (Employee or Freelancer).\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -7697,7 +7735,7 @@ const paths = {
                 summary: 'Create invoice',
                 operationId: 'postInvoiceCreateInvoice',
                 description:
-                    "Manager-only. Records a payment made to a worker. The worker must exist and not be deleted, and its pending_amount (total_earning - total_paid) must be >= amount, or this returns 400. On success, amount is added to the worker's total_paid and subtracted from pending_amount.\n\nRequired role: manager.",
+                    "Manager-only. Records a payment made to a worker. The worker must exist and not be deleted, and its pending_amount (total_earning - total_paid) must be >= amount, or this returns 400. On success, amount is added to the worker's total_paid and subtracted from pending_amount, and the worker's total_unpaid_hours is settled in proportion (unpaid_hours * amount / pending_amount; paying the whole balance clears all unpaid hours) into total_paid_hours. The hours settled are stored on the invoice as `hours`. Returns 409 if the worker's balance changed concurrently and the payment could not be applied; retry.\n\nRequired role: manager.",
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [],

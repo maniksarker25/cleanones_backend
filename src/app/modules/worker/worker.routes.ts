@@ -7,6 +7,11 @@ import workerValidations from './worker.validation';
 
 const router = Router();
 
+router.get(
+    '/my-availability',
+    auth(USER_ROLE.worker),
+    workerController.getMyAvailability
+);
 router.patch(
     '/my-availability',
     auth(USER_ROLE.worker),

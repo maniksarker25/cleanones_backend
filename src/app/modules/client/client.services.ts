@@ -81,7 +81,7 @@ const createClientIntoDB = async (
 
         await sendEmail({
             email: clientData.email,
-            subject: 'Your Cleanones Account Login Credentials',
+            subject: 'Your CleanOnes Account Login Credentials',
             html: clientCredentialsEmailBody(
                 clientData.name || 'Client',
                 clientData.email,
