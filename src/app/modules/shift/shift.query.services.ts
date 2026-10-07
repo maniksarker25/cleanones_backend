@@ -324,7 +324,7 @@ const attachPlanAndClient = async <T extends { cleaning_plan: Types.ObjectId }>(
     const clientIds = [...new Set(plans.map((p) => p.client.toString()))];
     const clients = clientIds.length
         ? await Client.find({ _id: { $in: clientIds } })
-              .select('name')
+              .select('name company_name')
               .lean()
         : [];
     const clientById = new Map(clients.map((c) => [c._id.toString(), c]));
@@ -349,7 +349,11 @@ const attachPlanAndClient = async <T extends { cleaning_plan: Types.ObjectId }>(
                 ? { _id: plan._id, title: plan.title }
                 : { _id: cleaning_plan, title: null },
             client: plan?.client
-                ? { _id: plan.client._id, name: plan.client.name }
+                ? {
+                      _id: plan.client._id,
+                      name: plan.client.name,
+                      company_name: plan.client.company_name ?? null,
+                  }
                 : null,
         };
     });

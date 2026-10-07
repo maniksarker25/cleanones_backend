@@ -1,4 +1,4 @@
-import { LOGO_CID } from './logo';
+import { LOGO_URL } from './logo';
 
 const clientCredentialsEmailBody = (
     name: string,
@@ -106,7 +106,7 @@ const clientCredentialsEmailBody = (
   <body>
     <div class="container">
       <div class="header">
-        <img src="cid:${LOGO_CID}" alt="CleanOnes" />
+        <img src="${LOGO_URL}" alt="CleanOnes" />
       </div>
       <div class="content">
         <h2>Welcome to CleanOnes, ${name}!</h2>
