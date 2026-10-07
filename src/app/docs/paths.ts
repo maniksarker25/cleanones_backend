@@ -1797,7 +1797,7 @@ const paths = {
                 summary: 'Soft-delete worker',
                 operationId: 'deleteWorkerDeleteWorkerId',
                 description:
-                    'Soft-deletes the worker profile and marks its linked user deleted and blocked. Returns null.\n\nRequired role: manager.',
+                    'Soft-deletes the worker profile and marks its linked user deleted and blocked. Returns null. Returns 409 (with details.shifts listing each shift) if the worker is still assigned to any upcoming or in-progress shift; remove them from those shifts first. Completed and cancelled shifts do not block deletion.\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [

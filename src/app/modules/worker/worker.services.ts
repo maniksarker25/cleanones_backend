@@ -146,6 +146,32 @@ const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
 
 const deleteWorkerFromDB = async (id: string) => {
     validateId(id);
+
+    // Past (completed/cancelled) shifts are history and don't block deletion;
+    // anything still upcoming or in progress must be reassigned first.
+    const activeShifts = await Shift.find({
+        'assigned_workers.worker': id,
+        status: { $in: ['upcoming', 'in_progress'] },
+    })
+        .select('date status cleaning_plan')
+        .sort({ date: 1 })
+        .lean();
+    if (activeShifts.length) {
+        throw new AppError(
+            httpStatus.CONFLICT,
+            `This worker is still assigned to ${activeShifts.length} upcoming or in-progress shift(s). Remove the worker from those shifts before deleting.`,
+            '',
+            {
+                shifts: activeShifts.map((shift) => ({
+                    shift: shift._id,
+                    date: shift.date,
+                    status: shift.status,
+                    cleaning_plan: shift.cleaning_plan,
+                })),
+            }
+        );
+    }
+
     const session = await mongoose.startSession();
     try {
         await session.withTransaction(async () => {
