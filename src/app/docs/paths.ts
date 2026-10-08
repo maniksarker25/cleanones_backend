@@ -1738,7 +1738,7 @@ const paths = {
                 summary: 'Update worker',
                 operationId: 'patchWorkerUpdateWorkerId',
                 description:
-                    'Partial update. Rejects duplicate email or phone. working_days may be set for any worker type (Employee or Freelancer).\n\nRequired role: manager.',
+                    'Partial update. Rejects duplicate email or phone. hourly_rate cannot be changed while the worker has a pending_amount greater than 0 (409 with details.pending_amount and details.current_hourly_rate); create an invoice for the full balance first. Sending the unchanged rate is allowed.working_days may be set for any worker type (Employee or Freelancer).\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [
@@ -1846,7 +1846,7 @@ const paths = {
                 summary: 'List workers',
                 operationId: 'getWorkerAllWorkers',
                 description:
-                    'Pagination is nested under data.meta; records are under data.result. Excludes soft-deleted workers (including legacy records missing isDeleted). Each record includes all-time shift stats computed in a single batched query across the whole page (not one query per worker): total_completed_work_hours (sum of check_out_at - check_in_at across completed check-ins, in hours), total_shift (shifts assigned, excluding cancelled), total_late_check_ins / total_on_time_check_ins (checked in after/at-or-before the shift\'s scheduled date_time), and total_absent (past shifts never checked into at all). total_late_check_ins, total_on_time_check_ins and total_absent are mutually exclusive per shift.\n\nRequired role: manager.',
+                    'Pagination is nested under data.meta; records are under data.result. Excludes soft-deleted workers (including legacy records missing isDeleted). Each record includes all-time shift stats computed in a single batched query across the whole page (not one query per worker): total_shift (shifts assigned, excluding cancelled), total_late_check_ins / total_on_time_check_ins (checked in after/at-or-before the shift\'s scheduled date_time), and total_absent (past shifts never checked into at all). total_late_check_ins, total_on_time_check_ins and total_absent are mutually exclusive per shift.\n\nRequired role: manager.',
                 security: [{ bearerAuth: [] }],
                 'x-roles': ['manager'],
                 parameters: [

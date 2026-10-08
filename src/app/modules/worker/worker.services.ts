@@ -4,12 +4,10 @@ import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
 import chatServices from '../chat/chat.services';
 import { Shift } from '../shift/shift.model';
-import { calcWorkedMs, MS_PER_HOUR } from '../shift/shift.shared.util';
 import { PROFILE_MODEL_BY_ROLE, USER_ROLE } from '../user/user.constant';
 import { User } from '../user/user.model';
 import { Worker } from './worker.model';
 import { TWorker } from './worker.interface';
-import { WorkerType } from './worker.constant';
 import workerValidations, {
     CreateWorkerInput,
     UpdateWorkerInput,
@@ -96,6 +94,26 @@ const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
             }).session(session);
             if (!worker)
                 throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
+            // Earnings already accrued are priced at the old rate; changing it while
+            // money is still owed would make that balance ambiguous. Re-sending the
+            // current rate is not a change, so it is allowed.
+
+            console.log("pending amount", worker.pending_amount, "hourly rate", data.hourly_rate, "worker hourly rate", worker.hourly_rate)
+            if (
+                data.hourly_rate !== undefined &&
+                data.hourly_rate !== worker.hourly_rate &&
+                worker.pending_amount >= 1
+            ) {
+                throw new AppError(
+                    httpStatus.CONFLICT,
+                    `Hourly rate can't be changed while ${roundToTwoDecimals(worker.pending_amount)} is still pending. Pay the pending amount first.`,
+                    '',
+                    {
+                        pending_amount: worker.pending_amount,
+                        current_hourly_rate: worker.hourly_rate,
+                    }
+                );
+            }
             const contactFilters = [];
             if (data.email !== undefined)
                 contactFilters.push({ email: data.email });
@@ -201,43 +219,7 @@ const deleteWorkerFromDB = async (id: string) => {
 
 const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
 
-const SHIFT_HOURS_SELECT =
-    'duration_minutes assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at';
-
-// Lifetime credited hours per worker (see calcWorkedMs). Cancelled shifts are excluded.
-const getTotalCompletedWorkHoursByWorker = async (
-    workerIds: mongoose.Types.ObjectId[]
-) => {
-    const hoursByWorker = new Map<string, number>();
-    if (!workerIds.length) return hoursByWorker;
-
-    const shifts = await Shift.find({
-        'assigned_workers.worker': { $in: workerIds },
-        status: { $ne: 'cancelled' },
-    })
-        .select(SHIFT_HOURS_SELECT)
-        .lean();
-
-    const idSet = new Set(workerIds.map((id) => id.toString()));
-    const msByWorker = new Map<string, number>();
-    for (const shift of shifts) {
-        const workerCount = shift.assigned_workers.length;
-        for (const entry of shift.assigned_workers) {
-            const workerId = entry.worker.toString();
-            if (!idSet.has(workerId)) continue;
-            const ms = calcWorkedMs(entry, shift.duration_minutes, workerCount);
-            if (ms > 0) msByWorker.set(workerId, (msByWorker.get(workerId) ?? 0) + ms);
-        }
-    }
-
-    for (const [workerId, ms] of msByWorker) {
-        hoursByWorker.set(workerId, roundToTwoDecimals(ms / MS_PER_HOUR));
-    }
-    return hoursByWorker;
-};
-
 interface WorkerShiftStats {
-    total_completed_work_hours: number;
     total_shift: number;
     total_late_check_ins: number;
     total_on_time_check_ins: number;
@@ -268,12 +250,10 @@ const getWorkerShiftStatsByWorker = async (
         'assigned_workers.worker': { $in: workerIds },
         status: { $ne: 'cancelled' },
     })
-        .select(`date date_time ${SHIFT_HOURS_SELECT}`)
+        .select('date date_time assigned_workers.worker assigned_workers.check_in_at')
         .lean();
 
-    const msByWorker = new Map<string, number>();
     for (const shift of shifts) {
-        const workerCount = shift.assigned_workers.length;
         for (const aw of shift.assigned_workers) {
             const workerId = aw.worker.toString();
             if (!idSet.has(workerId)) continue;
@@ -281,7 +261,6 @@ const getWorkerShiftStatsByWorker = async (
             const stats =
                 statsByWorker.get(workerId) ??
                 ({
-                    total_completed_work_hours: 0,
                     total_shift: 0,
                     total_late_check_ins: 0,
                     total_on_time_check_ins: 0,
@@ -290,11 +269,6 @@ const getWorkerShiftStatsByWorker = async (
             statsByWorker.set(workerId, stats);
 
             stats.total_shift += 1;
-
-            const workedMs = calcWorkedMs(aw, shift.duration_minutes, workerCount);
-            if (workedMs > 0) {
-                msByWorker.set(workerId, (msByWorker.get(workerId) ?? 0) + workedMs);
-            }
 
             if (aw.check_in_at) {
                 if (aw.check_in_at > shift.date_time) {
@@ -308,16 +282,10 @@ const getWorkerShiftStatsByWorker = async (
         }
     }
 
-    for (const [workerId, ms] of msByWorker) {
-        const stats = statsByWorker.get(workerId);
-        if (stats) stats.total_completed_work_hours = roundToTwoDecimals(ms / MS_PER_HOUR);
-    }
-
     return statsByWorker;
 };
 
 const EMPTY_WORKER_SHIFT_STATS: WorkerShiftStats = {
-    total_completed_work_hours: 0,
     total_shift: 0,
     total_late_check_ins: 0,
     total_on_time_check_ins: 0,
@@ -409,14 +377,10 @@ const getSingleWorkerFromDB = async (id: string) => {
     const worker = await Worker.findOne({ _id: id, ...activeWorker });
     if (!worker) throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
 
-    const [totalHours, attendanceStats] = await Promise.all([
-        getTotalCompletedWorkHoursByWorker([worker._id]),
-        getWorkerAttendanceStatsFromDB(worker._id),
-    ]);
+    const attendanceStats = await getWorkerAttendanceStatsFromDB(worker._id);
 
     return {
         ...worker.toObject(),
-        total_completed_work_hours: totalHours.get(worker._id.toString()) ?? 0,
         ...attendanceStats,
     };
 };
