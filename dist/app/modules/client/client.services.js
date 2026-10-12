@@ -33,6 +33,9 @@ const clientCredentialsEmailBody_1 = __importDefault(require("../../mailTemplate
 const sendEmail_1 = __importDefault(require("../../utilities/sendEmail"));
 const user_constant_1 = require("../user/user.constant");
 const user_model_1 = require("../user/user.model");
+const client_interface_1 = require("./client.interface");
+const client_validation_1 = __importDefault(require("./client.validation"));
+const csvBulk_1 = require("../../utilities/csvBulk");
 const client_model_1 = require("./client.model");
 const shift_model_1 = require("../shift/shift.model");
 const cleaning_plan_model_1 = require("../cleaning_plan/cleaning_plan.model");
@@ -43,7 +46,9 @@ const task_model_1 = require("../task/task.model");
 const additional_task_model_1 = require("../additional_task/additional_task.model");
 require("../worker/worker.model");
 const shift_services_1 = require("../shift/shift.services");
-const createClientIntoDB = (managerId, payload) => __awaiter(void 0, void 0, void 0, function* () {
+const shift_shared_util_1 = require("../shift/shift.shared.util");
+const createClientIntoDB = (managerId, payload, options = {}) => __awaiter(void 0, void 0, void 0, function* () {
+    const { sendCredentialsEmail = true } = options;
     const { password, confirmPassword } = payload, clientData = __rest(payload, ["password", "confirmPassword"]);
     if (password !== confirmPassword) {
         throw new appError_1.default(http_status_1.default.BAD_REQUEST, "Password and confirm password doesn't match");
@@ -73,11 +78,13 @@ const createClientIntoDB = (managerId, payload) => __awaiter(void 0, void 0, voi
         const clientPayload = Object.assign(Object.assign({}, clientData), { user: user._id, manager: managerId });
         const [profile] = yield client_model_1.Client.create([clientPayload], { session });
         yield user_model_1.User.findByIdAndUpdate(user._id, { profileId: profile._id }, { session });
-        yield (0, sendEmail_1.default)({
-            email: clientData.email,
-            subject: 'Your Cleanones Account Login Credentials',
-            html: (0, clientCredentialsEmailBody_1.default)(clientData.name || 'Client', clientData.email, password),
-        });
+        if (sendCredentialsEmail) {
+            yield (0, sendEmail_1.default)({
+                email: clientData.email,
+                subject: 'Your CleanOnes Account Login Credentials',
+                html: (0, clientCredentialsEmailBody_1.default)(clientData.name || 'Client', clientData.email, password),
+            });
+        }
         yield session.commitTransaction();
         session.endSession();
         // Best-effort, outside the transaction — same pattern as
@@ -92,6 +99,59 @@ const createClientIntoDB = (managerId, payload) => __awaiter(void 0, void 0, voi
         session.endSession();
         throw error;
     }
+});
+const CLIENT_CSV_COLUMNS = [
+    'name',
+    'email',
+    'phone',
+    'company_name',
+    'licence_expiration_date',
+    'contract_status',
+    'password',
+];
+// Bulk import: one client per CSV row, created independently (a bad row never blocks the rest).
+// No credentials email is sent — the manager hands the passwords from the CSV over directly.
+const bulkCreateClientsFromCsv = (managerId, csvBuffer) => __awaiter(void 0, void 0, void 0, function* () {
+    const rows = yield (0, csvBulk_1.parseCsvBuffer)(csvBuffer, [
+        'name',
+        'email',
+        'phone',
+        'password',
+    ]);
+    const result = {
+        total: rows.length,
+        created_count: 0,
+        failed_count: 0,
+        created: [],
+        failed: [],
+    };
+    for (const [index, raw] of rows.entries()) {
+        // +2: row 1 is the header, and spreadsheets number from 1.
+        const rowNumber = index + 2;
+        try {
+            const row = (0, csvBulk_1.compactRow)(raw, CLIENT_CSV_COLUMNS);
+            if (row.contract_status) {
+                row.contract_status = (0, csvBulk_1.matchOption)(row.contract_status, client_interface_1.CONTRACT_STATUS);
+            }
+            const data = client_validation_1.default.createClientValidationSchema.shape.body.parse(Object.assign(Object.assign({}, row), { confirmPassword: row.password }));
+            const profile = yield createClientIntoDB(managerId, data, { sendCredentialsEmail: false });
+            result.created.push({
+                row: rowNumber,
+                email: data.email,
+                id: profile._id.toString(),
+            });
+        }
+        catch (error) {
+            result.failed.push({
+                row: rowNumber,
+                email: raw.email || undefined,
+                error: (0, csvBulk_1.describeRowError)(error),
+            });
+        }
+    }
+    result.created_count = result.created.length;
+    result.failed_count = result.failed.length;
+    return result;
 });
 const updateClientIntoDB = (managerId, id, payload) => __awaiter(void 0, void 0, void 0, function* () {
     const client = yield client_model_1.Client.findOne({ _id: id, isDeleted: false });
@@ -501,7 +561,7 @@ const getClientOverviewFromDB = (clientId) => __awaiter(void 0, void 0, void 0, 
     };
 });
 function getClientScheduleRosterFromDB(clientId, queryDate) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
+    var _a, _b, _c, _d, _e, _f, _g;
     return __awaiter(this, void 0, void 0, function* () {
         const client = yield client_model_1.Client.findById(clientId);
         if (!client)
@@ -573,14 +633,12 @@ function getClientScheduleRosterFromDB(clientId, queryDate) {
         const teamMembersSet = new Set();
         // 5. Process materialized shifts first
         for (const shift of savedShifts) {
-            const locationName = ((_a = shift.location) === null || _a === void 0 ? void 0 : _a.name) ||
-                ((_c = (_b = shift.location) === null || _b === void 0 ? void 0 : _b.location) === null || _c === void 0 ? void 0 : _c.name) ||
-                'CleanOnes HQ';
-            const locationAddress = ((_e = (_d = shift.location) === null || _d === void 0 ? void 0 : _d.location) === null || _e === void 0 ? void 0 : _e.address) || '';
-            const planId = ((_g = (_f = shift.cleaning_plan) === null || _f === void 0 ? void 0 : _f._id) === null || _g === void 0 ? void 0 : _g.toString()) ||
-                ((_h = shift.cleaning_plan) === null || _h === void 0 ? void 0 : _h.toString()) ||
-                '';
-            const planTitle = ((_j = shift.cleaning_plan) === null || _j === void 0 ? void 0 : _j.title) || 'Cleaning Plan';
+            const populatedShiftLocation = shift.location.location;
+            const locationName = shift.location.name || (populatedShiftLocation === null || populatedShiftLocation === void 0 ? void 0 : populatedShiftLocation.name) || 'CleanOnes HQ';
+            const locationAddress = (populatedShiftLocation === null || populatedShiftLocation === void 0 ? void 0 : populatedShiftLocation.address) || '';
+            const populatedPlan = shift.cleaning_plan;
+            const planId = ((_a = populatedPlan === null || populatedPlan === void 0 ? void 0 : populatedPlan._id) === null || _a === void 0 ? void 0 : _a.toString()) || ((_b = shift.cleaning_plan) === null || _b === void 0 ? void 0 : _b.toString()) || '';
+            const planTitle = (populatedPlan === null || populatedPlan === void 0 ? void 0 : populatedPlan.title) || 'Cleaning Plan';
             // A materialized Shift always carries a real date_time/end_time —
             // both are set together, required, at staffing time.
             const durationMinutes = shift.duration_minutes || 480;
@@ -591,7 +649,7 @@ function getClientScheduleRosterFromDB(clientId, queryDate) {
             const assignedWorkers = workers.map((w) => {
                 var _a;
                 return ({
-                    name: w.name || ((_a = w.worker) === null || _a === void 0 ? void 0 : _a.name) || 'Specialist',
+                    name: ((_a = w.worker) === null || _a === void 0 ? void 0 : _a.name) || 'Specialist',
                     role: w.role || 'Specialist',
                 });
             });
@@ -614,25 +672,24 @@ function getClientScheduleRosterFromDB(clientId, queryDate) {
                     durationMinutes,
                     status: 'unstaffed',
                     isStaffed,
-                    roomsCount: ((_k = shift.rooms) === null || _k === void 0 ? void 0 : _k.length) || 0,
-                    tasksCount: ((_l = shift.tasks) === null || _l === void 0 ? void 0 : _l.length) || 0,
+                    roomsCount: ((_c = shift.rooms) === null || _c === void 0 ? void 0 : _c.length) || 0,
+                    tasksCount: ((_d = shift.tasks) === null || _d === void 0 ? void 0 : _d.length) || 0,
                     assignedWorkers,
                 });
                 teamMembersSet.add('Unassigned Specialist');
             }
             else {
                 for (const aw of workers) {
-                    const workerName = aw.name ||
-                        ((_m = aw.worker) === null || _m === void 0 ? void 0 : _m.name) ||
-                        'Specialist';
+                    const populatedWorker = aw.worker;
+                    const workerName = (populatedWorker === null || populatedWorker === void 0 ? void 0 : populatedWorker.name) || 'Specialist';
                     teamMembersSet.add(workerName);
                     rosterShifts.push({
-                        id: `${shift._id}_${((_o = aw.worker) === null || _o === void 0 ? void 0 : _o._id) || aw.name}`,
+                        id: `${shift._id}_${(populatedWorker === null || populatedWorker === void 0 ? void 0 : populatedWorker._id) || workerName}`,
                         shiftId: shift._id.toString(),
                         planId,
                         planTitle,
                         workerName,
-                        workerId: ((_q = (_p = aw.worker) === null || _p === void 0 ? void 0 : _p._id) === null || _q === void 0 ? void 0 : _q.toString()) || '',
+                        workerId: ((_e = populatedWorker === null || populatedWorker === void 0 ? void 0 : populatedWorker._id) === null || _e === void 0 ? void 0 : _e.toString()) || '',
                         workerRole: aw.role || 'Specialist',
                         location: locationName,
                         locationAddress,
@@ -642,8 +699,8 @@ function getClientScheduleRosterFromDB(clientId, queryDate) {
                         durationMinutes,
                         status: shift.status,
                         isStaffed,
-                        roomsCount: ((_r = shift.rooms) === null || _r === void 0 ? void 0 : _r.length) || 0,
-                        tasksCount: ((_s = shift.tasks) === null || _s === void 0 ? void 0 : _s.length) || 0,
+                        roomsCount: ((_f = shift.rooms) === null || _f === void 0 ? void 0 : _f.length) || 0,
+                        tasksCount: ((_g = shift.tasks) === null || _g === void 0 ? void 0 : _g.length) || 0,
                         assignedWorkers,
                     });
                 }
@@ -659,8 +716,9 @@ function getClientScheduleRosterFromDB(clientId, queryDate) {
             if (!hasMatchingTask && planTaskIdsForThisPlan.length > 0) {
                 continue;
             }
-            const locationName = ((_t = plan.location) === null || _t === void 0 ? void 0 : _t.name) || 'CleanOnes HQ';
-            const locationAddress = ((_u = plan.location) === null || _u === void 0 ? void 0 : _u.address) || '';
+            const populatedPlanLocation = plan.location;
+            const locationName = (populatedPlanLocation === null || populatedPlanLocation === void 0 ? void 0 : populatedPlanLocation.name) || 'CleanOnes HQ';
+            const locationAddress = (populatedPlanLocation === null || populatedPlanLocation === void 0 ? void 0 : populatedPlanLocation.address) || '';
             const planId = plan._id.toString();
             const planTitle = plan.title || 'Cleaning Plan';
             let planTasksDuration = 0;
@@ -740,10 +798,10 @@ const getClientActiveProgressFromDB = (clientId) => __awaiter(void 0, void 0, vo
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
-    const todaysShifts = yield shift_model_1.Shift.find({
+    const todaysShifts = yield (0, shift_shared_util_1.attachWorkerNames)(yield shift_model_1.Shift.find({
         cleaning_plan: { $in: clientPlanIds },
         date: { $gte: todayStart, $lte: todayEnd },
-    }).lean();
+    }).lean());
     const now = new Date();
     let total_estimated_hours = 0;
     let total_worked_hours = 0;
@@ -932,6 +990,7 @@ const getClientPlanRosterFromDB = (clientId, params) => __awaiter(void 0, void 0
 });
 const clientServices = {
     createClientIntoDB,
+    bulkCreateClientsFromCsv,
     updateClientIntoDB,
     deleteClientFromDB,
     getAllClientsFromDB,
