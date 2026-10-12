@@ -12,7 +12,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const resend_1 = require("resend");
 const config_1 = __importDefault(require("../config"));
 const resend = new resend_1.Resend(config_1.default.resend.api_key);

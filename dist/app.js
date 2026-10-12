@@ -13,24 +13,36 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateSignature = void 0;
-/* eslint-disable no-undef */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable no-unused-vars */
-/* eslint-disable prefer-const */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const cors_1 = __importDefault(require("cors"));
 const crypto_1 = __importDefault(require("crypto"));
 const express_1 = __importDefault(require("express"));
+const helmet_1 = __importDefault(require("helmet"));
 const sendContactUsEmail_1 = __importDefault(require("./app/helper/sendContactUsEmail"));
 const globalErrorHandler_1 = __importDefault(require("./app/middlewares/globalErrorHandler"));
 const notFound_1 = __importDefault(require("./app/middlewares/notFound"));
+const rateLimiter_middleware_1 = require("./app/middlewares/rateLimiter.middleware");
 const routes_1 = __importDefault(require("./app/routes"));
 const swagger_1 = require("./app/docs/swagger");
 require("./app/events/listeners");
 const app = (0, express_1.default)();
 // VERY IMPORTANT (for proxy / nginx)
 app.set('trust proxy', 1);
+// security headers ----------------
+app.use((0, helmet_1.default)({
+    // This API's real clients (mobile/web apps) only ever consume JSON.
+    // The one HTML page it renders itself is Swagger UI (/api-docs),
+    // which injects inline scripts/styles that a default CSP blocks —
+    // tuning CSP just for that one docs page isn't worth it, so CSP
+    // stays off here while every other helmet header (frameguard,
+    // nosniff, HSTS, referrer-policy, hidePoweredBy, etc.) still applies.
+    contentSecurityPolicy: false,
+    // Uploaded photos (/uploads) are loaded cross-origin by every
+    // frontend in the CORS allowlist below (the vercel.app domains) —
+    // helmet's default 'same-origin' resource policy would make
+    // browsers block those image loads.
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 // parser----------------
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
@@ -59,8 +71,7 @@ app.use((0, cors_1.default)({
 app.use('/uploads', express_1.default.static('uploads'));
 // application routers ----------------
 (0, swagger_1.setupSwagger)(app);
-// app.use(rateLimiters.apiLimiter);
-app.use('/api/v1', routes_1.default);
+app.use('/api/v1', rateLimiter_middleware_1.rateLimiters.apiLimiter, routes_1.default);
 app.post('/contact-us', sendContactUsEmail_1.default);
 app.get('/', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     res.send({ message: 'nice to meet you 2' });

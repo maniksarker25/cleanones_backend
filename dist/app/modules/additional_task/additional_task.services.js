@@ -20,6 +20,7 @@ const availability_util_1 = require("../cleaning_plan/availability.util");
 const cleaning_plan_model_1 = require("../cleaning_plan/cleaning_plan.model");
 const cleaning_plan_services_1 = __importDefault(require("../cleaning_plan/cleaning_plan.services"));
 const shift_services_1 = require("../shift/shift.services");
+const shift_model_1 = require("../shift/shift.model");
 const shift_snapshot_util_1 = require("../shift/shift.snapshot.util");
 const additional_task_model_1 = require("./additional_task.model");
 const additional_task_validation_1 = require("./additional_task.validation");
@@ -43,6 +44,19 @@ const ensureClientOwnsAdditionalTask = (cleaningPlanId, requester, notFoundMessa
         throw new appError_1.default(http_status_1.default.NOT_FOUND, notFoundMessage);
     }
 });
+// A started or finished shift never picks up new additional tasks (resync only
+// folds into 'upcoming' shifts), so one added for that day would sit approved
+// but never reach the crew or the shift's pay cap. Refuse it up front.
+const assertShiftNotStartedForDay = (planId, dateTime) => __awaiter(void 0, void 0, void 0, function* () {
+    const started = yield shift_model_1.Shift.exists({
+        cleaning_plan: planId,
+        date: (0, availability_util_1.normalizeToUTCDateOnly)(dateTime),
+        status: { $in: ['in_progress', 'completed'] },
+    });
+    if (started) {
+        throw new appError_1.default(http_status_1.default.BAD_REQUEST, 'The shift for this date has already started or completed, so an additional task cannot be added to it');
+    }
+});
 // ─── Create (Client) ──────────────────────────────────────────────────────────
 const createAdditionalTaskIntoDB = (payload, requester) => __awaiter(void 0, void 0, void 0, function* () {
     const requesterRole = requester.role;
@@ -64,6 +78,7 @@ const createAdditionalTaskIntoDB = (payload, requester) => __awaiter(void 0, voi
     if (!(0, availability_util_1.anyPatternOccursOnDate)(snapshot.patterns, day)) {
         throw new appError_1.default(http_status_1.default.BAD_REQUEST, 'This cleaning plan has no occurrence on the given date');
     }
+    yield assertShiftNotStartedForDay(plan._id, payload.date_time);
     const task = yield additional_task_model_1.AdditionalTask.create(Object.assign(Object.assign({}, payload), { is_completed: false, status: requesterRole === user_constant_1.USER_ROLE.manager ? 'Approved' : 'Pending' }));
     // A manager creating one directly is auto-approved (see status
     // above) — there's nothing pending for other managers to review, so only
@@ -92,6 +107,9 @@ const updateAdditionalTaskIntoDB = (id, payload, requester) => __awaiter(void 0,
     // prevent client from touching approval fields
     delete payload.status;
     delete payload.reject_reason;
+    if (payload.date_time) {
+        yield assertShiftNotStartedForDay(task.cleaning_plan_id, payload.date_time);
+    }
     const result = yield additional_task_model_1.AdditionalTask.findByIdAndUpdate(id, payload, {
         new: true,
         runValidators: true,
@@ -109,6 +127,9 @@ overrides) => __awaiter(void 0, void 0, void 0, function* () {
     const task = yield additional_task_model_1.AdditionalTask.findById(id);
     if (!task)
         throw new appError_1.default(http_status_1.default.NOT_FOUND, 'Additional task not found');
+    if (status === 'Approved' && task.status !== 'Approved') {
+        yield assertShiftNotStartedForDay(task.cleaning_plan_id, task.date_time);
+    }
     const result = yield additional_task_model_1.AdditionalTask.findByIdAndUpdate(id, Object.assign(Object.assign({ status, 
         // Approving always clears out any reason left over from a
         // previous rejection.
