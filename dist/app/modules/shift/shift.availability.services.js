@@ -12,13 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.findWorkerConflictOnDate = void 0;
 const availability_util_1 = require("../cleaning_plan/availability.util");
 const shift_model_1 = require("./shift.model");
-/**
- * Single-date conflict check for staffing one shift occurrence: does this
- * worker already have another staffed (materialized) shift on the same date
- * whose time window overlaps? A CleaningPlan carries no schedule of its own
- * (see cleaning_plan.interface.ts), so nothing has a time to conflict with
- * until it's actually staffed — only real Shift documents are ever checked.
- */
+/** Does this worker already have another staffed shift the same date with an overlapping time window? */
 const findWorkerConflictOnDate = (workerId, date, dateTime, durationMinutes, exclude) => __awaiter(void 0, void 0, void 0, function* () {
     const otherShifts = yield shift_model_1.Shift.find(Object.assign({ date, 'assigned_workers.worker': workerId, status: { $ne: 'cancelled' } }, (exclude.shiftId && { _id: { $ne: exclude.shiftId } })))
         .select('date_time duration_minutes cleaning_plan')

@@ -12,7 +12,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const axios_1 = __importDefault(require("axios"));
 const sendPushNotification = ({ playerIds, message, heading = 'Notification', url, data, collapseId, }) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -23,9 +22,7 @@ const sendPushNotification = ({ playerIds, message, heading = 'Notification', ur
             data }, (collapseId && {
             collapse_id: collapseId,
             android_group: collapseId,
-            // Android also needs an explicit summary text when
-            // grouping, otherwise it just shows the latest message
-            // with no "N more" indication.
+            // Android needs an explicit summary text when grouping.
             android_group_message: { en: 'You have new messages' },
         })), {
             headers: {
@@ -34,7 +31,10 @@ const sendPushNotification = ({ playerIds, message, heading = 'Notification', ur
         });
     }
     catch (error) {
-        console.error('OneSignal Error:', ((_a = error === null || error === void 0 ? void 0 : error.response) === null || _a === void 0 ? void 0 : _a.data) || error.message);
+        const responseData = error && typeof error === 'object' && 'response' in error
+            ? (_a = error.response) === null || _a === void 0 ? void 0 : _a.data
+            : undefined;
+        console.error('OneSignal Error:', responseData !== null && responseData !== void 0 ? responseData : (error instanceof Error ? error.message : error));
     }
 });
 exports.default = sendPushNotification;
