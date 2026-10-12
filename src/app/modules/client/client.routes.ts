@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import auth from '../../middlewares/auth';
+import csvUpload from '../../middlewares/csvUpload';
 import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import clientController from './client.controller';
@@ -12,6 +13,13 @@ router.post(
     auth(USER_ROLE.manager),
     validateRequest(clientValidations.createClientValidationSchema),
     clientController.createClient
+);
+
+router.post(
+    '/bulk-upload',
+    auth(USER_ROLE.manager),
+    csvUpload,
+    clientController.bulkUploadClients
 );
 
 router.patch(

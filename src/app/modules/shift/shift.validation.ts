@@ -60,7 +60,7 @@ const dateOnlyString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use YY
 // MAX_BULK_ASSIGN_RANGE_DAYS in shift.services.ts — kept in sync manually
 // since a Zod schema can't import a service-layer constant without creating
 // a validation -> service dependency the rest of this file avoids.
-const MAX_BULK_ASSIGN_DATES = 60;
+const MAX_BULK_ASSIGN_DATES = 62;
 
 const bulkAssignValidationSchema = z.object({
     body: z

@@ -56,6 +56,18 @@ const getSingleWorker = catchAsync(async (req, res) => {
     });
 });
 
+const bulkUploadWorkers = catchAsync(async (req, res) => {
+    const result = await workerServices.bulkCreateWorkersFromCsv(
+        (req.file as Express.Multer.File).buffer
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: `${result.created_count} of ${result.total} worker(s) created`,
+        data: result,
+    });
+});
+
 const getMyAvailability = catchAsync(async (req, res) => {
     const result = await workerServices.getMyAvailabilityFromDB(
         req.user.id as string
@@ -82,6 +94,7 @@ const updateMyAvailability = catchAsync(async (req, res) => {
 });
 
 export default {
+    bulkUploadWorkers,
     getMyAvailability,
     updateMyAvailability,
     createWorker,

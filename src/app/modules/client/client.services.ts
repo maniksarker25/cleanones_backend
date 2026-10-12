@@ -9,7 +9,15 @@ import sendEmail from '../../utilities/sendEmail';
 import { USER_ROLE } from '../user/user.constant';
 import { TUser } from '../user/user.interface';
 import { User } from '../user/user.model';
-import { TClient } from './client.interface';
+import { CONTRACT_STATUS, TClient } from './client.interface';
+import clientValidations from './client.validation';
+import {
+    BulkResult,
+    compactRow,
+    describeRowError,
+    matchOption,
+    parseCsvBuffer,
+} from '../../utilities/csvBulk';
 import { Client } from './client.model';
 import { TLocation } from '../location/location.interface';
 import { Shift } from '../shift/shift.model';
@@ -28,8 +36,10 @@ const createClientIntoDB = async (
     payload: Omit<TClient, 'manager'> & {
         password: string;
         confirmPassword: string;
-    }
+    },
+    options: { sendCredentialsEmail?: boolean } = {}
 ) => {
+    const { sendCredentialsEmail = true } = options;
     const { password, confirmPassword, ...clientData } = payload;
 
     if (password !== confirmPassword) {
@@ -79,15 +89,17 @@ const createClientIntoDB = async (
             { session }
         );
 
-        await sendEmail({
-            email: clientData.email,
-            subject: 'Your CleanOnes Account Login Credentials',
-            html: clientCredentialsEmailBody(
-                clientData.name || 'Client',
-                clientData.email,
-                password
-            ),
-        });
+        if (sendCredentialsEmail) {
+            await sendEmail({
+                email: clientData.email,
+                subject: 'Your CleanOnes Account Login Credentials',
+                html: clientCredentialsEmailBody(
+                    clientData.name || 'Client',
+                    clientData.email,
+                    password
+                ),
+            });
+        }
 
         await session.commitTransaction();
         session.endSession();
@@ -104,6 +116,77 @@ const createClientIntoDB = async (
         session.endSession();
         throw error;
     }
+};
+
+const CLIENT_CSV_COLUMNS = [
+    'name',
+    'email',
+    'phone',
+    'company_name',
+    'licence_expiration_date',
+    'contract_status',
+    'password',
+];
+
+// Bulk import: one client per CSV row, created independently (a bad row never blocks the rest).
+// No credentials email is sent — the manager hands the passwords from the CSV over directly.
+const bulkCreateClientsFromCsv = async (
+    managerId: string,
+    csvBuffer: Buffer
+): Promise<BulkResult> => {
+    const rows = await parseCsvBuffer(csvBuffer, [
+        'name',
+        'email',
+        'phone',
+        'password',
+    ]);
+
+    const result: BulkResult = {
+        total: rows.length,
+        created_count: 0,
+        failed_count: 0,
+        created: [],
+        failed: [],
+    };
+
+    for (const [index, raw] of rows.entries()) {
+        // +2: row 1 is the header, and spreadsheets number from 1.
+        const rowNumber = index + 2;
+        try {
+            const row = compactRow(raw, CLIENT_CSV_COLUMNS);
+            if (row.contract_status) {
+                row.contract_status = matchOption(
+                    row.contract_status,
+                    CONTRACT_STATUS
+                );
+            }
+            const data =
+                clientValidations.createClientValidationSchema.shape.body.parse({
+                    ...row,
+                    confirmPassword: row.password,
+                });
+            const profile = await createClientIntoDB(
+                managerId,
+                data as Parameters<typeof createClientIntoDB>[1],
+                { sendCredentialsEmail: false }
+            );
+            result.created.push({
+                row: rowNumber,
+                email: data.email,
+                id: profile._id.toString(),
+            });
+        } catch (error) {
+            result.failed.push({
+                row: rowNumber,
+                email: raw.email || undefined,
+                error: describeRowError(error),
+            });
+        }
+    }
+
+    result.created_count = result.created.length;
+    result.failed_count = result.failed.length;
+    return result;
 };
 
 const updateClientIntoDB = async (
@@ -1126,6 +1209,7 @@ const getClientPlanRosterFromDB = async (clientId: string, params: ClientRosterP
 
 const clientServices = {
     createClientIntoDB,
+    bulkCreateClientsFromCsv,
     updateClientIntoDB,
     deleteClientFromDB,
     getAllClientsFromDB,

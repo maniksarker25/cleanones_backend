@@ -6,13 +6,15 @@ import { combineDateWithTimeOfDay, normalizeToUTCDateOnly } from '../cleaning_pl
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
 import { Worker } from '../worker/worker.model';
 import { IAssignedWorker } from './shift.interface';
+import { BulkAssignment } from './bulk_assignment.model';
 import { Shift } from './shift.model';
 import { assignWorkersToShift } from './shift.services';
 import { listShiftsInRange } from './shift.query.services';
 import { FULL_WEEKDAY_NAMES } from './shift.shared.util';
 
 // Caps how far a bulk-assign preview/confirm can span, so neither walk is unbounded.
-export const MAX_BULK_ASSIGN_RANGE_DAYS = 60;
+// 62 so a full 2-month range always fits. Keep in sync with MAX_BULK_ASSIGN_DATES in shift.validation.ts.
+export const MAX_BULK_ASSIGN_RANGE_DAYS = 62;
 
 // A due date with nobody covering it: virtual, cancelled, or an empty crew.
 const isUnstaffedGap = (entry: {
@@ -102,6 +104,41 @@ export const previewBulkAssignForWorker = async (
         other_gap_dates,
         already_covered_count,
     };
+};
+
+/**
+ * Saves the bulk-assign so the reminder cron knows when it runs out, and marks
+ * any earlier un-renewed bulk-assign for the same plan+worker as renewed
+ * (this one starts after its last date), which stops its reminders.
+ */
+const recordBulkAssignment = async (
+    managerId: string,
+    planId: string,
+    workerId: string,
+    assignedDates: string[]
+): Promise<void> => {
+    const sorted = [...assignedDates].sort();
+    const from = new Date(sorted[0]);
+    const to = new Date(sorted[sorted.length - 1]);
+
+    const record = await BulkAssignment.create({
+        cleaning_plan: planId,
+        worker: workerId,
+        manager: managerId,
+        from,
+        to,
+    });
+
+    await BulkAssignment.updateMany(
+        {
+            _id: { $ne: record._id },
+            cleaning_plan: planId,
+            worker: workerId,
+            renewed_by: null,
+            to: { $lt: to },
+        },
+        { renewed_by: record._id }
+    );
 };
 
 export interface BulkAssignOutcome {
@@ -205,6 +242,15 @@ export const bulkAssignWorkerToShifts = async (
                     message: 'Unexpected error while assigning this date — please retry.',
                 });
             }
+        }
+    }
+
+    if (outcome.assigned.length > 0) {
+        try {
+            await recordBulkAssignment(managerId, planId, workerId, outcome.assigned);
+        } catch (error) {
+            // The shifts are already created; a failed bookkeeping write must not fail the request.
+            errorLogger.error(`bulkAssignWorkerToShifts: failed to record bulk assignment ${planId}`, error);
         }
     }
 

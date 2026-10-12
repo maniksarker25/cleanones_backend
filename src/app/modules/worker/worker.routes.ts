@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import auth from '../../middlewares/auth';
+import csvUpload from '../../middlewares/csvUpload';
 import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import workerController from './worker.controller';
@@ -25,6 +26,11 @@ router.post(
     '/create-worker',
     validateRequest(workerValidations.createWorkerValidationSchema),
     workerController.createWorker
+);
+router.post(
+    '/bulk-upload',
+    csvUpload,
+    workerController.bulkUploadWorkers
 );
 router.patch(
     '/update-worker/:id',

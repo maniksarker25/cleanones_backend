@@ -70,6 +70,95 @@ const errors = {
         },
     },
 };
+const bulkUploadOperation = (opts: {
+    tag: string;
+    summary: string;
+    operationId: string;
+    description: string;
+}) => ({
+    post: {
+        tags: [opts.tag],
+        summary: opts.summary,
+        operationId: opts.operationId,
+        description: opts.description,
+        security: [{ bearerAuth: [] }],
+        'x-roles': ['manager'],
+        parameters: [],
+        requestBody: {
+            required: true,
+            content: {
+                'multipart/form-data': {
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            file: {
+                                type: 'string',
+                                format: 'binary',
+                                description:
+                                    'CSV file (.csv, maximum 2 MB, header row required).',
+                            },
+                        },
+                        required: ['file'],
+                    },
+                },
+            },
+        },
+        responses: {
+            ...errors,
+            '200': {
+                description:
+                    'The upload was processed. Rows are created independently, so check failed for rows that were skipped.',
+                content: {
+                    'application/json': {
+                        schema: {
+                            type: 'object',
+                            properties: {
+                                success: { type: 'boolean', enum: [true] },
+                                message: { type: 'string' },
+                                data: {
+                                    type: 'object',
+                                    properties: {
+                                        total: { type: 'integer' },
+                                        created_count: { type: 'integer' },
+                                        failed_count: { type: 'integer' },
+                                        created: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    row: {
+                                                        type: 'integer',
+                                                        description:
+                                                            'Spreadsheet row number (the header is row 1).',
+                                                    },
+                                                    email: { type: 'string' },
+                                                    id: { type: 'string' },
+                                                },
+                                            },
+                                        },
+                                        failed: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    row: { type: 'integer' },
+                                                    email: { type: 'string' },
+                                                    error: { type: 'string' },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            required: ['success', 'message'],
+                        },
+                    },
+                },
+            },
+        },
+    },
+});
+
 const paths = {
 
     ...questionSuggestionPaths,
@@ -130,6 +219,13 @@ const paths = {
             },
         },
     },
+    '/client/bulk-upload': bulkUploadOperation({
+        tag: 'Clients',
+        summary: 'Bulk create clients from CSV',
+        operationId: 'postClientBulkUpload',
+        description:
+            'Creates many clients from one CSV, same rules as create-client but WITHOUT sending the credentials email (hand the passwords over yourself). Header row required; columns are case-insensitive. Required: name, email, phone, password (min 6 chars; used for both password and confirm password). Optional: company_name, licence_expiration_date (e.g. 2027-01-31), contract_status (Active | Inactive | Pending). Maximum 200 data rows and 2 MB per file. Each row is validated and created independently: a bad row (invalid value, duplicate email) is reported in data.failed with its spreadsheet row number and the rest are still created. Re-uploading the same file is safe, already-created emails just fail as duplicates. 400 if the file is missing, not a .csv, too large, has too many rows, or lacks a required column.\n\nRequired role: manager.',
+    }),
     '/client/update-client/{id}': {
         patch: {
             ...{
@@ -1731,6 +1827,13 @@ const paths = {
             },
         },
     },
+    '/worker/bulk-upload': bulkUploadOperation({
+        tag: 'Workers',
+        summary: 'Bulk create workers from CSV',
+        operationId: 'postWorkerBulkUpload',
+        description:
+            'Creates many workers from one CSV, same rules as create-worker (no email is sent). Header row required; columns are case-insensitive. Required: name, email, phone, worker_type (Employee | Freelancer), password (min 6 chars; used for both password and confirm password). Optional: position, address, nationality, dob (e.g. 1995-04-20), base_location, hourly_rate, national_id, languages and working_days (several values separated by ";" or "|", e.g. monday;tuesday). Maximum 200 data rows and 2 MB per file. Each row is validated and created independently: a bad row (invalid value, duplicate email or phone) is reported in data.failed with its spreadsheet row number and the rest are still created. Re-uploading the same file is safe, already-created emails just fail as duplicates. 400 if the file is missing, not a .csv, too large, has too many rows, or lacks a required column.\n\nRequired role: manager.',
+    }),
     '/worker/update-worker/{id}': {
         patch: {
             ...{

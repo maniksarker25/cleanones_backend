@@ -7,6 +7,7 @@ import shiftValidations from './shift.validation';
 // Side-effect import: registers the auto-checkout cron (see shift.cron.ts)
 // the moment this module loads, same as shiftController/shiftValidations do.
 import './shift.cron';
+import './bulk_assignment.cron';
 
 const router = Router();
 

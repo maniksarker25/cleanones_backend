@@ -18,6 +18,19 @@ const createClient = catchAsync(async (req, res) => {
     });
 });
 
+const bulkUploadClients = catchAsync(async (req, res) => {
+    const result = await clientServices.bulkCreateClientsFromCsv(
+        req.user.profileId as string,
+        (req.file as Express.Multer.File).buffer
+    );
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: `${result.created_count} of ${result.total} client(s) created`,
+        data: result,
+    });
+});
+
 const updateClient = catchAsync(async (req, res) => {
     const result = await clientServices.updateClientIntoDB(
         req.user.profileId as string,
@@ -168,6 +181,7 @@ const getClientPlanRoster = catchAsync(async (req, res) => {
 
 const clientController = {
     createClient,
+    bulkUploadClients,
     updateClient,
     deleteClient,
     getAllClients,

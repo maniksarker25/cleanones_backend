@@ -8,6 +8,15 @@ import { PROFILE_MODEL_BY_ROLE, USER_ROLE } from '../user/user.constant';
 import { User } from '../user/user.model';
 import { Worker } from './worker.model';
 import { TWorker } from './worker.interface';
+import {
+    BulkResult,
+    compactRow,
+    describeRowError,
+    matchOption,
+    parseCsvBuffer,
+    splitList,
+} from '../../utilities/csvBulk';
+import { WorkerType } from './worker.constant';
 import workerValidations, {
     CreateWorkerInput,
     UpdateWorkerInput,
@@ -80,6 +89,84 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
     await chatServices.createWorkerManagersChat(worker._id);
 
     return worker;
+};
+
+const WORKER_CSV_COLUMNS = [
+    'name',
+    'email',
+    'phone',
+    'worker_type',
+    'position',
+    'address',
+    'nationality',
+    'dob',
+    'base_location',
+    'languages',
+    'working_days',
+    'hourly_rate',
+    'national_id',
+    'password',
+];
+
+// Bulk import: one worker per CSV row, created independently (a bad row never blocks the rest).
+// Reuses createWorkerIntoDB, so each worker gets the same User + profile + manager chat as a
+// normal create. Like that API, no email is sent.
+const bulkCreateWorkersFromCsv = async (
+    csvBuffer: Buffer
+): Promise<BulkResult> => {
+    const rows = await parseCsvBuffer(csvBuffer, [
+        'name',
+        'email',
+        'phone',
+        'worker_type',
+        'password',
+    ]);
+
+    const result: BulkResult = {
+        total: rows.length,
+        created_count: 0,
+        failed_count: 0,
+        created: [],
+        failed: [],
+    };
+
+    for (const [index, raw] of rows.entries()) {
+        // +2: row 1 is the header, and spreadsheets number from 1.
+        const rowNumber = index + 2;
+        try {
+            const row = compactRow(raw, WORKER_CSV_COLUMNS);
+            const { languages, working_days, hourly_rate, worker_type, ...rest } =
+                row;
+            const data = workerValidations.createWorkerBody.parse({
+                ...rest,
+                worker_type: worker_type
+                    ? matchOption(worker_type, Object.values(WorkerType))
+                    : undefined,
+                ...(languages && { languages: splitList(languages) }),
+                ...(working_days && { working_days: splitList(working_days) }),
+                ...(hourly_rate !== undefined && {
+                    hourly_rate: Number(hourly_rate),
+                }),
+                confirmPassword: row.password,
+            });
+            const worker = await createWorkerIntoDB(data);
+            result.created.push({
+                row: rowNumber,
+                email: data.email,
+                id: worker._id.toString(),
+            });
+        } catch (error) {
+            result.failed.push({
+                row: rowNumber,
+                email: raw.email || undefined,
+                error: describeRowError(error),
+            });
+        }
+    }
+
+    result.created_count = result.created.length;
+    result.failed_count = result.failed.length;
+    return result;
 };
 
 const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
@@ -421,6 +508,7 @@ const getMyAvailabilityFromDB = async (userId: string) => {
 };
 
 export default {
+    bulkCreateWorkersFromCsv,
     getMyAvailabilityFromDB,
     updateMyAvailabilityIntoDB,
     createWorkerIntoDB,
