@@ -32,7 +32,7 @@ const simpleAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, functio
             decoded = jsonwebtoken_1.default.verify(token, config_1.default.jwt_access_secret);
         }
         catch (err) {
-            if (err.name === 'TokenExpiredError') {
+            if (err instanceof Error && err.name === 'TokenExpiredError') {
                 decoded = jsonwebtoken_1.default.decode(token);
             }
             else {
@@ -41,7 +41,7 @@ const simpleAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, functio
         }
         if (!decoded)
             return next(); // nothing to attach
-        let profileData;
+        let profileData = null;
         const { id, role } = decoded;
         if (role === user_constant_1.USER_ROLE.client) {
             profileData = yield client_model_1.Client.findOne({ user: id })

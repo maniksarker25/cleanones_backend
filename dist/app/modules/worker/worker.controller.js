@@ -61,6 +61,24 @@ const getSingleWorker = (0, catchasync_1.default)((req, res) => __awaiter(void 0
         data: result,
     });
 }));
+const bulkUploadWorkers = (0, catchasync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const result = yield worker_services_1.default.bulkCreateWorkersFromCsv(req.file.buffer);
+    (0, sendResponse_1.default)(res, {
+        statusCode: http_status_1.default.OK,
+        success: true,
+        message: `${result.created_count} of ${result.total} worker(s) created`,
+        data: result,
+    });
+}));
+const getMyAvailability = (0, catchasync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const result = yield worker_services_1.default.getMyAvailabilityFromDB(req.user.id);
+    (0, sendResponse_1.default)(res, {
+        statusCode: http_status_1.default.OK,
+        success: true,
+        message: 'Availability retrieved successfully',
+        data: result,
+    });
+}));
 const updateMyAvailability = (0, catchasync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const result = yield worker_services_1.default.updateMyAvailabilityIntoDB(req.user.id, req.body);
     (0, sendResponse_1.default)(res, {
@@ -71,6 +89,8 @@ const updateMyAvailability = (0, catchasync_1.default)((req, res) => __awaiter(v
     });
 }));
 exports.default = {
+    bulkUploadWorkers,
+    getMyAvailability,
     updateMyAvailability,
     createWorker,
     updateWorker,

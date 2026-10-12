@@ -48,8 +48,7 @@ const uploadFile = () => {
                 cb(null, uploadPath);
             }
             else {
-                //@ts-ignore
-                cb(new Error('Invalid file type'));
+                cb(new Error('Invalid file type'), '');
             }
         },
         filename: function (req, file, cb) {

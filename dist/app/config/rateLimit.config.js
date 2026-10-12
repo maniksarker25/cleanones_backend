@@ -28,7 +28,7 @@ const express_rate_limit_1 = __importStar(require("express-rate-limit"));
 // Global API limiter
 exports.apiLimiter = (0, express_rate_limit_1.default)({
     windowMs: 10 * 60 * 1000,
-    max: 60,
+    max: 300,
     standardHeaders: true,
     legacyHeaders: false,
     message: {

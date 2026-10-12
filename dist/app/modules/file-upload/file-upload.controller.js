@@ -12,7 +12,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const http_status_1 = __importDefault(require("http-status"));
 const appError_1 = __importDefault(require("../../error/appError"));
 const deleteFromS3_1 = require("../../helper/deleteFromS3");
@@ -27,19 +26,13 @@ const uploadConversationFiles = (0, catchasync_1.default)((req, res) => __awaite
     let videos = [];
     let pdfs = [];
     if ((_a = req.files) === null || _a === void 0 ? void 0 : _a.conversation_image) {
-        images = req.files.conversation_image.map((file) => {
-            return (0, multer_s3_uploader_1.getCloudFrontUrl)(file.key);
-        });
+        images = req.files.conversation_image.map((file) => (0, multer_s3_uploader_1.getCloudFrontUrl)(file.key));
     }
     if ((_b = req.files) === null || _b === void 0 ? void 0 : _b.conversation_video) {
-        videos = req.files.conversation_video.map((file) => {
-            return (0, multer_s3_uploader_1.getCloudFrontUrl)(file.key);
-        });
+        videos = req.files.conversation_video.map((file) => (0, multer_s3_uploader_1.getCloudFrontUrl)(file.key));
     }
     if ((_c = req.files) === null || _c === void 0 ? void 0 : _c.conversation_pdf) {
-        pdfs = req.files.conversation_pdf.map((file) => {
-            return (0, multer_s3_uploader_1.getCloudFrontUrl)(file.key);
-        });
+        pdfs = req.files.conversation_pdf.map((file) => (0, multer_s3_uploader_1.getCloudFrontUrl)(file.key));
     }
     (0, sendResponse_1.default)(res, {
         statusCode: http_status_1.default.OK,
