@@ -106,7 +106,6 @@ const shiftTaskSchema = new mongoose_1.Schema({
 }, { _id: false });
 const shiftAssignedWorkerSchema = new mongoose_1.Schema({
     worker: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Worker', required: true },
-    name: { type: String, required: true },
     role: {
         type: String,
         enum: ['Team leader', 'Co-leader', 'Normal worker'],

@@ -73,6 +73,83 @@ const errors = {
         },
     },
 };
+const bulkUploadOperation = (opts) => ({
+    post: {
+        tags: [opts.tag],
+        summary: opts.summary,
+        operationId: opts.operationId,
+        description: opts.description,
+        security: [{ bearerAuth: [] }],
+        'x-roles': ['manager'],
+        parameters: [],
+        requestBody: {
+            required: true,
+            content: {
+                'multipart/form-data': {
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            file: {
+                                type: 'string',
+                                format: 'binary',
+                                description: 'CSV file (.csv, maximum 2 MB, header row required).',
+                            },
+                        },
+                        required: ['file'],
+                    },
+                },
+            },
+        },
+        responses: Object.assign(Object.assign({}, errors), { '200': {
+                description: 'The upload was processed. Rows are created independently, so check failed for rows that were skipped.',
+                content: {
+                    'application/json': {
+                        schema: {
+                            type: 'object',
+                            properties: {
+                                success: { type: 'boolean', enum: [true] },
+                                message: { type: 'string' },
+                                data: {
+                                    type: 'object',
+                                    properties: {
+                                        total: { type: 'integer' },
+                                        created_count: { type: 'integer' },
+                                        failed_count: { type: 'integer' },
+                                        created: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    row: {
+                                                        type: 'integer',
+                                                        description: 'Spreadsheet row number (the header is row 1).',
+                                                    },
+                                                    email: { type: 'string' },
+                                                    id: { type: 'string' },
+                                                },
+                                            },
+                                        },
+                                        failed: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    row: { type: 'integer' },
+                                                    email: { type: 'string' },
+                                                    error: { type: 'string' },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            required: ['success', 'message'],
+                        },
+                    },
+                },
+            } }),
+    },
+});
 const paths = Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign({}, question_suggestion_paths_1.default), issue_report_paths_1.default), client_contact_paths_1.default), user_paths_1.default), chat_paths_1.default), chat_message_paths_1.default), client_overview_paths_1.default), { '/client/create-client': {
         post: Object.assign({
             tags: ['Clients'],
@@ -115,7 +192,12 @@ const paths = Object.assign(Object.assign(Object.assign(Object.assign(Object.ass
                     },
                 },
             }) }),
-    }, '/client/update-client/{id}': {
+    }, '/client/bulk-upload': bulkUploadOperation({
+        tag: 'Clients',
+        summary: 'Bulk create clients from CSV',
+        operationId: 'postClientBulkUpload',
+        description: 'Creates many clients from one CSV, same rules as create-client but WITHOUT sending the credentials email (hand the passwords over yourself). Header row required; columns are case-insensitive. Required: name, email, phone, password (min 6 chars; used for both password and confirm password). Optional: company_name, licence_expiration_date (e.g. 2027-01-31), contract_status (Active | Inactive | Pending). Maximum 200 data rows and 2 MB per file. Each row is validated and created independently: a bad row (invalid value, duplicate email) is reported in data.failed with its spreadsheet row number and the rest are still created. Re-uploading the same file is safe, already-created emails just fail as duplicates. 400 if the file is missing, not a .csv, too large, has too many rows, or lacks a required column.\n\nRequired role: manager.',
+    }), '/client/update-client/{id}': {
         patch: Object.assign({
             tags: ['Clients'],
             summary: 'Update client',
@@ -1343,11 +1425,45 @@ const paths = Object.assign(Object.assign(Object.assign(Object.assign(Object.ass
                 },
             }) }),
     }, '/worker/my-availability': {
+        get: {
+            tags: ['Workers'],
+            summary: "Get the caller's availability",
+            operationId: 'getWorkerMyAvailability',
+            description: "Returns the caller's own working_days and worker_type. Any active worker (Employee or Freelancer).\n\nRequired role: worker.",
+            security: [{ bearerAuth: [] }],
+            'x-roles': ['worker'],
+            parameters: [],
+            responses: Object.assign(Object.assign({}, errors), { '200': {
+                    description: 'Successful request.',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean', enum: [true] },
+                                    message: { type: 'string' },
+                                    data: {
+                                        type: 'object',
+                                        properties: {
+                                            working_days: {
+                                                type: 'array',
+                                                items: { type: 'string' },
+                                            },
+                                            worker_type: { type: 'string' },
+                                        },
+                                    },
+                                },
+                                required: ['success', 'message'],
+                            },
+                        },
+                    },
+                } }),
+        },
         patch: Object.assign({
             tags: ['Workers'],
             summary: "Update the caller's availability",
             operationId: 'patchWorkerMyAvailability',
-            description: 'Only active Freelancer-type workers can update their own availability; other workers receive 403.\n\nRequired role: worker.',
+            description: 'Any active worker (Employee or Freelancer) can update their own availability. The manager can also set it via create/update worker.\n\nRequired role: worker.',
             security: [{ bearerAuth: [] }],
             'x-roles': ['worker'],
             parameters: [],
@@ -1407,7 +1523,7 @@ const paths = Object.assign(Object.assign(Object.assign(Object.assign(Object.ass
             tags: ['Workers'],
             summary: 'Create worker',
             operationId: 'postWorkerCreateWorker',
-            description: 'Creates a user and worker profile in a MongoDB transaction. Rejects duplicate email or phone. working_days may only be supplied for Employee-type workers.\n\nRequired role: manager.',
+            description: 'Creates a user and worker profile in a MongoDB transaction. Rejects duplicate email or phone. working_days may be supplied for any worker type (Employee or Freelancer).\n\nRequired role: manager.',
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [],
@@ -1444,12 +1560,17 @@ const paths = Object.assign(Object.assign(Object.assign(Object.assign(Object.ass
                     },
                 },
             }) }),
-    }, '/worker/update-worker/{id}': {
+    }, '/worker/bulk-upload': bulkUploadOperation({
+        tag: 'Workers',
+        summary: 'Bulk create workers from CSV',
+        operationId: 'postWorkerBulkUpload',
+        description: 'Creates many workers from one CSV, same rules as create-worker (no email is sent). Header row required; columns are case-insensitive. Required: name, email, phone, worker_type (Employee | Freelancer), password (min 6 chars; used for both password and confirm password). Optional: position, address, nationality, dob (e.g. 1995-04-20), base_location, hourly_rate, national_id, languages and working_days (several values separated by ";" or "|", e.g. monday;tuesday). Maximum 200 data rows and 2 MB per file. Each row is validated and created independently: a bad row (invalid value, duplicate email or phone) is reported in data.failed with its spreadsheet row number and the rest are still created. Re-uploading the same file is safe, already-created emails just fail as duplicates. 400 if the file is missing, not a .csv, too large, has too many rows, or lacks a required column.\n\nRequired role: manager.',
+    }), '/worker/update-worker/{id}': {
         patch: Object.assign({
             tags: ['Workers'],
             summary: 'Update worker',
             operationId: 'patchWorkerUpdateWorkerId',
-            description: 'Partial update. Rejects duplicate email or phone. working_days may only be set when the target worker is Employee-type.\n\nRequired role: manager.',
+            description: 'Partial update. Rejects duplicate email or phone. hourly_rate cannot be changed while the worker has a pending_amount greater than 0 (409 with details.pending_amount and details.current_hourly_rate); create an invoice for the full balance first. Sending the unchanged rate is allowed.working_days may be set for any worker type (Employee or Freelancer).\n\nRequired role: manager.',
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [
@@ -1499,7 +1620,7 @@ const paths = Object.assign(Object.assign(Object.assign(Object.assign(Object.ass
             tags: ['Workers'],
             summary: 'Soft-delete worker',
             operationId: 'deleteWorkerDeleteWorkerId',
-            description: 'Soft-deletes the worker profile and marks its linked user deleted and blocked. Returns null.\n\nRequired role: manager.',
+            description: 'Soft-deletes the worker profile and marks its linked user deleted and blocked. Returns null. Returns 409 (with details.shifts listing each shift) if the worker is still assigned to any upcoming or in-progress shift; remove them from those shifts first. Completed and cancelled shifts do not block deletion.\n\nRequired role: manager.',
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [
@@ -1539,7 +1660,7 @@ const paths = Object.assign(Object.assign(Object.assign(Object.assign(Object.ass
             tags: ['Workers'],
             summary: 'List workers',
             operationId: 'getWorkerAllWorkers',
-            description: 'Pagination is nested under data.meta; records are under data.result. Excludes soft-deleted workers (including legacy records missing isDeleted). Each record includes all-time shift stats computed in a single batched query across the whole page (not one query per worker): total_completed_work_hours (sum of check_out_at - check_in_at across completed check-ins, in hours), total_shift (shifts assigned, excluding cancelled), total_late_check_ins / total_on_time_check_ins (checked in after/at-or-before the shift\'s scheduled date_time), and total_absent (past shifts never checked into at all). total_late_check_ins, total_on_time_check_ins and total_absent are mutually exclusive per shift.\n\nRequired role: manager.',
+            description: 'Pagination is nested under data.meta; records are under data.result. Excludes soft-deleted workers (including legacy records missing isDeleted). Each record includes all-time shift stats computed in a single batched query across the whole page (not one query per worker): total_shift (shifts assigned, excluding cancelled), total_late_check_ins / total_on_time_check_ins (checked in after/at-or-before the shift\'s scheduled date_time), and total_absent (past shifts never checked into at all). total_late_check_ins, total_on_time_check_ins and total_absent are mutually exclusive per shift.\n\nRequired role: manager.',
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [
@@ -6595,7 +6716,7 @@ const paths = Object.assign(Object.assign(Object.assign(Object.assign(Object.ass
             tags: ['Invoices'],
             summary: 'Create invoice',
             operationId: 'postInvoiceCreateInvoice',
-            description: "Manager-only. Records a payment made to a worker. The worker must exist and not be deleted, and its pending_amount (total_earning - total_paid) must be >= amount, or this returns 400. On success, amount is added to the worker's total_paid and subtracted from pending_amount.\n\nRequired role: manager.",
+            description: "Manager-only. Records a payment made to a worker. The worker must exist and not be deleted, and its pending_amount (total_earning - total_paid) must be >= amount, or this returns 400. On success, amount is added to the worker's total_paid and subtracted from pending_amount, and the worker's total_unpaid_hours is settled in proportion (unpaid_hours * amount / pending_amount; paying the whole balance clears all unpaid hours) into total_paid_hours. The hours settled are stored on the invoice as `hours`. Returns 409 if the worker's balance changed concurrently and the payment could not be applied; retry.\n\nRequired role: manager.",
             security: [{ bearerAuth: [] }],
             'x-roles': ['manager'],
             parameters: [],
