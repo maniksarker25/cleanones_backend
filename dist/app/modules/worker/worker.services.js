@@ -32,6 +32,7 @@ const shift_model_1 = require("../shift/shift.model");
 const user_constant_1 = require("../user/user.constant");
 const user_model_1 = require("../user/user.model");
 const worker_model_1 = require("./worker.model");
+const csvBulk_1 = require("../../utilities/csvBulk");
 const worker_constant_1 = require("./worker.constant");
 const worker_validation_1 = __importDefault(require("./worker.validation"));
 // Also include profiles created before the soft-delete field was introduced.
@@ -45,10 +46,6 @@ const createWorkerIntoDB = (payload) => __awaiter(void 0, void 0, void 0, functi
     // Credentials are stored only on the linked user account.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
     const _a = worker_validation_1.default.createWorkerBody.parse(payload), { password, confirmPassword } = _a, workerData = __rest(_a, ["password", "confirmPassword"]);
-    if (workerData.working_days !== undefined &&
-        workerData.worker_type !== worker_constant_1.WorkerType.Employee) {
-        throw new appError_1.default(http_status_1.default.FORBIDDEN, 'Only the manager can set working days for employees. Freelancers manage their own availability');
-    }
     const session = yield mongoose_1.default.startSession();
     let worker;
     try {
@@ -82,11 +79,73 @@ const createWorkerIntoDB = (payload) => __awaiter(void 0, void 0, void 0, functi
     finally {
         yield session.endSession();
     }
-    // Best-effort, outside the transaction — same pattern as
-    // createChatGroupForPlan for cleaning plans. Idempotent (unique index on
-    // the chat side), so a retry here can never create a duplicate.
+    // Best-effort, outside the transaction — idempotent, so a retry can't duplicate it.
     yield chat_services_1.default.createWorkerManagersChat(worker._id);
     return worker;
+});
+const WORKER_CSV_COLUMNS = [
+    'name',
+    'email',
+    'phone',
+    'worker_type',
+    'position',
+    'address',
+    'nationality',
+    'dob',
+    'base_location',
+    'languages',
+    'working_days',
+    'hourly_rate',
+    'national_id',
+    'password',
+];
+// Bulk import: one worker per CSV row, created independently (a bad row never blocks the rest).
+// Reuses createWorkerIntoDB, so each worker gets the same User + profile + manager chat as a
+// normal create. Like that API, no email is sent.
+const bulkCreateWorkersFromCsv = (csvBuffer) => __awaiter(void 0, void 0, void 0, function* () {
+    const rows = yield (0, csvBulk_1.parseCsvBuffer)(csvBuffer, [
+        'name',
+        'email',
+        'phone',
+        'worker_type',
+        'password',
+    ]);
+    const result = {
+        total: rows.length,
+        created_count: 0,
+        failed_count: 0,
+        created: [],
+        failed: [],
+    };
+    for (const [index, raw] of rows.entries()) {
+        // +2: row 1 is the header, and spreadsheets number from 1.
+        const rowNumber = index + 2;
+        try {
+            const row = (0, csvBulk_1.compactRow)(raw, WORKER_CSV_COLUMNS);
+            const { languages, working_days, hourly_rate, worker_type } = row, rest = __rest(row, ["languages", "working_days", "hourly_rate", "worker_type"]);
+            const data = worker_validation_1.default.createWorkerBody.parse(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign({}, rest), { worker_type: worker_type
+                    ? (0, csvBulk_1.matchOption)(worker_type, Object.values(worker_constant_1.WorkerType))
+                    : undefined }), (languages && { languages: (0, csvBulk_1.splitList)(languages) })), (working_days && { working_days: (0, csvBulk_1.splitList)(working_days) })), (hourly_rate !== undefined && {
+                hourly_rate: Number(hourly_rate),
+            })), { confirmPassword: row.password }));
+            const worker = yield createWorkerIntoDB(data);
+            result.created.push({
+                row: rowNumber,
+                email: data.email,
+                id: worker._id.toString(),
+            });
+        }
+        catch (error) {
+            result.failed.push({
+                row: rowNumber,
+                email: raw.email || undefined,
+                error: (0, csvBulk_1.describeRowError)(error),
+            });
+        }
+    }
+    result.created_count = result.created.length;
+    result.failed_count = result.failed.length;
+    return result;
 });
 const updateWorkerIntoDB = (id, payload) => __awaiter(void 0, void 0, void 0, function* () {
     validateId(id);
@@ -97,11 +156,17 @@ const updateWorkerIntoDB = (id, payload) => __awaiter(void 0, void 0, void 0, fu
             const worker = yield worker_model_1.Worker.findOne(Object.assign({ _id: id }, activeWorker)).session(session);
             if (!worker)
                 throw new appError_1.default(http_status_1.default.NOT_FOUND, 'Worker not found');
-            // Manager can only set working_days for Employee-type workers.
-            // Freelancers manage their own availability via /my-availability.
-            if (data.working_days !== undefined &&
-                worker.worker_type !== worker_constant_1.WorkerType.Employee) {
-                throw new appError_1.default(http_status_1.default.FORBIDDEN, 'Managers can only set working days for employees. Freelancers manage their own availability');
+            // Earnings already accrued are priced at the old rate; changing it while
+            // money is still owed would make that balance ambiguous. Re-sending the
+            // current rate is not a change, so it is allowed.
+            console.log("pending amount", worker.pending_amount, "hourly rate", data.hourly_rate, "worker hourly rate", worker.hourly_rate);
+            if (data.hourly_rate !== undefined &&
+                data.hourly_rate !== worker.hourly_rate &&
+                worker.pending_amount >= 1) {
+                throw new appError_1.default(http_status_1.default.CONFLICT, `Hourly rate can't be changed while ${roundToTwoDecimals(worker.pending_amount)} is still pending. Pay the pending amount first.`, '', {
+                    pending_amount: worker.pending_amount,
+                    current_hourly_rate: worker.hourly_rate,
+                });
             }
             const contactFilters = [];
             if (data.email !== undefined)
@@ -136,6 +201,25 @@ const updateWorkerIntoDB = (id, payload) => __awaiter(void 0, void 0, void 0, fu
 });
 const deleteWorkerFromDB = (id) => __awaiter(void 0, void 0, void 0, function* () {
     validateId(id);
+    // Past (completed/cancelled) shifts are history and don't block deletion;
+    // anything still upcoming or in progress must be reassigned first.
+    const activeShifts = yield shift_model_1.Shift.find({
+        'assigned_workers.worker': id,
+        status: { $in: ['upcoming', 'in_progress'] },
+    })
+        .select('date status cleaning_plan')
+        .sort({ date: 1 })
+        .lean();
+    if (activeShifts.length) {
+        throw new appError_1.default(http_status_1.default.CONFLICT, `This worker is still assigned to ${activeShifts.length} upcoming or in-progress shift(s). Remove the worker from those shifts before deleting.`, '', {
+            shifts: activeShifts.map((shift) => ({
+                shift: shift._id,
+                date: shift.date,
+                status: shift.status,
+                cleaning_plan: shift.cleaning_plan,
+            })),
+        });
+    }
     const session = yield mongoose_1.default.startSession();
     try {
         yield session.withTransaction(() => __awaiter(void 0, void 0, void 0, function* () {
@@ -154,58 +238,13 @@ const deleteWorkerFromDB = (id) => __awaiter(void 0, void 0, void 0, function* (
     return null;
 });
 const roundToTwoDecimals = (value) => Math.round(value * 100) / 100;
-// All-time sum of (check_out_at - check_in_at) across every completed
-// check-in, per worker, in hours — mirrors the same calculation used by
-// shift.services.ts's attendance/performance endpoints, just without a date
-// range since this is a lifetime total for the worker list.
-const getTotalCompletedWorkHoursByWorker = (workerIds) => __awaiter(void 0, void 0, void 0, function* () {
-    var _b;
-    const hoursByWorker = new Map();
-    if (!workerIds.length)
-        return hoursByWorker;
-    const shifts = yield shift_model_1.Shift.find({
-        'assigned_workers.worker': { $in: workerIds },
-    })
-        .select('assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at')
-        .lean();
-    const idSet = new Set(workerIds.map((id) => id.toString()));
-    const msByWorker = new Map();
-    for (const shift of shifts) {
-        for (const entry of shift.assigned_workers) {
-            const workerId = entry.worker.toString();
-            if (!idSet.has(workerId))
-                continue;
-            if (entry.check_in_at && entry.check_out_at) {
-                msByWorker.set(workerId, ((_b = msByWorker.get(workerId)) !== null && _b !== void 0 ? _b : 0) +
-                    (entry.check_out_at.getTime() - entry.check_in_at.getTime()));
-            }
-        }
-    }
-    for (const [workerId, ms] of msByWorker) {
-        hoursByWorker.set(workerId, roundToTwoDecimals(ms / 3600000));
-    }
-    return hoursByWorker;
-});
 /**
- * All-time shift stats for a batch of workers, in ONE query total — not one
- * per worker — so a 100-row page (the list's max limit) costs the same
- * single round trip as a 1-row page. Mirrors
- * getTotalCompletedWorkHoursByWorker/getWorkerAttendanceStatsFromDB's
- * definitions but computes every field in a single pass over the same
- * shift/assigned_workers data instead of running separate queries for hours
- * vs. late/on-time/absent:
- * - total_shift: shifts (excluding cancelled) this worker was ever assigned to.
- * - total_late_check_ins / total_on_time_check_ins: of the shifts they
- *   actually checked into, whether check_in_at was after/at-or-before the
- *   shift's scheduled date_time. Mutually exclusive with each other.
- * - total_absent: past shifts (date before today) they were assigned to but
- *   never checked into at all — mutually exclusive with the two above (a
- *   worker who checked in, even late, was not absent).
- * - total_completed_work_hours: sum of (check_out_at - check_in_at) across
- *   every completed check-in, in hours.
+ * All-time shift stats for a batch of workers in one query, not one per
+ * worker. late/on-time/absent are mutually exclusive — a worker who checked
+ * in late was not absent.
  */
 const getWorkerShiftStatsByWorker = (workerIds) => __awaiter(void 0, void 0, void 0, function* () {
-    var _c, _d;
+    var _b;
     const statsByWorker = new Map();
     if (!workerIds.length)
         return statsByWorker;
@@ -215,16 +254,14 @@ const getWorkerShiftStatsByWorker = (workerIds) => __awaiter(void 0, void 0, voi
         'assigned_workers.worker': { $in: workerIds },
         status: { $ne: 'cancelled' },
     })
-        .select('date date_time assigned_workers.worker assigned_workers.check_in_at assigned_workers.check_out_at')
+        .select('date date_time assigned_workers.worker assigned_workers.check_in_at')
         .lean();
-    const msByWorker = new Map();
     for (const shift of shifts) {
         for (const aw of shift.assigned_workers) {
             const workerId = aw.worker.toString();
             if (!idSet.has(workerId))
                 continue;
-            const stats = (_c = statsByWorker.get(workerId)) !== null && _c !== void 0 ? _c : ({
-                total_completed_work_hours: 0,
+            const stats = (_b = statsByWorker.get(workerId)) !== null && _b !== void 0 ? _b : ({
                 total_shift: 0,
                 total_late_check_ins: 0,
                 total_on_time_check_ins: 0,
@@ -232,10 +269,6 @@ const getWorkerShiftStatsByWorker = (workerIds) => __awaiter(void 0, void 0, voi
             });
             statsByWorker.set(workerId, stats);
             stats.total_shift += 1;
-            if (aw.check_in_at && aw.check_out_at) {
-                msByWorker.set(workerId, ((_d = msByWorker.get(workerId)) !== null && _d !== void 0 ? _d : 0) +
-                    (aw.check_out_at.getTime() - aw.check_in_at.getTime()));
-            }
             if (aw.check_in_at) {
                 if (aw.check_in_at > shift.date_time) {
                     stats.total_late_check_ins += 1;
@@ -249,15 +282,9 @@ const getWorkerShiftStatsByWorker = (workerIds) => __awaiter(void 0, void 0, voi
             }
         }
     }
-    for (const [workerId, ms] of msByWorker) {
-        const stats = statsByWorker.get(workerId);
-        if (stats)
-            stats.total_completed_work_hours = roundToTwoDecimals(ms / 3600000);
-    }
     return statsByWorker;
 });
 const EMPTY_WORKER_SHIFT_STATS = {
-    total_completed_work_hours: 0,
     total_shift: 0,
     total_late_check_ins: 0,
     total_on_time_check_ins: 0,
@@ -282,12 +309,8 @@ const getAllWorkersFromDB = (query) => __awaiter(void 0, void 0, void 0, functio
     });
     return { meta, result };
 });
-// All-time attendance stats for one worker, across every materialized shift
-// they've ever been assigned to. Mirrors the late/absent definitions used by
-// getWorkerPerformanceFromDB (shift.services.ts), just without the month
-// filter — late: worker's own check_in_at is after the shift's scheduled
-// date_time; absent: the shift's date is in the past, status isn't
-// 'cancelled', and the worker never checked in.
+// Lifetime attendance stats for one worker. late = checked in after the scheduled start;
+// absent = past date, status not cancelled, never checked in.
 const getWorkerAttendanceStatsFromDB = (workerId) => __awaiter(void 0, void 0, void 0, function* () {
     const today = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
     const shifts = yield shift_model_1.Shift.find({ 'assigned_workers.worker': workerId })
@@ -320,26 +343,37 @@ const getWorkerAttendanceStatsFromDB = (workerId) => __awaiter(void 0, void 0, v
     };
 });
 const getSingleWorkerFromDB = (id) => __awaiter(void 0, void 0, void 0, function* () {
-    var _e;
     validateId(id);
     const worker = yield worker_model_1.Worker.findOne(Object.assign({ _id: id }, activeWorker));
     if (!worker)
         throw new appError_1.default(http_status_1.default.NOT_FOUND, 'Worker not found');
-    const [totalHours, attendanceStats] = yield Promise.all([
-        getTotalCompletedWorkHoursByWorker([worker._id]),
-        getWorkerAttendanceStatsFromDB(worker._id),
-    ]);
-    return Object.assign(Object.assign(Object.assign({}, worker.toObject()), { total_completed_work_hours: (_e = totalHours.get(worker._id.toString())) !== null && _e !== void 0 ? _e : 0 }), attendanceStats);
+    const attendanceStats = yield getWorkerAttendanceStatsFromDB(worker._id);
+    return Object.assign(Object.assign({}, worker.toObject()), attendanceStats);
 });
 const updateMyAvailabilityIntoDB = (userId, payload) => __awaiter(void 0, void 0, void 0, function* () {
     const data = worker_validation_1.default.availabilityBody.parse(payload);
-    const worker = yield worker_model_1.Worker.findOneAndUpdate(Object.assign({ user: userId, worker_type: worker_constant_1.WorkerType.Freelancer }, activeWorker), { $set: { working_days: data.working_days } }, { new: true, runValidators: true });
+    const worker = yield worker_model_1.Worker.findOneAndUpdate(Object.assign({ user: userId }, activeWorker), { $set: { working_days: data.working_days } }, { new: true, runValidators: true });
     if (!worker) {
-        throw new appError_1.default(http_status_1.default.FORBIDDEN, 'Only active freelancers can update their own availability');
+        throw new appError_1.default(http_status_1.default.NOT_FOUND, 'Active worker profile not found');
     }
     return worker;
 });
+const getMyAvailabilityFromDB = (userId) => __awaiter(void 0, void 0, void 0, function* () {
+    var _c;
+    const worker = yield worker_model_1.Worker.findOne(Object.assign({ user: userId }, activeWorker))
+        .select('working_days worker_type')
+        .lean();
+    if (!worker) {
+        throw new appError_1.default(http_status_1.default.NOT_FOUND, 'Active worker profile not found');
+    }
+    return {
+        working_days: (_c = worker.working_days) !== null && _c !== void 0 ? _c : [],
+        worker_type: worker.worker_type,
+    };
+});
 exports.default = {
+    bulkCreateWorkersFromCsv,
+    getMyAvailabilityFromDB,
     updateMyAvailabilityIntoDB,
     createWorkerIntoDB,
     updateWorkerIntoDB,
