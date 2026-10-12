@@ -87,6 +87,7 @@ const createWorkerManagersChat = (workerId) => __awaiter(void 0, void 0, void 0,
         });
     }
     catch (_c) {
+        // Socket.io not initialized (e.g. in a script/test context) — the chat itself still got created.
     }
     return chat;
 });

@@ -16,6 +16,7 @@ const http_status_1 = __importDefault(require("http-status"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const QueryBuilder_1 = __importDefault(require("../../builder/QueryBuilder"));
 const appError_1 = __importDefault(require("../../error/appError"));
+const shift_shared_util_1 = require("../shift/shift.shared.util");
 const worker_model_1 = require("../worker/worker.model");
 const invoice_model_1 = require("./invoice.model");
 const ensureWorkerExists = (workerId) => __awaiter(void 0, void 0, void 0, function* () {
@@ -26,23 +27,54 @@ const ensureWorkerExists = (workerId) => __awaiter(void 0, void 0, void 0, funct
     return worker;
 });
 const createInvoiceIntoDB = (managerId, payload) => __awaiter(void 0, void 0, void 0, function* () {
-    const worker = yield ensureWorkerExists(payload.worker);
+    var _a, _b;
+    yield ensureWorkerExists(payload.worker);
     const session = yield mongoose_1.default.startSession();
     session.startTransaction();
     try {
-        // Conditioned on pending_amount in the filter (not just the read
-        // above) so two concurrent invoices for the same worker can't both
-        // pass the check and jointly overdraw the pending balance.
-        const updatedWorker = yield worker_model_1.Worker.findOneAndUpdate({ _id: payload.worker, pending_amount: { $gte: payload.amount } }, {
-            $inc: {
-                total_paid: payload.amount,
-                pending_amount: -payload.amount,
-            },
-        }, { new: true, session });
-        if (!updatedWorker) {
-            throw new appError_1.default(http_status_1.default.BAD_REQUEST, `Insufficient pending amount for this worker (pending: ${worker.pending_amount}, requested: ${payload.amount})`);
+        // Optimistic concurrency: the update only applies if the worker's pending
+        // balance and unpaid hours are still what we read, so a concurrent invoice or
+        // check-out can't make us overdraw pending or settle the wrong share of hours.
+        let paidHours = 0;
+        let applied = false;
+        for (let attempt = 0; attempt < 3 && !applied; attempt++) {
+            const current = yield worker_model_1.Worker.findOne({
+                _id: payload.worker,
+                isDeleted: false,
+            }).session(session);
+            if (!current) {
+                throw new appError_1.default(http_status_1.default.NOT_FOUND, 'Worker not found');
+            }
+            if (current.pending_amount < payload.amount) {
+                throw new appError_1.default(http_status_1.default.BAD_REQUEST, `Insufficient pending amount for this worker (pending: ${current.pending_amount}, requested: ${payload.amount})`);
+            }
+            // Paying off the whole balance clears all unpaid hours exactly; otherwise
+            // hours are settled in proportion to the share of pending money paid.
+            const unpaidHours = (_a = current.total_unpaid_hours) !== null && _a !== void 0 ? _a : 0;
+            const settlesAll = Math.abs(current.pending_amount - payload.amount) < 0.005;
+            paidHours = settlesAll
+                ? unpaidHours
+                : (0, shift_shared_util_1.roundToTwoDecimals)(unpaidHours * (payload.amount / current.pending_amount));
+            const updated = yield worker_model_1.Worker.findOneAndUpdate({
+                _id: payload.worker,
+                pending_amount: current.pending_amount,
+                total_unpaid_hours: unpaidHours,
+            }, {
+                $inc: {
+                    total_paid: payload.amount,
+                    pending_amount: -payload.amount,
+                },
+                $set: {
+                    total_paid_hours: (0, shift_shared_util_1.roundToTwoDecimals)(((_b = current.total_paid_hours) !== null && _b !== void 0 ? _b : 0) + paidHours),
+                    total_unpaid_hours: (0, shift_shared_util_1.roundToTwoDecimals)(unpaidHours - paidHours),
+                },
+            }, { new: true, session });
+            applied = !!updated;
         }
-        const [invoice] = yield invoice_model_1.Invoice.create([Object.assign(Object.assign({}, payload), { manager: managerId })], { session });
+        if (!applied) {
+            throw new appError_1.default(http_status_1.default.CONFLICT, 'Worker balance changed while recording the payment, please retry');
+        }
+        const [invoice] = yield invoice_model_1.Invoice.create([Object.assign(Object.assign({}, payload), { manager: managerId, hours: paidHours })], { session });
         yield session.commitTransaction();
         session.endSession();
         return invoice;

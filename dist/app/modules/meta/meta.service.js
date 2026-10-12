@@ -9,7 +9,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const client_model_1 = require("../client/client.model");
 const worker_model_1 = require("../worker/worker.model");
 const getDashboardMetaData = () => __awaiter(void 0, void 0, void 0, function* () {
@@ -167,7 +166,8 @@ const getProviderChartData = (year) => __awaiter(void 0, void 0, void 0, functio
         yearsDropdown,
     };
 });
-const getEarningChartData = (year) => __awaiter(void 0, void 0, void 0, function* () {
+// TODO: unimplemented — always returns empty/zeroed data regardless of year.
+const getEarningChartData = (_year) => __awaiter(void 0, void 0, void 0, function* () {
     return {
         chartData: [],
         totalEarning: 0,

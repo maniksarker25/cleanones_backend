@@ -24,11 +24,9 @@ const worker_model_1 = require("../modules/worker/worker.model");
 const superAdmin_model_1 = __importDefault(require("../modules/superAdmin/superAdmin.model"));
 const user_constant_1 = require("../modules/user/user.constant");
 const catchasync_1 = __importDefault(require("../utilities/catchasync"));
-// make costume interface
 const auth = (...requiredRoles) => {
     return (0, catchasync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
         var _a;
-        // check if the token is sent from client -----
         let token = (_a = req === null || req === void 0 ? void 0 : req.headers) === null || _a === void 0 ? void 0 : _a.authorization;
         if (!token) {
             throw new appError_1.default(http_status_1.default.UNAUTHORIZED, 'You are not authorized');
@@ -43,14 +41,11 @@ const auth = (...requiredRoles) => {
         catch (err) {
             throw new appError_1.default(http_status_1.default.UNAUTHORIZED, 'Token is expired');
         }
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { id, role, email, profileId, iat } = decoded;
+        const { id, role } = decoded;
         if (!decoded) {
             throw new appError_1.default(http_status_1.default.UNAUTHORIZED, 'Token is expired');
         }
-        // get the user if that here ---------
-        // const user = await User.findById(id);
-        let profileData;
+        let profileData = null;
         if (role == user_constant_1.USER_ROLE.admin) {
             profileData = yield admin_model_1.default.findOne({ user: id })
                 .select('_id user')
@@ -112,15 +107,6 @@ const auth = (...requiredRoles) => {
         if (!user.isActive) {
             throw new appError_1.default(http_status_1.default.FORBIDDEN, 'Your account  is inactivated , please contact support');
         }
-        // if (
-        //   user?.passwordChangedAt &&
-        //   (await User.isJWTIssuedBeforePasswordChange(
-        //     user?.passwordChangedAt,
-        //     iat as number,
-        //   ))
-        // ) {
-        //   throw new AppError(httpStatus.FORBIDDEN, 'You are not authorized 2');
-        // }
         if (requiredRoles && !requiredRoles.includes(role)) {
             throw new appError_1.default(http_status_1.default.UNAUTHORIZED, 'Your are not authorized 3');
         }
