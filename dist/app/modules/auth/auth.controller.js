@@ -28,6 +28,7 @@ const catchasync_1 = __importDefault(require("../../utilities/catchasync"));
 const sendResponse_1 = __importDefault(require("../../utilities/sendResponse"));
 const auth_services_1 = __importDefault(require("./auth.services"));
 const loginUser = (0, catchasync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    console.log('req.body', req.body);
     const result = yield auth_services_1.default.loginUserIntoDB(req.body);
     const { refreshToken } = result;
     res.cookie('refreshToken', refreshToken, {

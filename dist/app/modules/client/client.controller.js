@@ -26,6 +26,15 @@ const createClient = (0, catchasync_1.default)((req, res) => __awaiter(void 0, v
         data: result,
     });
 }));
+const bulkUploadClients = (0, catchasync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const result = yield client_services_1.default.bulkCreateClientsFromCsv(req.user.profileId, req.file.buffer);
+    (0, sendResponse_1.default)(res, {
+        statusCode: http_status_1.default.OK,
+        success: true,
+        message: `${result.created_count} of ${result.total} client(s) created`,
+        data: result,
+    });
+}));
 const updateClient = (0, catchasync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const result = yield client_services_1.default.updateClientIntoDB(req.user.profileId, req.params.id, req.body);
     (0, sendResponse_1.default)(res, {
@@ -139,6 +148,7 @@ const getClientPlanRoster = (0, catchasync_1.default)((req, res) => __awaiter(vo
 }));
 const clientController = {
     createClient,
+    bulkUploadClients,
     updateClient,
     deleteClient,
     getAllClients,

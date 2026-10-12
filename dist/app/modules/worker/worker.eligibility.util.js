@@ -29,12 +29,7 @@ const activeUserIdSetFor = (userIds) => __awaiter(void 0, void 0, void 0, functi
         .lean();
     return new Set(activeUsers.map((u) => u._id.toString()));
 });
-/**
- * Hard eligibility check: not deleted (Worker profile) and the linked User
- * account is not deleted/blocked/inactive. This is never overridable by
- * `force` — it's a data-integrity fact, not a schedulable judgment call.
- * Throws 400 naming exactly which worker IDs failed and why.
- */
+/** Hard eligibility check (never overridable by `force`): not deleted, and the linked User isn't blocked/inactive. */
 const assertWorkersEligible = (workerIds) => __awaiter(void 0, void 0, void 0, function* () {
     const workers = yield worker_model_1.Worker.find(Object.assign({ _id: { $in: workerIds } }, exports.activeWorkerFilter))
         .select('_id user')

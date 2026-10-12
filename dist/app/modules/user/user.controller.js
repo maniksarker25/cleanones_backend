@@ -12,7 +12,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const http_status_1 = __importDefault(require("http-status"));
 const multer_s3_uploader_1 = require("../../helper/multer-s3-uploader");
 const catchasync_1 = __importDefault(require("../../utilities/catchasync"));
@@ -58,9 +57,9 @@ const getMyProfile = (0, catchasync_1.default)((req, res) => __awaiter(void 0, v
     });
 }));
 const updateUserProfile = (0, catchasync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _d, _e;
+    var _d;
     const file = (_d = req.files) === null || _d === void 0 ? void 0 : _d.profile_image;
-    if ((_e = req.files) === null || _e === void 0 ? void 0 : _e.profile_image) {
+    if (file === null || file === void 0 ? void 0 : file.length) {
         req.body.profile_image = (0, multer_s3_uploader_1.getCloudFrontUrl)(file[0].key);
     }
     const result = yield user_services_1.default.updateUserProfile(req.user, req.body);
@@ -94,8 +93,8 @@ const upgradeAccount = (0, catchasync_1.default)((req, res) => __awaiter(void 0,
     (0, sendResponse_1.default)(res, {
         statusCode: http_status_1.default.OK,
         success: true,
-        message: result.message,
-        data: result.data,
+        message: 'Account upgraded successfully',
+        data: result,
     });
 }));
 const userController = {

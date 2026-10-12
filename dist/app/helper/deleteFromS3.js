@@ -13,7 +13,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteFileFromS3 = void 0;
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // with version 3
 const client_s3_1 = require("@aws-sdk/client-s3");
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -44,7 +43,7 @@ const deleteFileFromS3 = (fileUrl) => __awaiter(void 0, void 0, void 0, function
             yield s3.send(headCommand);
         }
         catch (err) {
-            if (err.name === 'NotFound') {
+            if (err instanceof Error && err.name === 'NotFound') {
                 console.log(`File ${fileKey} does not exist in S3.`);
                 return;
             }
@@ -59,7 +58,7 @@ const deleteFileFromS3 = (fileUrl) => __awaiter(void 0, void 0, void 0, function
         console.log(`Successfully deleted ${fileKey} from S3`);
     }
     catch (err) {
-        if (err.name === 'NotFound') {
+        if (err instanceof Error && err.name === 'NotFound') {
             console.error(`File ${fileKey} was not found in S3.`);
         }
         else {

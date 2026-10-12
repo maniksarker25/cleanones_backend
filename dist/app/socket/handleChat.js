@@ -12,6 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const appError_1 = __importDefault(require("../error/appError"));
 const chat_services_1 = __importDefault(require("../modules/chat/chat.services"));
 const chat_message_services_1 = __importDefault(require("../modules/chat_message/chat_message.services"));
 const user_constant_1 = require("../modules/user/user.constant");
@@ -21,6 +22,14 @@ const toSenderRole = (role) => {
         return role;
     }
     return null;
+};
+const errorInfo = (error) => {
+    if (error instanceof appError_1.default) {
+        return { statusCode: error.statusCode, message: error.message };
+    }
+    if (error instanceof Error)
+        return { message: error.message };
+    return { message: 'Unexpected error' };
 };
 const handleChat = (io, socket, currentUserId, profileId, role) => {
     const senderRole = toSenderRole(role);
@@ -39,9 +48,10 @@ const handleChat = (io, socket, currentUserId, profileId, role) => {
             socket.join(`group:${groupId}`);
         }
         catch (error) {
+            const info = errorInfo(error);
             (0, helper_1.emitError)(socket, {
-                code: (error === null || error === void 0 ? void 0 : error.statusCode) || 500,
-                message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to join chat',
+                code: info.statusCode || 500,
+                message: info.message || 'Failed to join chat',
                 type: 'auth',
             });
         }
@@ -67,12 +77,13 @@ const handleChat = (io, socket, currentUserId, profileId, role) => {
             callback === null || callback === void 0 ? void 0 : callback({ success: true, data: message });
         }
         catch (error) {
+            const info = errorInfo(error);
             (0, helper_1.emitError)(socket, {
-                code: (error === null || error === void 0 ? void 0 : error.statusCode) || 500,
-                message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to send message',
+                code: info.statusCode || 500,
+                message: info.message || 'Failed to send message',
                 type: 'server',
             });
-            callback === null || callback === void 0 ? void 0 : callback({ success: false, message: error === null || error === void 0 ? void 0 : error.message });
+            callback === null || callback === void 0 ? void 0 : callback({ success: false, message: info.message });
         }
     }));
     socket.on('group:delete-message', ({ messageId }, callback) => __awaiter(void 0, void 0, void 0, function* () {
@@ -81,12 +92,13 @@ const handleChat = (io, socket, currentUserId, profileId, role) => {
             callback === null || callback === void 0 ? void 0 : callback({ success: true, data: message });
         }
         catch (error) {
+            const info = errorInfo(error);
             (0, helper_1.emitError)(socket, {
-                code: (error === null || error === void 0 ? void 0 : error.statusCode) || 500,
-                message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to delete message',
+                code: info.statusCode || 500,
+                message: info.message || 'Failed to delete message',
                 type: 'server',
             });
-            callback === null || callback === void 0 ? void 0 : callback({ success: false, message: error === null || error === void 0 ? void 0 : error.message });
+            callback === null || callback === void 0 ? void 0 : callback({ success: false, message: info.message });
         }
     }));
     socket.on('group:typing', ({ groupId, name }) => {
@@ -131,13 +143,14 @@ const handleChat = (io, socket, currentUserId, profileId, role) => {
             callback === null || callback === void 0 ? void 0 : callback({ success: true, data: message });
         }
         catch (error) {
+            const info = errorInfo(error);
             (0, helper_1.emitError)(socket, {
-                code: (error === null || error === void 0 ? void 0 : error.statusCode) || 500,
-                message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to send message',
+                code: info.statusCode || 500,
+                message: info.message || 'Failed to send message',
                 type: 'general',
-                details: error === null || error === void 0 ? void 0 : error.message,
+                details: info.message,
             });
-            callback === null || callback === void 0 ? void 0 : callback({ success: false, message: error === null || error === void 0 ? void 0 : error.message });
+            callback === null || callback === void 0 ? void 0 : callback({ success: false, message: info.message });
         }
     }));
     socket.on('seen', ({ chatId, conversationId }) => __awaiter(void 0, void 0, void 0, function* () {
