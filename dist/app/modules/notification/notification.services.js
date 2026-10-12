@@ -43,18 +43,10 @@ const seeNotification = (user) => __awaiter(void 0, void 0, void 0, function* ()
     let result;
     if ((user === null || user === void 0 ? void 0 : user.role) === user_constant_1.USER_ROLE.superAdmin) {
         result = yield notification_model_1.default.updateMany({ receiver: 'admin' }, { isRead: true }, { runValidators: true, new: true });
-        // const adminUnseenNotificationCount = await getAdminNotificationCount();
-        //@ts-ignore
-        // global.io.emit('admin-notifications', adminUnseenNotificationCount);
     }
     if ((user === null || user === void 0 ? void 0 : user.role) !== user_constant_1.USER_ROLE.superAdmin) {
         result = yield notification_model_1.default.updateMany({ receiver: user === null || user === void 0 ? void 0 : user.profileId }, { isRead: true }, { runValidators: true, new: true });
     }
-    //   const updatedNotificationCount = await getUnseenNotificationCount(
-    //     user?.userId,
-    //   );
-    //@ts-ignore
-    //   global.io.to(user?.userId).emit('notifications', updatedNotificationCount);
     return result;
 });
 const seeSingleNotification = (notificationId, user) => __awaiter(void 0, void 0, void 0, function* () {
@@ -136,22 +128,14 @@ const sendNotification = ({ receiver, title, message, type, entity, action = not
     return notification;
 });
 /**
- * Chat messages are deliberately NOT routed through sendNotification/the
- * Notification collection: a busy group chat would otherwise flood the
- * generic notification list with one row per message, drowning out actual
- * business events (plan created, task approved, etc.), and an offline
- * recipient would get one separate OS push per message instead of one
- * collapsed "new messages" alert. Chat already has its own history/unread
- * tracking (ChatMessage + the seen mechanism) and its own realtime delivery
- * (group:new-message/message:new via chat_message.services.ts) — this only
- * covers the one gap those don't: an OS-level push for someone who's
- * currently offline, collapsed per-chat via OneSignal's collapse key so it
- * can never stack into a wall of alerts.
+ * Chat messages skip sendNotification/the Notification collection entirely —
+ * a busy chat would flood that generic list. This only covers the one gap
+ * chat's own realtime delivery doesn't: an OS push for an offline recipient,
+ * collapsed per-chat so it can't stack into a wall of alerts.
  */
 const sendChatPushNotification = ({ receiver, title, message, chatId, data = {}, }) => __awaiter(void 0, void 0, void 0, function* () {
     const userId = receiver.toString();
-    // Online: the chat's own socket event (group:new-message/message:new)
-    // already delivered this in realtime — nothing further to do here.
+    // Online: the chat's own socket event already delivered this in realtime.
     if ((0, socket_1.isUserOnline)(userId))
         return;
     const devices = yield device_model_1.Device.find({

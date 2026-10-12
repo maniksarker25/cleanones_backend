@@ -12,8 +12,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable no-unused-vars */
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const http_status_1 = __importDefault(require("http-status"));
 const config_1 = __importDefault(require("../../config"));
@@ -67,6 +65,8 @@ const loginUserIntoDB = (payload) => __awaiter(void 0, void 0, void 0, function*
     if (payload.role && !user.roles.includes(payload.role)) {
         throw new appError_1.default(http_status_1.default.NOT_FOUND, `${payload.role} account not found`);
     }
+    console.log("payload", payload);
+    console.log('user?.password', user === null || user === void 0 ? void 0 : user.password, "payload?.password", payload === null || payload === void 0 ? void 0 : payload.password);
     if (!(yield user_model_1.User.isPasswordMatched(payload === null || payload === void 0 ? void 0 : payload.password, user === null || user === void 0 ? void 0 : user.password))) {
         throw new appError_1.default(http_status_1.default.FORBIDDEN, 'Invalid credentials');
     }
@@ -82,9 +82,11 @@ const loginUserIntoDB = (payload) => __awaiter(void 0, void 0, void 0, function*
     };
     const accessToken = (0, user_utils_1.createToken)(jwtPayload, config_1.default.jwt_access_secret, config_1.default.jwt_access_expires_in);
     const refreshToken = (0, user_utils_1.createToken)(jwtPayload, config_1.default.jwt_refresh_secret, config_1.default.jwt_refresh_expires_in);
-    const obj = {};
-    return Object.assign(Object.assign({ accessToken,
-        refreshToken }, obj), { role: user === null || user === void 0 ? void 0 : user.role });
+    return {
+        accessToken,
+        refreshToken,
+        role: user === null || user === void 0 ? void 0 : user.role,
+    };
 });
 // change password
 const changePasswordIntoDB = (userData, payload) => __awaiter(void 0, void 0, void 0, function* () {

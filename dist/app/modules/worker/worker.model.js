@@ -80,6 +80,21 @@ const workerSchema = new mongoose_1.Schema({
         default: 0,
         min: 0,
     },
+    total_working_hours: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+    total_paid_hours: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+    total_unpaid_hours: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
     is_profile_completed: {
         type: Boolean,
         default: false,
