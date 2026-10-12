@@ -56,14 +56,7 @@ const location_model_1 = require("../location/location.model");
 const task_model_1 = require("../task/task.model");
 const shift_services_1 = require("../shift/shift.services");
 const cleaning_plan_model_1 = require("./cleaning_plan.model");
-/**
- * Server-computed conservative upper bound: sum of duration_minutes across
- * the plan's own selected (active) tasks. Deliberately worst-case (assumes
- * every task could land on the same day) rather than a per-date-accurate
- * figure — used only as an informational estimate on the plan (see
- * max_estimated_duration); the real, authoritative duration for a specific
- * day lives on that day's materialized Shift.
- */
+/** Worst-case estimate (assumes every task lands the same day): sum of duration_minutes across the plan's tasks. */
 const computeMaxEstimatedDuration = (taskIds) => __awaiter(void 0, void 0, void 0, function* () {
     if (!taskIds.length)
         return 0;
@@ -75,11 +68,7 @@ const computeMaxEstimatedDuration = (taskIds) => __awaiter(void 0, void 0, void 
         .lean();
     return tasks.reduce((sum, t) => sum + (t.duration_minutes || 0), 0);
 });
-/**
- * Enforces the plan's core invariant: every selected task must belong to one
- * of the plan's own selected rooms — a task can't be picked onto a plan that
- * doesn't cover its room. Also guards against stale/invalid task ids.
- */
+/** Enforces that every selected task belongs to one of the plan's selected rooms; also catches stale task ids. */
 const validateTasksBelongToRooms = (taskIds, roomIds) => __awaiter(void 0, void 0, void 0, function* () {
     if (!taskIds.length)
         return;
@@ -96,12 +85,7 @@ const validateTasksBelongToRooms = (taskIds, roomIds) => __awaiter(void 0, void 
         throw new appError_1.default(http_status_1.default.BAD_REQUEST, "One or more selected tasks do not belong to this plan's selected rooms");
     }
 });
-/**
- * Drops any previously-selected task whose room no longer appears in the
- * plan's (just-updated) room list — called when `rooms` changes on an update
- * that doesn't also explicitly replace `tasks` in the same payload, so a
- * removed room can never leave an orphaned task id behind on the plan.
- */
+/** Drops any selected task whose room fell out of the plan's (just-updated) room list. */
 const pruneTasksForRemovedRooms = (taskIds, roomIds) => __awaiter(void 0, void 0, void 0, function* () {
     if (!taskIds.length)
         return [];
@@ -161,13 +145,11 @@ const updateCleaningPlanIntoDB = (managerId, id, payload) => __awaiter(void 0, v
     const effectiveRooms = rooms !== undefined ? rooms : plan.rooms;
     let effectiveTasks = tasks !== undefined ? tasks : plan.tasks;
     if (tasks !== undefined) {
-        // Manager explicitly set the task selection on this update — must
-        // belong to whichever room list is in effect after this same edit.
+        // Must belong to whichever room list is in effect after this same edit.
         yield validateTasksBelongToRooms(tasks, effectiveRooms);
     }
     else if (rooms !== undefined) {
-        // Rooms changed but tasks weren't touched in this payload — drop any
-        // previously-selected task whose room just fell out of the plan.
+        // Rooms changed but tasks weren't touched — drop any task whose room just fell out.
         effectiveTasks = yield pruneTasksForRemovedRooms(plan.tasks, rooms);
     }
     if (rooms !== undefined) {
@@ -181,9 +163,7 @@ const updateCleaningPlanIntoDB = (managerId, id, payload) => __awaiter(void 0, v
         new: true,
         runValidators: true,
     });
-    // A room/task change on the plan needs today's already-materialized
-    // shift (if any) resynced — otherwise it keeps showing whatever
-    // rooms/tasks existed at staffing time until someone re-visits it.
+    // Keeps today's already-materialized shift (if any) in sync with this change.
     if (result && (rooms !== undefined || tasks !== undefined)) {
         yield (0, shift_services_1.resyncTodayShiftRoomsIfDue)(result._id, result.rooms, result.tasks);
     }
@@ -194,12 +174,7 @@ const deleteCleaningPlanFromDB = (managerId, id) => __awaiter(void 0, void 0, vo
     const plan = yield cleaning_plan_model_1.CleaningPlan.findById(id);
     if (!plan)
         throw new appError_1.default(http_status_1.default.NOT_FOUND, 'Cleaning plan not found');
-    // The plan flip, its chat group, and cancelling its future shifts must
-    // land together or not at all — a crash mid-cascade must never leave a
-    // "deleted" plan with a shift still 'upcoming' and staffable. Events are
-    // deliberately fired AFTER the transaction commits, never inside it:
-    // they're external side effects (notifications), not data that needs to
-    // roll back, and must never fire for a write that didn't actually land.
+    // Plan flip + chat group + shift cancellation land atomically; events fire only after commit.
     const session = yield mongoose_1.default.startSession();
     let result;
     let workerIds;
@@ -498,10 +473,7 @@ const getSingleCleaningPlanFromDB = (id) => __awaiter(void 0, void 0, void 0, fu
                     { $match: { $expr: { $in: ['$_id', '$$roomIds'] } } },
                     { $project: { location: 0, last_updated_by: 0 } },
                     {
-                        // Only this plan's OWN selected tasks under the
-                        // room — not every active task the room has — so a
-                        // second plan covering the same room with a
-                        // different task subset reports its own counts.
+                        // Only this plan's own selected tasks under the room, not every active task.
                         $lookup: {
                             from: 'tasks',
                             let: { roomId: '$_id', planTaskIds: '$$planTaskIds' },
@@ -543,11 +515,9 @@ const getSingleCleaningPlanFromDB = (id) => __awaiter(void 0, void 0, void 0, fu
             $addFields: {
                 total_rooms: { $size: { $ifNull: ['$rooms', []] } },
                 total_tasks: { $sum: '$rooms.total_task' },
-                // Sum of the recurring room tasks' duration_minutes only —
-                // the plan's regular checklist, excluding ad-hoc work.
+                // Regular checklist duration only, excluding ad-hoc tasks.
                 total_task_duration: { $sum: '$rooms.total_duration' },
-                // Sum across every AdditionalTask regardless of status —
-                // same "unfiltered" convention as total_additional_tasks_pending below.
+                // Sum across every AdditionalTask regardless of status.
                 total_additional_task_duration: {
                     $sum: { $ifNull: ['$additional_tasks.duration_minutes', []] },
                 },
@@ -563,9 +533,7 @@ const getSingleCleaningPlanFromDB = (id) => __awaiter(void 0, void 0, void 0, fu
             },
         },
         {
-            // Grand total: regular checklist time + ad-hoc task time
-            // combined — split into its own stage so it can reference the
-            // two fields computed just above.
+            // Grand total: checklist time + ad-hoc task time.
             $addFields: {
                 total_duration: {
                     $add: ['$total_task_duration', '$total_additional_task_duration'],

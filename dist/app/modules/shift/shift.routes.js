@@ -10,6 +10,10 @@ const validateRequest_1 = __importDefault(require("../../middlewares/validateReq
 const user_constant_1 = require("../user/user.constant");
 const shift_controller_1 = __importDefault(require("./shift.controller"));
 const shift_validation_1 = __importDefault(require("./shift.validation"));
+// Side-effect import: registers the auto-checkout cron (see shift.cron.ts)
+// the moment this module loads, same as shiftController/shiftValidations do.
+require("./shift.cron");
+require("./bulk_assignment.cron");
 const router = (0, express_1.Router)();
 router.get('/my-shifts', (0, auth_1.default)(user_constant_1.USER_ROLE.worker), shift_controller_1.default.listMyShifts);
 router.get('/my-active-shift', (0, auth_1.default)(user_constant_1.USER_ROLE.worker), shift_controller_1.default.getMyActiveShift);

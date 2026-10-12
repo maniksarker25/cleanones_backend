@@ -216,9 +216,7 @@ const deleteFAQ = (id) => __awaiter(void 0, void 0, void 0, function* () {
 const addSlider = (req) => __awaiter(void 0, void 0, void 0, function* () {
     const { files, body } = req;
     let image = undefined;
-    //@ts-ignore
-    if (files && files.image) {
-        //@ts-ignore
+    if (files === null || files === void 0 ? void 0 : files.image) {
         image = `/images/image/${files.image[0].filename}`;
     }
     const result = yield manage_model_1.Slider.create(Object.assign({ image }, body));
@@ -231,9 +229,7 @@ const editSlider = (req) => __awaiter(void 0, void 0, void 0, function* () {
     const { files, body } = req;
     const { id } = req.params;
     let image = undefined;
-    //@ts-ignore
-    if (files && files.image) {
-        //@ts-ignore
+    if (files === null || files === void 0 ? void 0 : files.image) {
         image = `/images/image/${files.image[0].filename}`;
     }
     const isExist = yield manage_model_1.Slider.findById(id);
@@ -241,7 +237,6 @@ const editSlider = (req) => __awaiter(void 0, void 0, void 0, function* () {
         throw new appError_1.default(404, 'Slider program not found');
     }
     const updateData = __rest(body, []);
-    // console.log(updateData);
     const result = yield manage_model_1.Slider.findOneAndUpdate({ _id: id }, Object.assign({ image }, updateData), {
         new: true,
         runValidators: true,
