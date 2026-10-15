@@ -3,6 +3,7 @@ import auth from '../../middlewares/auth';
 import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import locationController from './location.controller';
+import locationCompanyAdminController from './location.company_admin.controller';
 import locationValidations from './location.validation';
 
 const router = Router();
@@ -56,6 +57,17 @@ router.get(
     '/single-location/:id',
     auth(USER_ROLE.manager,USER_ROLE.client),
     locationController.getSingleLocation
+);
+
+router.get(
+    '/company-admin/get-all-locations',
+    auth(USER_ROLE.company_admin),
+    locationCompanyAdminController.getAllLocations
+);
+router.get(
+    '/company-admin/get-single-location/:id',
+    auth(USER_ROLE.company_admin),
+    locationCompanyAdminController.getSingleLocation
 );
 
 export const locationRoutes = router;

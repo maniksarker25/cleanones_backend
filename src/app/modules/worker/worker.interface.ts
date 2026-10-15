@@ -6,6 +6,7 @@ export interface TWorker {
     email: string;
     phone?: string;
     user: Types.ObjectId;
+    manager: Types.ObjectId;
     isagree_condition?: boolean;
     dob?: Date | string;
     nationality?: string;

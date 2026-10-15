@@ -146,6 +146,11 @@ const shiftAssignedWorkerSchema = new Schema(
 
 const shiftSchema = new Schema<IShift>(
     {
+        manager: {
+            type: Schema.Types.ObjectId,
+            ref: 'Manager',
+            required: true,
+        },
         cleaning_plan: {
             type: Schema.Types.ObjectId,
             ref: 'CleaningPlan',
@@ -213,5 +218,9 @@ shiftSchema.index({ 'assigned_workers.worker': 1, date: 1 });
 // compound index covers both via the standard prefix rule, since none of the
 // existing indexes above start with a bare `date`.
 shiftSchema.index({ date: 1, 'location.location': 1 });
+// Manager-scoped equivalents: every manager-facing shift query leads with
+// `manager`, so these replace the unscoped date lookups for that traffic.
+shiftSchema.index({ manager: 1, date: 1, 'location.location': 1 });
+shiftSchema.index({ manager: 1, 'assigned_workers.worker': 1, date: 1 });
 
 export const Shift = model<IShift>('Shift', shiftSchema, 'shifts');

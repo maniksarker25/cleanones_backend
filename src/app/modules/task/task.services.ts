@@ -1,13 +1,18 @@
 import httpStatus from 'http-status';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
+import { managerScope } from '../../utilities/managerScope';
 import { Room } from '../room/room.model';
 import shiftServices from '../shift/shift.services';
 import { TTask } from './task.interface';
 import { Task } from './task.model';
 
-const resolveRoomHierarchy = async (roomId: string) => {
-    const room = await Room.findOne({ _id: roomId, is_active: true });
+const resolveRoomHierarchy = async (managerId: string, roomId: string) => {
+    const room = await Room.findOne({
+        _id: roomId,
+        is_active: true,
+        ...managerScope(managerId),
+    });
 
     if (!room) {
         throw new AppError(httpStatus.NOT_FOUND, 'Room not found');
@@ -28,6 +33,7 @@ const resolveRoomHierarchy = async (roomId: string) => {
     }
 
     return {
+        manager: room.manager,
         room: room._id,
         location: populatedLocation._id,
         client: populatedLocation.client,
@@ -36,12 +42,16 @@ const resolveRoomHierarchy = async (roomId: string) => {
 
 const createTaskIntoDB = async (
     managerId: string,
-    payload: Omit<TTask, 'client' | 'location'>
+    payload: Omit<TTask, 'client' | 'location' | 'manager'>
 ) => {
-    const hierarchy = await resolveRoomHierarchy(payload.room.toString());
+    const hierarchy = await resolveRoomHierarchy(
+        managerId,
+        payload.room.toString()
+    );
 
     const result = await Task.create({
         ...payload,
+        manager: hierarchy.manager,
         client: hierarchy.client,
         location: hierarchy.location,
         room: hierarchy.room,
@@ -58,7 +68,7 @@ const createTaskIntoDB = async (
 // task is due on, so it's not worth the extra plan/shift scan below.
 const changesRecurrence = (
     task: TTask,
-    payload: Omit<Partial<TTask>, 'client' | 'location' | 'room'>
+    payload: Omit<Partial<TTask>, 'client' | 'location' | 'room' | 'manager'>
 ): boolean => {
     if (payload.is_active === false && task.is_active !== false) return true;
     if (
@@ -84,10 +94,12 @@ const changesRecurrence = (
 const updateTaskIntoDB = async (
     managerId: string,
     id: string,
-    payload: Omit<Partial<TTask>, 'client' | 'location' | 'room'>,
+    payload: Omit<Partial<TTask>, 'client' | 'location' | 'room' | 'manager'>,
     force = false
 ) => {
-    const task = await Task.findById(id);
+    delete (payload as { manager?: unknown }).manager;
+
+    const task = await Task.findOne({ _id: id, ...managerScope(managerId) });
     if (!task) {
         throw new AppError(httpStatus.NOT_FOUND, 'Task not found');
     }
@@ -132,7 +144,7 @@ const updateTaskIntoDB = async (
 };
 
 const deleteTaskFromDB = async (managerId: string, id: string, force = false) => {
-    const task = await Task.findById(id);
+    const task = await Task.findOne({ _id: id, ...managerScope(managerId) });
     if (!task) {
         throw new AppError(httpStatus.NOT_FOUND, 'Task not found');
     }
@@ -160,17 +172,28 @@ const deleteTaskFromDB = async (managerId: string, id: string, force = false) =>
     return result;
 };
 
+// `managerId` is null only on the client's own path, which has already
+// verified the room belongs to the calling client.
 const getAllTasksByRoomFromDB = async (
+    managerId: string | null,
     roomId: string,
     query: Record<string, unknown>
 ) => {
-    const room = await Room.findOne({ _id: roomId, is_active: true });
+    const room = await Room.findOne({
+        _id: roomId,
+        is_active: true,
+        ...(managerId && managerScope(managerId)),
+    });
     if (!room) {
         throw new AppError(httpStatus.NOT_FOUND, 'Room not found');
     }
 
     const taskQuery = new QueryBuilder(
-        Task.find({ room: roomId, is_active: true })
+        Task.find({
+            room: roomId,
+            is_active: true,
+            ...(managerId && managerScope(managerId)),
+        })
             .populate('client', 'name email phone company_name')
             .populate('location', 'name address')
             .populate('room', 'name room_type cleaning_type floor')
@@ -208,11 +231,11 @@ const getMyTasksFromDB = async (
         throw new AppError(httpStatus.NOT_FOUND, 'Room not found');
     }
 
-    return getAllTasksByRoomFromDB(roomId, query);
+    return getAllTasksByRoomFromDB(null, roomId, query);
 };
 
-const getSingleTaskFromDB = async (id: string) => {
-    const task = await Task.findById(id)
+const getSingleTaskFromDB = async (managerId: string, id: string) => {
+    const task = await Task.findOne({ _id: id, ...managerScope(managerId) })
         .populate('client', 'name email phone company_name')
         .populate('location', 'name address')
         .populate('room', 'name room_type cleaning_type floor')

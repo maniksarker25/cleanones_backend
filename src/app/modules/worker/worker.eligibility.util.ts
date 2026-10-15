@@ -1,5 +1,6 @@
 import httpStatus from 'http-status';
 import { Types } from 'mongoose';
+import { toManagerObjectId } from '../../utilities/managerScope';
 import AppError from '../../error/appError';
 import { User } from '../user/user.model';
 import { Worker } from '../worker/worker.model';
@@ -20,12 +21,18 @@ const activeUserIdSetFor = async (
     return new Set(activeUsers.map((u) => u._id.toString()));
 };
 
-/** Hard eligibility check (never overridable by `force`): not deleted, and the linked User isn't blocked/inactive. */
+/**
+ * Hard eligibility check (never overridable by `force`): not deleted, the
+ * linked User isn't blocked/inactive, and the worker belongs to `managerId`
+ * (a foreign worker is reported as "not found", same as a missing one).
+ */
 export const assertWorkersEligible = async (
+    managerId: Types.ObjectId | string,
     workerIds: (Types.ObjectId | string)[]
 ): Promise<{ _id: Types.ObjectId; user: Types.ObjectId }[]> => {
     const workers = await Worker.find({
         _id: { $in: workerIds },
+        manager: toManagerObjectId(managerId),
         ...activeWorkerFilter,
     })
         .select('_id user')

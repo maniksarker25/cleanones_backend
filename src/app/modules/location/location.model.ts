@@ -4,6 +4,7 @@ import { TLocation } from './location.interface';
 
 const locationSchema = new Schema<TLocation>(
     {
+        manager: { type: Schema.Types.ObjectId, ref: 'Manager', required: true, index: true },
         client: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
         last_updated_by: { type: Schema.Types.ObjectId, ref: 'Manager', default: null },
         name: { type: String, required: true },
@@ -23,6 +24,7 @@ const locationSchema = new Schema<TLocation>(
 );
 
 locationSchema.index({ client: 1, is_active: 1 });
+locationSchema.index({ manager: 1, is_active: 1, createdAt: -1 });
 locationSchema.index({ location: '2dsphere' }, { sparse: true });
 
 export const Location = model<TLocation>('Location',locationSchema);

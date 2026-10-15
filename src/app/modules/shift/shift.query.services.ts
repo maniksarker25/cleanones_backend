@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import mongoose, { Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { managerScope, toManagerObjectId } from '../../utilities/managerScope';
 import { normalizeToUTCDateOnly } from '../cleaning_plan/availability.util';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Client } from '../client/client.model';
@@ -14,20 +15,27 @@ import {
     resolveShiftEndTime,
 } from './shift.shared.util';
 
+// Called by managers (pass `managerId`) and workers (pass `requestingWorkerId`);
+// a manager only ever sees shifts/plans of their own tenant.
 export const getShiftForDate = async (
     planId: string,
     date: Date,
-    requestingWorkerId?: string
+    requestingWorkerId?: string,
+    managerId?: string
 ) => {
     const day = normalizeToUTCDateOnly(date);
-    const existing = await Shift.findOne({ cleaning_plan: planId, date: day }).lean();
+    const existing = await Shift.findOne({
+        cleaning_plan: planId,
+        date: day,
+        ...(managerId && managerScope(managerId)),
+    }).lean();
 
     let result: (Record<string, unknown> & { assigned_workers: IAssignedWorker[] }) | null;
     if (existing) {
         const [withNames] = await attachWorkerNames([existing]);
         result = { ...withNames, end_time: resolveShiftEndTime(existing), is_virtual: false };
     } else {
-        const plan = await ensureActivePlan(planId);
+        const plan = await ensureActivePlan(planId, managerId);
         const snapshot = await buildShiftSnapshot(plan);
         const dueTasks = tasksOccurringOnDate(snapshot, day);
         result = dueTasks.length
@@ -68,8 +76,13 @@ export const getShiftForDate = async (
  * Every occurrence of the plan in [from, to]: the materialized shift where
  * one exists, otherwise an unstaffed placeholder for dates the plan is due.
  */
-export const listShiftsInRange = async (planId: string, from: Date, to: Date) => {
-    const plan = await ensureActivePlan(planId);
+export const listShiftsInRange = async (
+    managerId: string,
+    planId: string,
+    from: Date,
+    to: Date
+) => {
+    const plan = await ensureActivePlan(planId, managerId);
     const fromDay = normalizeToUTCDateOnly(from);
     const toDay = normalizeToUTCDateOnly(to);
     if (toDay < fromDay) {
@@ -244,17 +257,17 @@ export const getNextShiftForWorker = async (workerId: string) => {
 };
 
 /**
- * Dashboard-wide "today at a glance" — same for every manager, not scoped
- * to the caller. Only counts already-materialized shifts (the daily cron
+ * Manager dashboard "today at a glance", scoped to the calling manager's own
+ * shifts. Only counts already-materialized shifts (the daily cron
  * guarantees today's exist by now). total_absent/total_late are
  * point-in-time: absent = past start, never checked in; late = checked in
  * after the scheduled start. Mutually exclusive, both exclude cancelled shifts.
  */
-export const getTodayLiveShiftMetaFromDB = async () => {
+export const getTodayLiveShiftMetaFromDB = async (managerId: string) => {
     const today = normalizeToUTCDateOnly(new Date());
     const now = new Date();
 
-    const allShifts = await Shift.find({ date: today })
+    const allShifts = await Shift.find({ date: today, ...managerScope(managerId) })
         .select('status date_time assigned_workers')
         .lean();
     const shifts = allShifts.filter((s) => s.status !== 'cancelled');
@@ -374,8 +387,9 @@ const SHIFT_STATUSES = new Set<IShift['status']>([
     'completed',
 ]);
 
-/** Manager-facing today's-shifts list, system-wide, filterable by location/client. Room detail lives on the single-shift endpoint. */
+/** Manager-facing today's-shifts list for the manager's own tenant, filterable by location/client. Room detail lives on the single-shift endpoint. */
 export const getTodayLiveShiftsFromDB = async (
+    managerId: string,
     query: Record<string, unknown>
 ) => {
     const today = normalizeToUTCDateOnly(new Date());
@@ -394,7 +408,11 @@ export const getTodayLiveShiftsFromDB = async (
         );
     }
 
-    const match: Record<string, unknown> = { date: today, status: { $ne: 'cancelled' } };
+    const match: Record<string, unknown> = {
+        date: today,
+        status: { $ne: 'cancelled' },
+        manager: toManagerObjectId(managerId),
+    };
 
     const locationId = parseObjectIdQueryParam(query.location, 'location');
     if (locationId) {
@@ -403,7 +421,10 @@ export const getTodayLiveShiftsFromDB = async (
 
     const clientId = parseObjectIdQueryParam(query.client, 'client');
     if (clientId) {
-        const planIds = await CleaningPlan.find({ client: clientId }).distinct('_id');
+        const planIds = await CleaningPlan.find({
+            client: clientId,
+            ...managerScope(managerId),
+        }).distinct('_id');
         match.cleaning_plan = { $in: planIds };
     }
 
@@ -445,12 +466,12 @@ export const getTodayLiveShiftsFromDB = async (
 };
 
 /** One shift's full detail — tasks, rooms with progress, crew, plan/client context. */
-export const getSingleLiveShiftFromDB = async (id: string) => {
+export const getSingleLiveShiftFromDB = async (managerId: string, id: string) => {
     if (!mongoose.isValidObjectId(id)) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Invalid shift ID');
     }
 
-    const shift = await Shift.findById(id).lean();
+    const shift = await Shift.findOne({ _id: id, ...managerScope(managerId) }).lean();
     if (!shift) {
         throw new AppError(httpStatus.NOT_FOUND, 'Shift not found');
     }

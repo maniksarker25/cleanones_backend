@@ -3,6 +3,13 @@ import { IIssueReport, ISSUE_SEVERITY, ISSUE_STATUS } from './issue_report.inter
 
 const issueReportSchema = new Schema<IIssueReport>(
     {
+        manager: {
+            type: Schema.Types.ObjectId,
+            ref: 'Manager',
+            required: true,
+            immutable: true,
+            index: true,
+        },
         worker: {
             type: Schema.Types.ObjectId,
             ref: 'Worker',

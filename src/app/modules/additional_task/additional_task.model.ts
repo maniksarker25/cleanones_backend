@@ -36,6 +36,12 @@ const photoRequirementSchema = new Schema<IPhotoRequirement>(
 
 const additionalTaskSchema = new Schema<IAdditionalTask>(
     {
+        manager: {
+            type: Schema.Types.ObjectId,
+            ref: 'Manager',
+            required: true,
+            index: true,
+        },
         cleaning_plan_id: {
             type: Schema.Types.ObjectId,
             ref: 'CleaningPlan',

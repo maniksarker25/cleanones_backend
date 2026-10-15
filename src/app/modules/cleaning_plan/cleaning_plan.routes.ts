@@ -3,6 +3,7 @@ import auth from '../../middlewares/auth';
 import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import cleaningPlanController from './cleaning_plan.controller';
+import cleaningPlanCompanyAdminController from './cleaning_plan.company_admin.controller';
 import cleaningPlanValidations from './cleaning_plan.validation';
 
 const router = Router();
@@ -46,6 +47,17 @@ router.get(
     '/single-cleaning-plan/:id',
     auth(USER_ROLE.manager,USER_ROLE.client),
     cleaningPlanController.getSingleCleaningPlan
+);
+
+router.get(
+    '/company-admin/get-all-cleaning-plans',
+    auth(USER_ROLE.company_admin),
+    cleaningPlanCompanyAdminController.getAllCleaningPlans
+);
+router.get(
+    '/company-admin/get-single-cleaning-plan/:id',
+    auth(USER_ROLE.company_admin),
+    cleaningPlanCompanyAdminController.getSingleCleaningPlan
 );
 
 export const cleaningPlanRoutes = router;

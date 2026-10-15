@@ -6,31 +6,11 @@ import {
     NOTIFICATION_ENTITY,
 } from '../../modules/notification/notification.enum';
 import NotificationService from '../../modules/notification/notification.services';
-import { Manager } from '../../modules/manager/manager.model';
-
-// Same fan-out rationale as additional_task.listener.ts — no stored manager
-// relationship exists to narrow this to one, so every manager gets their own
-// notification row.
-const notifyAllManagers = async (
-    build: (managerId: string) => Parameters<
-        typeof NotificationService.sendNotification
-    >[0]
-) => {
-    const managers = await Manager.find().select('_id').lean();
-    await Promise.all(
-        managers.map((manager) =>
-            NotificationService.sendNotification(
-                build(manager._id.toString())
-            ).catch((err) =>
-                errorLogger.error('issue_report notification failed', err)
-            )
-        )
-    );
-};
+import { notifyWorkerManager } from './notifyManager';
 
 // A worker filed a new issue report.
 onAppEvent('issue_report.created', async (payload) => {
-    await notifyAllManagers((managerId) => ({
+    await notifyWorkerManager(payload.workerId, (managerId) => ({
         receiver: managerId,
         title: 'New issue report',
         message: `A worker reported an issue: "${payload.issueType}" (${payload.severity} severity).`,
@@ -39,7 +19,7 @@ onAppEvent('issue_report.created', async (payload) => {
         action: NOTIFICATION_ACTION.VIEW,
         entityId: payload.issueId,
         meta: { issueId: payload.issueId, workerId: payload.workerId },
-    }));
+    }), 'issue_report.created');
 });
 
 // A manager changed an issue report's status — tell the worker who filed it.

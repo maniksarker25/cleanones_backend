@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import { Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { toManagerObjectId } from '../../utilities/managerScope';
 import { emitAppEvent } from '../../events/eventEmitter';
 import { normalizeToUTCDateOnly } from '../cleaning_plan/availability.util';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
@@ -86,8 +87,17 @@ export const attachWorkerNames = async <T extends WithAssignedWorkers>(
 
 // .lean() — every caller only reads plan fields (location, rooms, is_active,
 // _id) to build a snapshot or check state; none of them save this doc back.
-export const ensureActivePlan = async (planId: string | Types.ObjectId) => {
-    const plan = await CleaningPlan.findById(planId).lean();
+// `managerId` is passed by every manager-facing caller; a foreign manager's plan
+// is then reported as missing. Worker/client paths omit it (they're scoped by
+// their own assignment/ownership checks).
+export const ensureActivePlan = async (
+    planId: string | Types.ObjectId,
+    managerId?: string
+) => {
+    const plan = await CleaningPlan.findOne({
+        _id: planId,
+        ...(managerId && { manager: toManagerObjectId(managerId) }),
+    }).lean();
     if (!plan)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
     return plan;
@@ -96,10 +106,15 @@ export const ensureActivePlan = async (planId: string | Types.ObjectId) => {
 // A Shift only exists once a manager has staffed it — nothing auto-materializes it.
 export const getShiftOrThrow = async (
     planId: string | Types.ObjectId,
-    date: Date
+    date: Date,
+    managerId?: string
 ): Promise<IShift & { _id: Types.ObjectId }> => {
     const day = normalizeToUTCDateOnly(date);
-    const shift = await Shift.findOne({ cleaning_plan: planId, date: day });
+    const shift = await Shift.findOne({
+        cleaning_plan: planId,
+        date: day,
+        ...(managerId && { manager: toManagerObjectId(managerId) }),
+    });
     if (!shift) {
         throw new AppError(
             httpStatus.NOT_FOUND,

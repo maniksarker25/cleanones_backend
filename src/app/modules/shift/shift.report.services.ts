@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import AppError from '../../error/appError';
+import { managerScope } from '../../utilities/managerScope';
 import { normalizeToUTCDateOnly } from '../cleaning_plan/availability.util';
 import { WorkerType } from '../worker/worker.constant';
 import { Worker } from '../worker/worker.model';
@@ -111,17 +112,26 @@ const buildShiftTrendBuckets = (
 };
 
 /** Dashboard report: shift + issue-report totals for the period, plus a trend chart and status breakdown. */
-export const getManagerReportFromDB = async (period: TReportPeriod) => {
+export const getManagerReportFromDB = async (
+    managerId: string,
+    period: TReportPeriod
+) => {
     const now = new Date();
     const { from, to } = getReportDateRange(period, now);
     const toExclusive = new Date(to);
     toExclusive.setUTCDate(toExclusive.getUTCDate() + 1);
 
     const [shifts, issueReports] = await Promise.all([
-        Shift.find({ date: { $gte: from, $lt: toExclusive } })
+        Shift.find({
+            date: { $gte: from, $lt: toExclusive },
+            ...managerScope(managerId),
+        })
             .select('date')
             .lean(),
-        IssueReport.find({ createdAt: { $gte: from, $lt: toExclusive } })
+        IssueReport.find({
+            createdAt: { $gte: from, $lt: toExclusive },
+            ...managerScope(managerId),
+        })
             .select('status')
             .lean(),
     ]);
@@ -155,10 +165,20 @@ export const getManagerReportFromDB = async (period: TReportPeriod) => {
  * scheduled start; absent = past date, status not cancelled, never checked in.
  */
 export const getWorkerPerformanceFromDB = async (
+    managerId: string,
     workerId: string,
     month?: number,
     year?: number
 ) => {
+    if (!mongoose.isObjectIdOrHexString(workerId)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid worker ID');
+    }
+    const ownedWorker = await Worker.exists({
+        _id: workerId,
+        ...managerScope(managerId),
+    });
+    if (!ownedWorker) throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
+
     const now = new Date();
     const targetYear = year ?? now.getUTCFullYear();
     const targetMonth = month ?? now.getUTCMonth() + 1; // 1-12
@@ -319,6 +339,7 @@ const getAttendanceSummaryPeriodRange = (
  * total check-ins (on-time = at or before the scheduled start, no grace).
  */
 export const getWorkersAttendanceSummaryFromDB = async (
+    managerId: string,
     period: TAttendanceSummaryPeriod
 ) => {
     const now = new Date();
@@ -326,6 +347,7 @@ export const getWorkersAttendanceSummaryFromDB = async (
 
     const shifts = await Shift.find({
         date: { $gte: start, $lt: end },
+        ...managerScope(managerId),
     }).lean();
 
     let completedShifts = 0;
@@ -375,6 +397,7 @@ export const getWorkersAttendanceSummaryFromDB = async (
  * One row per matching active worker, even with zero shifts (an all-0 row).
  */
 export const getWorkersAttendanceListFromDB = async (
+    managerId: string,
     period: TAttendanceSummaryPeriod,
     searchTerm?: string,
     workerType?: WorkerType
@@ -382,7 +405,10 @@ export const getWorkersAttendanceListFromDB = async (
     const now = new Date();
     const { start, end } = getAttendanceSummaryPeriodRange(period, now);
 
-    const workerFilter: Record<string, unknown> = { isDeleted: { $ne: true } };
+    const workerFilter: Record<string, unknown> = {
+        isDeleted: { $ne: true },
+        ...managerScope(managerId),
+    };
     if (workerType) workerFilter.worker_type = workerType;
     if (searchTerm) {
         const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -444,6 +470,7 @@ export const getWorkersAttendanceListFromDB = async (
 
 /** Same as getWorkersAttendanceSummaryFromDB, scoped to one worker — powers the profile's Attendance tab. */
 export const getWorkerAttendanceSummaryFromDB = async (
+    managerId: string,
     workerId: string,
     period: TAttendanceSummaryPeriod
 ) => {
@@ -453,6 +480,7 @@ export const getWorkerAttendanceSummaryFromDB = async (
     const worker = await Worker.findOne({
         _id: workerId,
         isDeleted: { $ne: true },
+        ...managerScope(managerId),
     }).select('_id').lean();
     if (!worker) throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
 

@@ -44,7 +44,10 @@ const deleteRoom = catchAsync(async (req, res) => {
 });
 
 const getAllRooms = catchAsync(async (req, res) => {
-    const result = await roomServices.getAllRoomsFromDB(req.query);
+    const result = await roomServices.getAllRoomsFromDB(
+        req.user.profileId as string,
+        req.query
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -55,6 +58,7 @@ const getAllRooms = catchAsync(async (req, res) => {
 
 const getAllRoomsByLocation = catchAsync(async (req, res) => {
     const result = await roomServices.getAllRoomsByLocationFromDB(
+        req.user.profileId as string,
         req.params.locationId,
         req.query
     );
@@ -81,7 +85,10 @@ const getMyRooms = catchAsync(async (req, res) => {
 });
 
 const getSingleRoom = catchAsync(async (req, res) => {
-    const result = await roomServices.getSingleRoomFromDB(req.params.id);
+    const result = await roomServices.getSingleRoomFromDB(
+        req.user.profileId as string,
+        req.params.id
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,

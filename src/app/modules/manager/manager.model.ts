@@ -10,6 +10,12 @@ const managerSchema = new Schema<TManager>(
             unique: true,
             index: true,
         },
+        company: {
+            type: Schema.Types.ObjectId,
+            ref: 'Company',
+            required: true,
+            index: true,
+        },
         name: {
             type: String,
             required: true,

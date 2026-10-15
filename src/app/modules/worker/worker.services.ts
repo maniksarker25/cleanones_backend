@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
+import { managerScope } from '../../utilities/managerScope';
 import chatServices from '../chat/chat.services';
 import { Shift } from '../shift/shift.model';
 import { PROFILE_MODEL_BY_ROLE, USER_ROLE } from '../user/user.constant';
@@ -31,7 +32,10 @@ const validateId = (id: string) => {
     }
 };
 
-const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
+const createWorkerIntoDB = async (
+    managerId: string,
+    payload: CreateWorkerInput
+) => {
     // Credentials are stored only on the linked user account.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
     const { password, confirmPassword, ...workerData } =
@@ -69,6 +73,7 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
                 [
                     {
                         ...workerData,
+                        manager: managerId,
                         user: user._id,
                     },
                 ],
@@ -86,7 +91,7 @@ const createWorkerIntoDB = async (payload: CreateWorkerInput) => {
     }
 
     // Best-effort, outside the transaction — idempotent, so a retry can't duplicate it.
-    await chatServices.createWorkerManagersChat(worker._id);
+    await chatServices.createWorkerManagersChat(managerId, worker?._id.toString());
 
     return worker;
 };
@@ -112,6 +117,7 @@ const WORKER_CSV_COLUMNS = [
 // Reuses createWorkerIntoDB, so each worker gets the same User + profile + manager chat as a
 // normal create. Like that API, no email is sent.
 const bulkCreateWorkersFromCsv = async (
+    managerId: string,
     csvBuffer: Buffer
 ): Promise<BulkResult> => {
     const rows = await parseCsvBuffer(csvBuffer, [
@@ -149,7 +155,7 @@ const bulkCreateWorkersFromCsv = async (
                 }),
                 confirmPassword: row.password,
             });
-            const worker = await createWorkerIntoDB(data);
+            const worker = await createWorkerIntoDB(managerId, data);
             result.created.push({
                 row: rowNumber,
                 email: data.email,
@@ -169,7 +175,11 @@ const bulkCreateWorkersFromCsv = async (
     return result;
 };
 
-const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
+const updateWorkerIntoDB = async (
+    managerId: string,
+    id: string,
+    payload: UpdateWorkerInput
+) => {
     validateId(id);
     const data = workerValidations.updateWorkerBody.parse(payload);
     const session = await mongoose.startSession();
@@ -178,6 +188,7 @@ const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
             const worker = await Worker.findOne({
                 _id: id,
                 ...activeWorker,
+                ...managerScope(managerId),
             }).session(session);
             if (!worker)
                 throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
@@ -239,7 +250,7 @@ const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
                     );
             }
             return Worker.findOneAndUpdate(
-                { _id: id, ...activeWorker },
+                { _id: id, ...activeWorker, ...managerScope(managerId) },
                 { $set: data },
                 { new: true, runValidators: true, session }
             );
@@ -249,8 +260,16 @@ const updateWorkerIntoDB = async (id: string, payload: UpdateWorkerInput) => {
     }
 };
 
-const deleteWorkerFromDB = async (id: string) => {
+const deleteWorkerFromDB = async (managerId: string, id: string) => {
     validateId(id);
+
+    // Ownership first, so a foreign worker's shift state is never revealed.
+    const owned = await Worker.exists({
+        _id: id,
+        ...activeWorker,
+        ...managerScope(managerId),
+    });
+    if (!owned) throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
 
     // Past (completed/cancelled) shifts are history and don't block deletion;
     // anything still upcoming or in progress must be reassigned first.
@@ -281,7 +300,7 @@ const deleteWorkerFromDB = async (id: string) => {
     try {
         await session.withTransaction(async () => {
             const worker = await Worker.findOneAndUpdate(
-                { _id: id, ...activeWorker },
+                { _id: id, ...activeWorker, ...managerScope(managerId) },
                 { $set: { isDeleted: true } },
                 { new: true, session }
             );
@@ -379,7 +398,10 @@ const EMPTY_WORKER_SHIFT_STATS: WorkerShiftStats = {
     total_absent: 0,
 };
 
-const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
+const getAllWorkersFromDB = async (
+    managerId: string,
+    query: Record<string, unknown>
+) => {
     const parsed = workerValidations.workerListQuery.parse(query);
     const safeQuery = {
         ...parsed,
@@ -390,7 +412,10 @@ const getAllWorkersFromDB = async (query: Record<string, unknown>) => {
             ),
         }),
     };
-    const workerQuery = new QueryBuilder(Worker.find(activeWorker), safeQuery)
+    const workerQuery = new QueryBuilder(
+        Worker.find({ ...activeWorker, ...managerScope(managerId) }),
+        safeQuery
+    )
         .search(['name', 'email', 'phone', 'position', 'nationality'])
         .filter()
         .paginate()
@@ -459,9 +484,13 @@ const getWorkerAttendanceStatsFromDB = async (workerId: mongoose.Types.ObjectId)
     };
 };
 
-const getSingleWorkerFromDB = async (id: string) => {
+const getSingleWorkerFromDB = async (managerId: string, id: string) => {
     validateId(id);
-    const worker = await Worker.findOne({ _id: id, ...activeWorker });
+    const worker = await Worker.findOne({
+        _id: id,
+        ...activeWorker,
+        ...managerScope(managerId),
+    });
     if (!worker) throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
 
     const attendanceStats = await getWorkerAttendanceStatsFromDB(worker._id);
