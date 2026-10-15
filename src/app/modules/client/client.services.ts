@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
+import { managerScope } from '../../utilities/managerScope';
 import { emitAppEvent } from '../../events/eventEmitter';
 import chatServices from '../chat/chat.services';
 import clientCredentialsEmailBody from '../../mailTemplate/clientCredentialsEmailBody';
@@ -108,7 +109,7 @@ const createClientIntoDB = async (
         // createChatGroupForPlan/createWorkerManagersChat. Idempotent (unique
         // index on the chat side), so a retry here can never create a
         // duplicate.
-        await chatServices.createClientManagersChat(profile._id);
+        await chatServices.createClientManagersChat(managerId, profile._id);
 
         return profile;
     } catch (error) {
@@ -194,7 +195,14 @@ const updateClientIntoDB = async (
     id: string,
     payload: Partial<TClient>
 ) => {
-    const client = await Client.findOne({ _id: id, isDeleted: false });
+    // Ownership is fixed at creation; never let a payload reassign it.
+    delete (payload as { manager?: unknown }).manager;
+
+    const client = await Client.findOne({
+        _id: id,
+        isDeleted: false,
+        ...managerScope(managerId),
+    });
     if (!client) {
         throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
     }
@@ -216,8 +224,8 @@ const updateClientIntoDB = async (
         }
     }
 
-    const result = await Client.findByIdAndUpdate(
-        id,
+    const result = await Client.findOneAndUpdate(
+        { _id: id, ...managerScope(managerId) },
         { ...payload, last_updated_by: managerId },
         {
             new: true,
@@ -236,7 +244,11 @@ const updateClientIntoDB = async (
 };
 
 const deleteClientFromDB = async (managerId: string, id: string) => {
-    const client = await Client.findOne({ _id: id, isDeleted: false });
+    const client = await Client.findOne({
+        _id: id,
+        isDeleted: false,
+        ...managerScope(managerId),
+    });
     if (!client) {
         throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
     }
@@ -310,9 +322,12 @@ const deleteClientFromDB = async (managerId: string, id: string) => {
     return null;
 };
 
-const getAllClientsFromDB = async (query: Record<string, unknown>) => {
+const getAllClientsFromDB = async (
+    managerId: string,
+    query: Record<string, unknown>
+) => {
     const clientQuery = new QueryBuilder(
-        Client.find({ isDeleted: false })
+        Client.find({ isDeleted: false, ...managerScope(managerId) })
             .populate({
                 path: 'manager',
                 populate: {

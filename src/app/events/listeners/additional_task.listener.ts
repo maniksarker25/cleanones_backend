@@ -6,34 +6,12 @@ import {
     NOTIFICATION_ENTITY,
 } from '../../modules/notification/notification.enum';
 import NotificationService from '../../modules/notification/notification.services';
-import { Manager } from '../../modules/manager/manager.model';
+import { notifyPlanManager } from './notifyManager';
 
-// There's no persisted "manager" membership list anywhere in this app (see
-// chat.services.ts's ensureChatAccessOrThrow) — every manager has blanket
-// access to everything manager-scoped by role, not by a stored relationship.
-// Fanning out one Notification per manager mirrors that: each manager gets
-// their own row (their own read/seen state) rather than a single shared one.
-const notifyAllManagers = async (
-    build: (managerId: string) => Parameters<
-        typeof NotificationService.sendNotification
-    >[0]
-) => {
-    const managers = await Manager.find().select('_id').lean();
-    await Promise.all(
-        managers.map((manager) =>
-            NotificationService.sendNotification(
-                build(manager._id.toString())
-            ).catch((err) =>
-                errorLogger.error('additional_task notification failed', err)
-            )
-        )
-    );
-};
-
-// A client requested extra, one-off work — every manager needs to see this
-// to approve/reject it.
+// A client requested extra, one-off work — the plan's own manager needs to
+// see this to approve/reject it.
 onAppEvent('additional_task.created', async (payload) => {
-    await notifyAllManagers((managerId) => ({
+    await notifyPlanManager(payload.planId, (managerId) => ({
         receiver: managerId,
         title: 'New additional task request',
         message: `A client requested extra work: "${payload.name}".`,
@@ -42,7 +20,7 @@ onAppEvent('additional_task.created', async (payload) => {
         action: NOTIFICATION_ACTION.VIEW,
         entityId: payload.taskId,
         meta: { planId: payload.planId, clientId: payload.clientId },
-    }));
+    }), 'additional_task.created');
 });
 
 onAppEvent('additional_task.approved', async (payload) => {

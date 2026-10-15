@@ -21,6 +21,8 @@ export type TChatType = (typeof CHAT_TYPES)[number];
 export interface TChat {
     _id?: string;
     type: TChatType;
+    // Owning manager — only this manager (not every manager) is a member.
+    manager: Types.ObjectId;
 
     // group chats (type: 'group') — one per cleaning plan
     cleaning_plan?: Types.ObjectId | null;

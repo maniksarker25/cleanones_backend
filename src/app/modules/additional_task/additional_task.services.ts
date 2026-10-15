@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { toManagerObjectId } from '../../utilities/managerScope';
 import { emitAppEvent } from '../../events/eventEmitter';
 import {
     anyPatternOccursOnDate,
@@ -16,25 +17,41 @@ import { AdditionalTask } from './additional_task.model';
 import { additionalTaskListQuerySchema } from './additional_task.validation';
 import { USER_ROLE } from '../user/user.constant';
 
-const ensureCleaningPlanExists = async (planId: string) => {
+type Requester = { role: string; profileId: string };
+
+// Loads the plan and verifies the requester owns it: a client must be the
+// plan's client, a manager must be the plan's manager. A foreign plan is
+// reported as missing so its existence isn't confirmed.
+const ensureCleaningPlanExists = async (
+    planId: string,
+    requester: Requester
+) => {
     const plan = await CleaningPlan.findOne({ _id: planId, is_active: true });
-    if (!plan)
+    const owner =
+        requester.role === USER_ROLE.manager ? plan?.manager : plan?.client;
+    if (!plan || owner?.toString() !== requester.profileId)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
     return plan;
 };
 
-// Managers have blanket access to everything manager-scoped (no persisted
-// membership list anywhere in this app — same convention as chat.services.ts
-// and getAllAdditionalTasksByPlanFromDB below), so ownership is only ever
-// checked for the client role. Throws 404 rather than 403 so an unauthorized
-// client can't distinguish "not yours" from "doesn't exist".
-const ensureClientOwnsAdditionalTask = async (
-    cleaningPlanId: Types.ObjectId | string,
-    requester: { role: string; profileId: string },
+// A manager owns the additional tasks of their own plans (the task carries a
+// denormalized `manager`); a client owns those of plans that are theirs. Throws
+// 404 rather than 403 so a foreign requester can't distinguish "not yours" from
+// "doesn't exist".
+const ensureRequesterOwnsAdditionalTask = async (
+    task: Pick<IAdditionalTask, 'manager' | 'cleaning_plan_id'>,
+    requester: Requester,
     notFoundMessage = 'Additional task not found'
 ) => {
-    if (requester.role !== USER_ROLE.client) return;
-    const plan = await CleaningPlan.findById(cleaningPlanId).select('client').lean();
+    if (requester.role === USER_ROLE.manager) {
+        if (task.manager.toString() !== requester.profileId) {
+            throw new AppError(httpStatus.NOT_FOUND, notFoundMessage);
+        }
+        return;
+    }
+    const plan = await CleaningPlan.findById(task.cleaning_plan_id)
+        .select('client')
+        .lean();
     if (!plan || plan.client.toString() !== requester.profileId) {
         throw new AppError(httpStatus.NOT_FOUND, notFoundMessage);
     }
@@ -63,19 +80,14 @@ const assertShiftNotStartedForDay = async (
 // ─── Create (Client) ──────────────────────────────────────────────────────────
 
 const createAdditionalTaskIntoDB = async (
-    payload: Omit<IAdditionalTask, 'is_completed' | 'status'>,
-    requester: { role: string; profileId: string }
+    payload: Omit<IAdditionalTask, 'is_completed' | 'status' | 'manager'>,
+    requester: Requester
 ) => {
     const requesterRole = requester.role;
     const plan = await ensureCleaningPlanExists(
-        payload.cleaning_plan_id.toString()
+        payload.cleaning_plan_id.toString(),
+        requester
     );
-    if (
-        requesterRole === USER_ROLE.client &&
-        plan.client.toString() !== requester.profileId
-    ) {
-        throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
-    }
 
     // date_time only needs to fall on a date this plan actually has an
     // occurrence on (per its tasks' recurrence patterns) — the time-of-day
@@ -98,6 +110,7 @@ const createAdditionalTaskIntoDB = async (
 
     const task = await AdditionalTask.create({
         ...payload,
+        manager: plan.manager,
         is_completed: false,
         status: requesterRole === USER_ROLE.manager ? 'Approved' : 'Pending',
     });
@@ -126,14 +139,16 @@ const createAdditionalTaskIntoDB = async (
 const updateAdditionalTaskIntoDB = async (
     id: string,
     payload: Partial<IAdditionalTask>,
-    requester: { role: string; profileId: string }
+    requester: Requester
 ) => {
     const task = await AdditionalTask.findById(id);
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
-    await ensureClientOwnsAdditionalTask(task.cleaning_plan_id, requester);
+    await ensureRequesterOwnsAdditionalTask(task, requester);
 
-    // prevent client from touching approval fields
+    // prevent the requester from touching approval or tenancy fields
+    delete (payload as { manager?: unknown }).manager;
+    delete (payload as { cleaning_plan_id?: unknown }).cleaning_plan_id;
     delete payload.status;
     delete payload.reject_reason;
 
@@ -151,6 +166,7 @@ const updateAdditionalTaskIntoDB = async (
 // ─── Approve (Manager) ────────────────────────────────────────────────────────
 
 const approveAdditionalTaskIntoDB = async (
+    managerId: string,
     id: string,
     status: Extract<TAdditionalTaskStatus, 'Approved' | 'Rejected'>,
     rejectReason?: string,
@@ -163,7 +179,10 @@ const approveAdditionalTaskIntoDB = async (
         photo_requirements?: IAdditionalTask['photo_requirements'];
     }
 ) => {
-    const task = await AdditionalTask.findById(id);
+    const task = await AdditionalTask.findOne({
+        _id: id,
+        manager: toManagerObjectId(managerId),
+    });
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
 
@@ -225,12 +244,12 @@ const approveAdditionalTaskIntoDB = async (
 
 const deleteAdditionalTaskFromDB = async (
     id: string,
-    requester: { role: string; profileId: string }
+    requester: Requester
 ) => {
     const task = await AdditionalTask.findById(id);
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
-    await ensureClientOwnsAdditionalTask(task.cleaning_plan_id, requester);
+    await ensureRequesterOwnsAdditionalTask(task, requester);
 
     await AdditionalTask.findByIdAndDelete(id);
     return { message: 'Additional task deleted successfully' };
@@ -240,7 +259,7 @@ const deleteAdditionalTaskFromDB = async (
 
 const getAllAdditionalTasksByPlanFromDB = async (
     query: Record<string, unknown>,
-    requester: { role: string; profileId: string }
+    requester: Requester
 ) => {
     const parsed = additionalTaskListQuerySchema.safeParse(query);
     if (!parsed.success) {
@@ -250,10 +269,7 @@ const getAllAdditionalTasksByPlanFromDB = async (
     const { planId, client, searchTerm, sort } = parsed.data;
     const filters: Record<string, unknown> = {};
     if (planId) {
-        const plan = await ensureCleaningPlanExists(planId);
-        if (requester.role === USER_ROLE.client && plan.client.toString() !== requester.profileId) {
-            throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
-        }
+        await ensureCleaningPlanExists(planId, requester);
         filters.cleaning_plan_id = new Types.ObjectId(planId);
     } else if (requester.role === USER_ROLE.client) {
         // Always self-scoped — the `client` query param (manager-only) is
@@ -261,10 +277,20 @@ const getAllAdditionalTasksByPlanFromDB = async (
         const plans = await CleaningPlan.find({ client: requester.profileId, is_active: true }).select('_id');
         filters.cleaning_plan_id = { $in: plans.map((plan) => plan._id) };
     } else if (client) {
-        const plans = await CleaningPlan.find({ client, is_active: true }).select('_id');
+        const plans = await CleaningPlan.find({
+            client,
+            manager: toManagerObjectId(requester.profileId),
+            is_active: true,
+        }).select('_id');
         // An empty $in never matches — correctly yields zero results instead
         // of accidentally falling through to "no client filter at all".
         filters.cleaning_plan_id = { $in: plans.map((plan) => plan._id) };
+    }
+
+    // A manager's listing is always confined to their own tenant, whichever
+    // filter branch above applied.
+    if (requester.role === USER_ROLE.manager) {
+        filters.manager = toManagerObjectId(requester.profileId);
     }
 
     const page = parsed.data.page ?? 1;
@@ -360,14 +386,15 @@ const getAllAdditionalTasksByPlanFromDB = async (
 
 const getSingleAdditionalTaskFromDB = async (
     id: string,
-    requester: { role: string; profileId: string }
+    requester: Requester
 ) => {
     const task = await AdditionalTask.findById(id).lean();
     if (!task)
         throw new AppError(httpStatus.NOT_FOUND, 'Additional task not found');
-    await ensureClientOwnsAdditionalTask(task.cleaning_plan_id, requester);
+    await ensureRequesterOwnsAdditionalTask(task, requester);
 
     const cleaningPlan = await cleaningPlanServices.getSingleCleaningPlanFromDB(
+        requester,
         task.cleaning_plan_id.toString()
     );
     return { ...task, cleaning_plan_id: cleaningPlan };

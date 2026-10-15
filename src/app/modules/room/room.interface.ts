@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 
 export interface TRoom {
     location: Types.ObjectId;
+    manager: Types.ObjectId;
     last_updated_by?: Types.ObjectId;
     name: string;
     room_type: string;

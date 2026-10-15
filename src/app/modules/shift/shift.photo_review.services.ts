@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import { Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { toManagerObjectId } from '../../utilities/managerScope';
 import { CleaningPlan } from '../cleaning_plan/cleaning_plan.model';
 import { Location } from '../location/location.model';
 import { Task } from '../task/task.model';
@@ -34,7 +35,7 @@ export const setPhotoVerdict = async (
     verdict: 'approved' | 'rejected',
     note?: string
 ) => {
-    const shift = await getShiftOrThrow(planId, date);
+    const shift = await getShiftOrThrow(planId, date, managerId);
 
     const task = shift.tasks.find((t) => t.task.toString() === taskId);
     if (!task) {
@@ -179,6 +180,7 @@ const photoNeedsReview = (photo: PhotoReviewPhoto): boolean => {
  * cleaning plan or location.
  */
 export const getPhotoReviewListFromDB = async (
+    managerId: string,
     params: PhotoReviewQueryParams
 ): Promise<PhotoReviewRow[]> => {
     const to = params.to ?? new Date();
@@ -190,7 +192,10 @@ export const getPhotoReviewListFromDB = async (
             return d;
         })();
 
-    const filter: Record<string, unknown> = { date: { $gte: from, $lte: to } };
+    const filter: Record<string, unknown> = {
+        date: { $gte: from, $lte: to },
+        manager: toManagerObjectId(managerId),
+    };
     if (params.planId) filter.cleaning_plan = new Types.ObjectId(params.planId);
     if (params.locationId)
         filter['location.location'] = new Types.ObjectId(params.locationId);

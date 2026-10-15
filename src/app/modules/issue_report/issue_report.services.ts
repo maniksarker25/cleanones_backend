@@ -2,7 +2,9 @@ import httpStatus from 'http-status';
 import { isObjectIdOrHexString } from 'mongoose';
 import AppError from '../../error/appError';
 import { emitAppEvent } from '../../events/eventEmitter';
+import { managerScope } from '../../utilities/managerScope';
 import { Location } from '../location/location.model';
+import { Worker } from '../worker/worker.model';
 import { IssueReport } from './issue_report.model';
 import {
     issueReportBody,
@@ -15,8 +17,14 @@ const validateId = (id: string) => {
     }
 };
 
-const ensureLocationExists = async (id: string) => {
-    const location = await Location.findOne({ _id: id, is_active: true });
+// Locations are tenant-scoped: a report can only point at a location of the
+// same manager the reporting worker belongs to.
+const ensureLocationExists = async (id: string, managerId: string) => {
+    const location = await Location.findOne({
+        _id: id,
+        is_active: true,
+        ...managerScope(managerId),
+    });
     if (!location) {
         throw new AppError(httpStatus.NOT_FOUND, 'Active location not found');
     }
@@ -24,9 +32,14 @@ const ensureLocationExists = async (id: string) => {
 
 const createIssueReportIntoDB = async (payload: unknown, workerId: string) => {
     const body = issueReportBody.parse(payload);
-    await ensureLocationExists(body.location);
+    const worker = await Worker.findOne({ _id: workerId, isDeleted: { $ne: true } })
+        .select('manager')
+        .lean();
+    if (!worker) throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
+    await ensureLocationExists(body.location, worker.manager.toString());
     const result = await IssueReport.create({
         ...body,
+        manager: worker.manager,
         worker: workerId,
         status: 'PENDING',
     });
@@ -41,19 +54,27 @@ const createIssueReportIntoDB = async (payload: unknown, workerId: string) => {
     return result;
 };
 
-const updateIssueReportIntoDB = async (id: string, payload: unknown) => {
+const updateIssueReportIntoDB = async (
+    managerId: string,
+    id: string,
+    payload: unknown
+) => {
     validateId(id);
     const body = issueReportUpdateBody.parse(payload);
-    if (body.location !== undefined) await ensureLocationExists(body.location);
+    if (body.location !== undefined)
+        await ensureLocationExists(body.location, managerId);
 
-    const existing = await IssueReport.findById(id).select('status worker');
+    const existing = await IssueReport.findOne({
+        _id: id,
+        ...managerScope(managerId),
+    }).select('status worker');
     if (!existing)
         throw new AppError(httpStatus.NOT_FOUND, 'Issue report not found');
     const statusChanged =
         body.status !== undefined && body.status !== existing.status;
 
-    const result = await IssueReport.findByIdAndUpdate(
-        id,
+    const result = await IssueReport.findOneAndUpdate(
+        { _id: id, ...managerScope(managerId) },
         { $set: body },
         {
             new: true,
@@ -75,16 +96,19 @@ const updateIssueReportIntoDB = async (id: string, payload: unknown) => {
     return result;
 };
 
-const deleteIssueReportFromDB = async (id: string) => {
+const deleteIssueReportFromDB = async (managerId: string, id: string) => {
     validateId(id);
-    const result = await IssueReport.findByIdAndDelete(id);
+    const result = await IssueReport.findOneAndDelete({
+        _id: id,
+        ...managerScope(managerId),
+    });
     if (!result)
         throw new AppError(httpStatus.NOT_FOUND, 'Issue report not found');
     return result;
 };
 
-const getAllIssueReportsFromDB = async () => {
-    return IssueReport.find().sort('-createdAt');
+const getAllIssueReportsFromDB = async (managerId: string) => {
+    return IssueReport.find(managerScope(managerId)).sort('-createdAt');
 };
 
 const getMyIssueReportsFromDB = async (workerId: string) => {

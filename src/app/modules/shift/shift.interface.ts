@@ -76,6 +76,7 @@ export interface IShiftAssignedWorker {
 
 export interface IShift {
     cleaning_plan: Types.ObjectId;
+    manager: Types.ObjectId;
     date: Date;
 
     date_time: Date;

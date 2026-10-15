@@ -4,7 +4,10 @@ import sendResponse from '../../utilities/sendResponse';
 import workerServices from './worker.services';
 
 const createWorker = catchAsync(async (req, res) => {
-    const result = await workerServices.createWorkerIntoDB(req.body);
+    const result = await workerServices.createWorkerIntoDB(
+        req.user.profileId as string,
+        req.body
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -15,6 +18,7 @@ const createWorker = catchAsync(async (req, res) => {
 
 const updateWorker = catchAsync(async (req, res) => {
     const result = await workerServices.updateWorkerIntoDB(
+        req.user.profileId as string,
         req.params.id,
         req.body
     );
@@ -27,7 +31,10 @@ const updateWorker = catchAsync(async (req, res) => {
 });
 
 const deleteWorker = catchAsync(async (req, res) => {
-    const result = await workerServices.deleteWorkerFromDB(req.params.id);
+    const result = await workerServices.deleteWorkerFromDB(
+        req.user.profileId as string,
+        req.params.id
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -37,7 +44,10 @@ const deleteWorker = catchAsync(async (req, res) => {
 });
 
 const getAllWorkers = catchAsync(async (req, res) => {
-    const result = await workerServices.getAllWorkersFromDB(req.query);
+    const result = await workerServices.getAllWorkersFromDB(
+        req.user.profileId as string,
+        req.query
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -47,7 +57,10 @@ const getAllWorkers = catchAsync(async (req, res) => {
 });
 
 const getSingleWorker = catchAsync(async (req, res) => {
-    const result = await workerServices.getSingleWorkerFromDB(req.params.id);
+    const result = await workerServices.getSingleWorkerFromDB(
+        req.user.profileId as string,
+        req.params.id
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -58,6 +71,7 @@ const getSingleWorker = catchAsync(async (req, res) => {
 
 const bulkUploadWorkers = catchAsync(async (req, res) => {
     const result = await workerServices.bulkCreateWorkersFromCsv(
+        req.user.profileId as string,
         (req.file as Express.Multer.File).buffer
     );
     sendResponse(res, {

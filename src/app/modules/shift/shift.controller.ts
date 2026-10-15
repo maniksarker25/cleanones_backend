@@ -72,8 +72,10 @@ const getMyNextShift = catchAsync(async (req, res) => {
     });
 });
 
-const getTodayLiveShiftMeta = catchAsync(async (_req, res) => {
-    const result = await shiftServices.getTodayLiveShiftMetaFromDB();
+const getTodayLiveShiftMeta = catchAsync(async (req, res) => {
+    const result = await shiftServices.getTodayLiveShiftMetaFromDB(
+        req.user.profileId as string
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -84,7 +86,10 @@ const getTodayLiveShiftMeta = catchAsync(async (_req, res) => {
 
 const getManagerReport = catchAsync(async (req, res) => {
     const { period } = shiftValidations.managerReportQuery.parse(req.query);
-    const result = await shiftServices.getManagerReportFromDB(period);
+    const result = await shiftServices.getManagerReportFromDB(
+        req.user.profileId as string,
+        period
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -94,7 +99,10 @@ const getManagerReport = catchAsync(async (req, res) => {
 });
 
 const getTodayLiveShifts = catchAsync(async (req, res) => {
-    const result = await shiftServices.getTodayLiveShiftsFromDB(req.query);
+    const result = await shiftServices.getTodayLiveShiftsFromDB(
+        req.user.profileId as string,
+        req.query
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -104,7 +112,10 @@ const getTodayLiveShifts = catchAsync(async (req, res) => {
 });
 
 const getSingleLiveShift = catchAsync(async (req, res) => {
-    const result = await shiftServices.getSingleLiveShiftFromDB(req.params.id);
+    const result = await shiftServices.getSingleLiveShiftFromDB(
+        req.user.profileId as string,
+        req.params.id
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -124,6 +135,7 @@ const getWorkerPerformance = catchAsync(async (req, res) => {
     }
 
     const result = await shiftServices.getWorkerPerformanceFromDB(
+        req.user.profileId as string,
         req.params.workerId,
         month,
         year
@@ -148,6 +160,7 @@ const getWorkersAttendanceSummary = catchAsync(async (req, res) => {
     }
 
     const result = await shiftServices.getWorkersAttendanceSummaryFromDB(
+        req.user.profileId as string,
         period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number]
     );
     sendResponse(res, {
@@ -168,6 +181,7 @@ const getWorkerAttendanceSummary = catchAsync(async (req, res) => {
     }
 
     const result = await shiftServices.getWorkerAttendanceSummaryFromDB(
+        req.user.profileId as string,
         req.params.workerId,
         period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number]
     );
@@ -203,6 +217,7 @@ const getWorkersAttendanceList = catchAsync(async (req, res) => {
     const searchTerm = (req.query.search as string | undefined)?.trim() || undefined;
 
     const result = await shiftServices.getWorkersAttendanceListFromDB(
+        req.user.profileId as string,
         period as (typeof ATTENDANCE_SUMMARY_PERIODS)[number],
         searchTerm,
         workerType
@@ -262,7 +277,7 @@ const getShiftRoster = catchAsync(async (req, res) => {
     const client = (req.query.client as string | undefined) || undefined;
     const location = (req.query.location as string | undefined) || undefined;
 
-    const result = await shiftServices.getShiftRosterFromDB({
+    const result = await shiftServices.getShiftRosterFromDB(req.user.profileId as string, {
         view: view as (typeof ROSTER_VIEWS)[number],
         date,
         year,
@@ -314,7 +329,7 @@ const getManagerPlanRoster = catchAsync(async (req, res) => {
     const location = (req.query.location as string | undefined) || undefined;
     const searchTerm = (req.query.search as string | undefined)?.trim() || undefined;
 
-    const result = await shiftServices.getManagerPlanRosterFromDB({
+    const result = await shiftServices.getManagerPlanRosterFromDB(req.user.profileId as string, {
         view: view as (typeof ROSTER_VIEWS)[number],
         date,
         year,
@@ -354,7 +369,7 @@ const getPhotoReviewList = catchAsync(async (req, res) => {
         );
     }
 
-    const result = await shiftServices.getPhotoReviewListFromDB({
+    const result = await shiftServices.getPhotoReviewListFromDB(req.user.profileId as string, {
         from: fromDate,
         to: toDate,
         planId: planId !== undefined ? String(planId) : undefined,
@@ -403,6 +418,7 @@ const listShifts = catchAsync(async (req, res) => {
           })();
 
     const result = await shiftServices.listShiftsInRange(
+        req.user.profileId as string,
         req.params.planId,
         fromDate,
         toDate
@@ -417,14 +433,12 @@ const listShifts = catchAsync(async (req, res) => {
 
 const getShift = catchAsync(async (req, res) => {
     const date = parseDateParam(req.params.date);
-    const requestingWorkerId =
-        req.user.role === USER_ROLE.worker
-            ? (req.user.profileId as string)
-            : undefined;
+    const isWorker = req.user.role === USER_ROLE.worker;
     const result = await shiftServices.getShiftForDate(
         req.params.planId,
         date,
-        requestingWorkerId
+        isWorker ? (req.user.profileId as string) : undefined,
+        isWorker ? undefined : (req.user.profileId as string)
     );
     if (!result) {
         throw new AppError(
@@ -452,6 +466,7 @@ const getEligibleWorkers = catchAsync(async (req, res) => {
     const endTime = parseDateParam(String(req.query.end_time), 'end_time');
 
     const result = await shiftServices.listEligibleWorkersForShift(
+        req.user.profileId as string,
         req.params.planId,
         date,
         startTime,
@@ -488,6 +503,7 @@ const assignWorkers = catchAsync(async (req, res) => {
 const getBulkAssignPreview = catchAsync(async (req, res) => {
     const { worker, from, to } = shiftValidations.bulkAssignPreviewQuery.parse(req.query);
     const result = await shiftServices.previewBulkAssignForWorker(
+        req.user.profileId as string,
         req.params.planId,
         worker,
         new Date(from),

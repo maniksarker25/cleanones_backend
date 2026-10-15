@@ -6,24 +6,7 @@ import {
     NOTIFICATION_ENTITY,
 } from '../../modules/notification/notification.enum';
 import NotificationService from '../../modules/notification/notification.services';
-import { Manager } from '../../modules/manager/manager.model';
-
-// Same fan-out rationale as additional_task.listener.ts — attendance is a
-// manager-wide concern, not tied to one specific manager per plan.
-const notifyAllManagers = async (
-    build: (managerId: string) => Parameters<
-        typeof NotificationService.sendNotification
-    >[0]
-) => {
-    const managers = await Manager.find().select('_id').lean();
-    await Promise.all(
-        managers.map((manager) =>
-            NotificationService.sendNotification(
-                build(manager._id.toString())
-            ).catch((err) => errorLogger.error('shift notification failed', err))
-        )
-    );
-};
+import { notifyPlanManager } from './notifyManager';
 
 // A worker was newly staffed onto a shift occurrence.
 onAppEvent('shift.worker_assigned', async (payload) => {
@@ -101,7 +84,7 @@ onAppEvent('shift.cancelled', async (payload) => {
 });
 
 onAppEvent('shift.checked_in', async (payload) => {
-    await notifyAllManagers((managerId) => ({
+    await notifyPlanManager(payload.planId, (managerId) => ({
         receiver: managerId,
         title: 'Worker checked in',
         message: `A worker checked in for their shift.`,
@@ -110,11 +93,11 @@ onAppEvent('shift.checked_in', async (payload) => {
         action: NOTIFICATION_ACTION.VIEW,
         entityId: payload.shiftId,
         meta: { planId: payload.planId, workerId: payload.workerId, at: payload.at },
-    }));
+    }), 'shift.checked_in');
 });
 
 onAppEvent('shift.checked_out', async (payload) => {
-    await notifyAllManagers((managerId) => ({
+    await notifyPlanManager(payload.planId, (managerId) => ({
         receiver: managerId,
         title: 'Worker checked out',
         message: `A worker checked out of their shift.`,
@@ -123,7 +106,7 @@ onAppEvent('shift.checked_out', async (payload) => {
         action: NOTIFICATION_ACTION.VIEW,
         entityId: payload.shiftId,
         meta: { planId: payload.planId, workerId: payload.workerId, at: payload.at },
-    }));
+    }), 'shift.checked_out');
 });
 
 // Every task on the shift got completed — let the client know their
@@ -142,7 +125,7 @@ onAppEvent('shift.completed', async (payload) => {
         errorLogger.error('shift.completed notification failed', err)
     );
 
-    await notifyAllManagers((managerId) => ({
+    await notifyPlanManager(payload.planId, (managerId) => ({
         receiver: managerId,
         title: 'Shift completed',
         message: 'A shift has been fully completed.',
@@ -151,5 +134,5 @@ onAppEvent('shift.completed', async (payload) => {
         action: NOTIFICATION_ACTION.VIEW,
         entityId: payload.shiftId,
         meta: { planId: payload.planId },
-    }));
+    }), 'shift.completed');
 });

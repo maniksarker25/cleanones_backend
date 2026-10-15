@@ -23,7 +23,8 @@ router.post(
         USER_ROLE.client,
         USER_ROLE.worker,
         USER_ROLE.admin,
-        USER_ROLE.superAdmin
+        USER_ROLE.superAdmin,
+        USER_ROLE.company_admin
     ),
     validateRequest(authValidations.changePasswordValidationSchema),
     authControllers.changePassword

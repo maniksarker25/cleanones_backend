@@ -50,6 +50,7 @@ const deleteTask = catchAsync(async (req, res) => {
 
 const getAllTasksByRoom = catchAsync(async (req, res) => {
     const result = await taskServices.getAllTasksByRoomFromDB(
+        req.user.profileId as string,
         req.params.roomId,
         req.query
     );
@@ -76,7 +77,10 @@ const getMyTasks = catchAsync(async (req, res) => {
 });
 
 const getSingleTask = catchAsync(async (req, res) => {
-    const result = await taskServices.getSingleTaskFromDB(req.params.id);
+    const result = await taskServices.getSingleTaskFromDB(
+        req.user.profileId as string,
+        req.params.id
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,

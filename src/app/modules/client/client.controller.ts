@@ -59,7 +59,10 @@ const deleteClient = catchAsync(async (req, res) => {
 });
 
 const getAllClients = catchAsync(async (req, res) => {
-    const result = await clientServices.getAllClientsFromDB(req.query);
+    const result = await clientServices.getAllClientsFromDB(
+        req.user.profileId as string,
+        req.query
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
