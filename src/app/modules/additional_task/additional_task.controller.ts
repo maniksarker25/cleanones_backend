@@ -53,6 +53,7 @@ const deleteAdditionalTask = catchAsync(async (req, res) => {
 
 const approveAdditionalTask = catchAsync(async (req, res) => {
     const result = await additionalTaskServices.approveAdditionalTaskIntoDB(
+        req.user.profileId as string,
         req.params.id,
         req.body.status,
         req.body.reject_reason,

@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import mongoose, { Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { toManagerObjectId } from '../../utilities/managerScope';
 import {
     laterOf,
     normalizeToUTCDateOnly,
@@ -93,8 +94,12 @@ export const getRosterDateRange = (
  * matching shifts too. Pagination runs on the Worker query first (one
  * `$facet` for page + total), then Shifts are fetched only for that page.
  */
-export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
+export const getShiftRosterFromDB = async (
+    managerId: string,
+    params: RosterQueryParams
+) => {
     const { view, date, year, month, searchTerm, workerType, client, location } = params;
+    const manager = toManagerObjectId(managerId);
     const { start, end } = getRosterDateRange(view, date, year, month);
 
     const page = Math.max(1, Math.trunc(params.page ?? 1) || 1);
@@ -103,6 +108,7 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
     const shiftFilter: Record<string, unknown> = {
         date: { $gte: start, $lt: end },
         status: { $ne: 'cancelled' },
+        manager,
     };
     if (location !== undefined) {
         if (!mongoose.isValidObjectId(location)) {
@@ -114,12 +120,15 @@ export const getShiftRosterFromDB = async (params: RosterQueryParams) => {
         if (!mongoose.isValidObjectId(client)) {
             throw new AppError(httpStatus.BAD_REQUEST, 'Invalid client ID');
         }
-        const planIds = await CleaningPlan.find({ client }).distinct('_id');
+        const planIds = await CleaningPlan.find({ client, manager }).distinct('_id');
         shiftFilter.cleaning_plan = { $in: planIds };
     }
     const filteringByClientOrLocation = location !== undefined || client !== undefined;
 
-    const workerFilter: Record<string, unknown> = { isDeleted: { $ne: true } };
+    const workerFilter: Record<string, unknown> = {
+        isDeleted: { $ne: true },
+        manager,
+    };
     if (workerType) workerFilter.worker_type = workerType;
     if (searchTerm) {
         const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -466,10 +475,16 @@ export interface ManagerPlanRosterParams extends PlanGroupedRosterParams {
     searchTerm?: string;
 }
 
-/** System-wide plan-grouped roster — same shape as GET /client/roster, filterable by client/location/title. */
-export const getManagerPlanRosterFromDB = async (params: ManagerPlanRosterParams) => {
+/** The manager's own plan-grouped roster — same shape as GET /client/roster, filterable by client/location/title. */
+export const getManagerPlanRosterFromDB = async (
+    managerId: string,
+    params: ManagerPlanRosterParams
+) => {
     const { client, location, searchTerm, ...rosterParams } = params;
-    const planFilter: Record<string, unknown> = { is_active: true };
+    const planFilter: Record<string, unknown> = {
+        is_active: true,
+        manager: toManagerObjectId(managerId),
+    };
 
     if (client !== undefined) {
         if (!mongoose.isValidObjectId(client)) {

@@ -23,7 +23,16 @@ class QueryBuilder<T> {
     }
     filter() {
         const queryObj = { ...this.query }; // copy the query
-        const excludeFields = ['searchTerm', 'sort', 'limit', 'page', 'fields'];
+        // `manager` is the tenant boundary: services set it from the session, so a
+        // client-supplied ?manager= must never reach (and override) the filter.
+        const excludeFields = [
+            'searchTerm',
+            'sort',
+            'limit',
+            'page',
+            'fields',
+            'manager',
+        ];
         excludeFields.forEach((el) => delete queryObj[el]);
         this.modelQuery = this.modelQuery.find(queryObj as FilterQuery<T>);
         return this;

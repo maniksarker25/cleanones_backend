@@ -3,6 +3,12 @@ import { IClientContact } from './client_contact.interface';
 
 const clientContactSchema = new Schema<IClientContact>(
     {
+        manager: {
+            type: Schema.Types.ObjectId,
+            ref: 'Manager',
+            required: true,
+            index: true,
+        },
         client: {
             type: Schema.Types.ObjectId,
             ref: 'Client',

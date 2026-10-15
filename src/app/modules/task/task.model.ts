@@ -13,6 +13,7 @@ const photoRequirementSchema = new Schema(
 
 const taskSchema = new Schema<TTask>(
     {
+        manager: { type: Schema.Types.ObjectId, ref: 'Manager', required: true, index: true },
         client: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
         location: { type: Schema.Types.ObjectId, ref: 'Location', required: true, index: true },
         room: { type: Schema.Types.ObjectId, ref: 'Room', required: true, index: true },
@@ -34,5 +35,6 @@ const taskSchema = new Schema<TTask>(
 );
 
 taskSchema.index({ room: 1, is_active: 1 });
+taskSchema.index({ manager: 1, is_active: 1 });
 
 export const Task = model<TTask>('Task', taskSchema);

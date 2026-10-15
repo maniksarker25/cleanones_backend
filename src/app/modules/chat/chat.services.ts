@@ -4,9 +4,12 @@ import AppError from '../../error/appError';
 import { getIO } from '../../socket/socket';
 import { USER_ROLE } from '../user/user.constant';
 import { ICleaningPlan } from '../cleaning_plan/cleaning_plan.interface';
+import { Client } from '../client/client.model';
+import { Worker } from '../worker/worker.model';
+import { toManagerObjectId } from '../../utilities/managerScope';
 import { Chat } from './chat.model';
 
-type TMinimalPlan = Pick<ICleaningPlan, 'title' | 'client'> & {
+type TMinimalPlan = Pick<ICleaningPlan, 'title' | 'client' | 'manager'> & {
     _id: Types.ObjectId | string;
 };
 
@@ -14,6 +17,7 @@ type TMinimalPlan = Pick<ICleaningPlan, 'title' | 'client'> & {
 const createChatGroupForPlan = async (plan: TMinimalPlan) => {
     return Chat.create({
         type: 'group',
+        manager: plan.manager,
         cleaning_plan: plan._id,
         name: plan.title,
         client: plan.client,
@@ -97,16 +101,25 @@ const deactivateChatGroupsForPlans = async (
 };
 
 
-const createWorkerManagersChat = async (workerId: Types.ObjectId | string) => {
+const createWorkerManagersChat = async (
+    managerId: Types.ObjectId | string,
+    workerId: Types.ObjectId | string
+) => {
     const chat = await Chat.findOneAndUpdate(
         { type: 'worker', workers: workerId },
-        { $setOnInsert: { type: 'worker', workers: [workerId] } },
+        {
+            $setOnInsert: {
+                type: 'worker',
+                manager: managerId,
+                workers: [workerId],
+            },
+        },
         { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
     try {
         const io = getIO();
-        io.to('role:manager').emit('worker-chat:created', {
+        io.to(managerId.toString()).emit('worker-chat:created', {
             _id: chat._id,
             worker: workerId,
         });
@@ -128,16 +141,25 @@ const deactivateWorkerManagersChat = async (
 };
 
 
-const createClientManagersChat = async (clientId: Types.ObjectId | string) => {
+const createClientManagersChat = async (
+    managerId: Types.ObjectId | string,
+    clientId: Types.ObjectId | string
+) => {
     const chat = await Chat.findOneAndUpdate(
         { type: 'client', client: clientId },
-        { $setOnInsert: { type: 'client', client: clientId } },
+        {
+            $setOnInsert: {
+                type: 'client',
+                manager: managerId,
+                client: clientId,
+            },
+        },
         { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
     try {
         const io = getIO();
-        io.to('role:manager').emit('client-chat:created', {
+        io.to(managerId.toString()).emit('client-chat:created', {
             _id: chat._id,
             client: clientId,
         });
@@ -164,11 +186,26 @@ const deactivateClientManagersChat = async (
 const findOrCreateDirectChat = async (clientId: string, workerId: string) => {
     const participant_key = [clientId, workerId].sort().join(':');
 
+    // A direct chat only makes sense inside one manager's tenant: both parties
+    // must exist and share a manager, or we'd bridge two managers' data.
+    const [client, worker] = await Promise.all([
+        Client.findOne({ _id: clientId, isDeleted: false })
+            .select('manager')
+            .lean(),
+        Worker.findOne({ _id: workerId, isDeleted: { $ne: true } })
+            .select('manager')
+            .lean(),
+    ]);
+    if (!client || !worker || !client.manager.equals(worker.manager)) {
+        throw new AppError(httpStatus.NOT_FOUND, 'Chat participant not found');
+    }
+
     const chat = await Chat.findOneAndUpdate(
         { type: 'direct', participant_key },
         {
             $setOnInsert: {
                 type: 'direct',
+                manager: client.manager,
                 client: clientId,
                 workers: [workerId],
                 participant_key,
@@ -187,7 +224,7 @@ const ensureChatAccessOrThrow = async (
     profileId: string,
     role: string
 ) => {
-    const chat = await Chat.findById(chatId);
+    const chat:any = await Chat.findById(chatId);
     if (!chat) {
         throw new AppError(httpStatus.NOT_FOUND, 'Chat not found');
     }
@@ -199,6 +236,11 @@ const ensureChatAccessOrThrow = async (
             chat.type === 'worker' ||
             chat.type === 'client')
     ) {
+        // Only the owning manager is a member; another manager's chat is
+        // reported as missing rather than forbidden so its id isn't confirmed.
+        if (chat.manager.toString() !== profileId) {
+            throw new AppError(httpStatus.NOT_FOUND, 'Chat not found');
+        }
         return chat;
     }
 
@@ -208,7 +250,7 @@ const ensureChatAccessOrThrow = async (
         chat.client.toString() === profileId;
     const isWorker =
         role === USER_ROLE.worker &&
-        chat.workers.some((w) => w.toString() === profileId);
+        chat.workers.some((w:any) => w.toString() === profileId);
 
     if (!isClient && !isWorker) {
         throw new AppError(
@@ -227,7 +269,10 @@ const renameChatIntoDB = async (
     chatId: string,
     name: string
 ) => {
-    const chat = await Chat.findById(chatId);
+    const chat = await Chat.findOne({
+        _id: chatId,
+        manager: toManagerObjectId(managerId),
+    });
     if (!chat) {
         throw new AppError(httpStatus.NOT_FOUND, 'Chat not found');
     }
@@ -248,7 +293,7 @@ const renameChatIntoDB = async (
         const io = getIO();
         const payload = { _id: chatId, name };
         io.to(`group:${chatId}`).emit('group:renamed', payload);
-        io.to('role:manager').emit('group:renamed', payload);
+        io.to(managerId).emit('group:renamed', payload);
         if (chat.client) {
             io.to(chat.client.toString()).emit('group:renamed', payload);
         }
@@ -270,7 +315,10 @@ const removeGroupMemberFromDB = async (
     chatId: string,
     workerId: string
 ) => {
-    const chat = await Chat.findById(chatId);
+    const chat = await Chat.findOne({
+        _id: chatId,
+        manager: toManagerObjectId(managerId),
+    });
     if (!chat) {
         throw new AppError(httpStatus.NOT_FOUND, 'Chat not found');
     }
@@ -305,7 +353,7 @@ const removeGroupMemberFromDB = async (
         // group:removed (they haven't lost access, just the roster changed).
         const memberChangedPayload = { _id: chatId, worker: workerId };
         io.to(`group:${chatId}`).emit('group:member-removed', memberChangedPayload);
-        io.to('role:manager').emit('group:member-removed', memberChangedPayload);
+        io.to(managerId).emit('group:member-removed', memberChangedPayload);
         if (chat.client) {
             io.to(chat.client.toString()).emit(
                 'group:member-removed',
@@ -365,6 +413,7 @@ const getMyChatsFromDB = async (
     let filter: Record<string, unknown>;
     if (role === USER_ROLE.manager) {
         filter = {
+            manager: toManagerObjectId(profileId),
             is_active: true,
             type: { $in: ['group', 'worker', 'client'] },
         };

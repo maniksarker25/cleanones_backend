@@ -4,6 +4,7 @@ export const USER_ROLE = {
     worker: 'worker',
     client: 'client',
     manager: 'manager',
+    company_admin: 'company_admin',
 } as const;
 
 export const UserStatus = ['in-progress', 'blocked'];
@@ -13,6 +14,7 @@ export const PROFILE_MODEL_BY_ROLE = {
     client: 'Client',
     manager: 'Manager',
     admin: 'Admin',
+    company_admin: 'Company',
 };
 
 export const PROFILE_FIELDS_BY_ROLE = {
@@ -41,4 +43,5 @@ export const PROFILE_FIELDS_BY_ROLE = {
     client: ['company_name'],
     manager: [],
     admin: ['address', 'website'],
+    company_admin: ['company_name', 'address', 'website'],
 };

@@ -3,6 +3,7 @@ import auth from '../../middlewares/auth';
 import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import shiftController from './shift.controller';
+import shiftCompanyAdminController from './shift.company_admin.controller';
 import shiftValidations from './shift.validation';
 // Side-effect import: registers the auto-checkout cron (see shift.cron.ts)
 // the moment this module loads, same as shiftController/shiftValidations do.
@@ -10,6 +11,22 @@ import './shift.cron';
 import './bulk_assignment.cron';
 
 const router = Router();
+
+router.get(
+    '/company-admin/get-all-shifts',
+    auth(USER_ROLE.company_admin),
+    shiftCompanyAdminController.getAllShifts
+);
+router.get(
+    '/company-admin/get-today-shift-meta',
+    auth(USER_ROLE.company_admin),
+    shiftCompanyAdminController.getTodayShiftMeta
+);
+router.get(
+    '/company-admin/get-single-shift/:id',
+    auth(USER_ROLE.company_admin),
+    shiftCompanyAdminController.getSingleShift
+);
 
 router.get('/my-shifts', auth(USER_ROLE.worker), shiftController.listMyShifts);
 

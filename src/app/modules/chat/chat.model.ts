@@ -8,6 +8,11 @@ const chatSchema = new Schema<TChat>(
             enum: CHAT_TYPES,
             required: true,
         },
+        manager: {
+            type: Schema.Types.ObjectId,
+            ref: 'Manager',
+            required: true,
+        },
         cleaning_plan: {
             type: Schema.Types.ObjectId,
             ref: 'CleaningPlan',
@@ -65,10 +70,10 @@ const chatSchema = new Schema<TChat>(
 // replace rather than supplement the old single-field client/workers indexes.
 chatSchema.index({ client: 1, is_active: 1, last_message_at: -1 });
 chatSchema.index({ workers: 1, is_active: 1, last_message_at: -1 });
-// Manager's list spans every group/worker/client chat in the system (not
+// Manager's list spans every group/worker/client chat that manager owns (not
 // scoped to one client/worker), so this is the query most likely to degrade
 // without its own index as the business grows.
-chatSchema.index({ is_active: 1, type: 1, last_message_at: -1 });
+chatSchema.index({ manager: 1, is_active: 1, type: 1, last_message_at: -1 });
 
 chatSchema.index(
     { cleaning_plan: 1 },

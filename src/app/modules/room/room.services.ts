@@ -1,14 +1,18 @@
 import httpStatus from 'http-status';
 import { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { managerScope, toManagerObjectId } from '../../utilities/managerScope';
 import { Location } from '../location/location.model';
 import { TRoom } from './room.interface';
 import { Room } from './room.model';
 
-const ensureLocationExists = async (locationId: string) => {
+// `managerId` is omitted only on the client's own path, which has already
+// verified the location belongs to the calling client.
+const ensureLocationExists = async (locationId: string, managerId?: string) => {
     const location = await Location.findOne({
         _id: locationId,
         is_active: true,
+        ...(managerId && managerScope(managerId)),
     });
 
     if (!location) {
@@ -19,10 +23,14 @@ const ensureLocationExists = async (locationId: string) => {
 };
 
 const createRoomIntoDB = async (managerId: string, payload: TRoom) => {
-    await ensureLocationExists(payload.location.toString());
+    const location = await ensureLocationExists(
+        payload.location.toString(),
+        managerId
+    );
 
     const result = await Room.create({
         ...payload,
+        manager: location.manager,
         last_updated_by: managerId,
     });
     return result;
@@ -33,7 +41,10 @@ const updateRoomIntoDB = async (
     id: string,
     payload: Partial<TRoom>
 ) => {
-    const room = await Room.findById(id);
+    delete (payload as { manager?: unknown }).manager;
+    delete (payload as { location?: unknown }).location;
+
+    const room = await Room.findOne({ _id: id, ...managerScope(managerId) });
     if (!room) {
         throw new AppError(httpStatus.NOT_FOUND, 'Room not found');
     }
@@ -51,7 +62,7 @@ const updateRoomIntoDB = async (
 };
 
 const deleteRoomFromDB = async (managerId: string, id: string) => {
-    const room = await Room.findById(id);
+    const room = await Room.findOne({ _id: id, ...managerScope(managerId) });
     if (!room) {
         throw new AppError(httpStatus.NOT_FOUND, 'Room not found');
     }
@@ -66,10 +77,11 @@ const deleteRoomFromDB = async (managerId: string, id: string) => {
 };
 
 const getAllRoomsByLocationFromDB = async (
+    managerId: string | null,
     locationId: string,
     query: Record<string, unknown>
 ) => {
-    await ensureLocationExists(locationId);
+    await ensureLocationExists(locationId, managerId ?? undefined);
 
     const searchTerm = query.searchTerm as string | undefined;
     const page = Number(query.page) || 1;
@@ -93,8 +105,9 @@ const getAllRoomsByLocationFromDB = async (
         {
             $match: {
                 is_active: true,
-                location: new Types.ObjectId(locationId),
                 ...filters,
+                location: new Types.ObjectId(locationId),
+                ...(managerId && { manager: toManagerObjectId(managerId) }),
             },
         },
     ];
@@ -215,20 +228,33 @@ const getAllRoomsByLocationFromDB = async (
     };
 };
 
-const getAllRoomsFromDB = async (query: Record<string, unknown>) => {
+const getAllRoomsFromDB = async (
+    managerId: string,
+    query: Record<string, unknown>
+) => {
     const searchTerm = query.searchTerm as string | undefined;
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
     const skip = (page - 1) * limit;
     const sort = query.sort as string | undefined;
 
-    const matchConditions: Record<string, unknown>[] = [{ is_active: true }];
+    const matchConditions: Record<string, unknown>[] = [
+        { is_active: true },
+        { manager: toManagerObjectId(managerId) },
+    ];
 
     Object.keys(query).forEach((key) => {
         if (
-            ['searchTerm', 'page', 'limit', 'sort', 'fields', 'location', 'client'].includes(
-                key
-            )
+            [
+                'searchTerm',
+                'page',
+                'limit',
+                'sort',
+                'fields',
+                'location',
+                'client',
+                'manager',
+            ].includes(key)
         ) {
             return;
         }
@@ -244,6 +270,7 @@ const getAllRoomsFromDB = async (query: Record<string, unknown>) => {
     if (query.client) {
         const clientLocationIds = await Location.find({
             client: new Types.ObjectId(query.client as string),
+            ...managerScope(managerId),
         }).distinct('_id');
         matchConditions.push({ location: { $in: clientLocationIds } });
     }
@@ -398,12 +425,20 @@ const getMyRoomsFromDB = async (
         throw new AppError(httpStatus.NOT_FOUND, 'Location not found');
     }
 
-    return getAllRoomsByLocationFromDB(locationId, query);
+    return getAllRoomsByLocationFromDB(null, locationId, query);
 };
 
-const getSingleRoomFromDB = async (id: string) => {
+const getSingleRoomFromDB = async (managerId: string, id: string) => {
+    if (!Types.ObjectId.isValid(id)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid room ID');
+    }
     const [room] = await Room.aggregate([
-        { $match: { _id: new Types.ObjectId(id) } },
+        {
+            $match: {
+                _id: new Types.ObjectId(id),
+                manager: toManagerObjectId(managerId),
+            },
+        },
         {
             $lookup: {
                 from: 'locations',
