@@ -15,6 +15,7 @@ const createIssueReport = catchAsync(async (req, res) => {
 
 const updateIssueReport = catchAsync(async (req, res) => {
     const result = await services.updateIssueReportIntoDB(
+        req.user.profileId as string,
         req.params.id,
         req.body
     );
@@ -27,7 +28,10 @@ const updateIssueReport = catchAsync(async (req, res) => {
 });
 
 const deleteIssueReport = catchAsync(async (req, res) => {
-    const result = await services.deleteIssueReportFromDB(req.params.id);
+    const result = await services.deleteIssueReportFromDB(
+        req.user.profileId as string,
+        req.params.id
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -37,7 +41,9 @@ const deleteIssueReport = catchAsync(async (req, res) => {
 });
 
 const getAllIssueReports = catchAsync(async (req, res) => {
-    const result = await services.getAllIssueReportsFromDB();
+    const result = await services.getAllIssueReportsFromDB(
+        req.user.profileId as string
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,

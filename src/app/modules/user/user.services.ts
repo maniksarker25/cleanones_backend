@@ -12,6 +12,7 @@ import Admin from '../admin/admin.model';
 import { Client } from '../client/client.model';
 import { Worker } from '../worker/worker.model';
 import { Manager } from '../manager/manager.model';
+import { Company } from '../company/company.model';
 import { upsertDevice } from '../device/device.service';
 import SuperAdmin from '../superAdmin/superAdmin.model';
 import { USER_ROLE } from './user.constant';
@@ -284,6 +285,11 @@ const getMyProfile = async (userData: JwtPayload) => {
             path: 'user',
             select: 'isBlocked isActive isAdminVerified',
         });
+    } else if (userData.role === USER_ROLE.company_admin) {
+        result = await Company.findOne({ user: userData.id }).populate({
+            path: 'user',
+            select: 'isBlocked isActive ',
+        });
     } else if (userData.role === USER_ROLE.superAdmin) {
         result = await SuperAdmin.findOne({ user: userData.id }).populate({
             path: 'user',
@@ -369,6 +375,15 @@ const updateUserProfile = async (
             }
         );
         return result;
+    } else if (userData.role == USER_ROLE.company_admin) {
+        const company = await Company.findById(userData.profileId);
+        if (!company) {
+            throw new AppError(httpStatus.NOT_FOUND, 'Profile not found');
+        }
+        return Company.findByIdAndUpdate(userData.profileId, payload, {
+            new: true,
+            runValidators: true,
+        });
     } else if (userData.role == USER_ROLE.superAdmin) {
         const admin = await SuperAdmin.findById(userData.profileId);
         if (!admin) {

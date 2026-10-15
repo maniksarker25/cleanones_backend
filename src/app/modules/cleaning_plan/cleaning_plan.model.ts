@@ -70,6 +70,8 @@ const cleaningPlanSchema = new Schema<ICleaningPlan>(
     }
 );
 
+cleaningPlanSchema.index({ manager: 1, is_active: 1, status: 1 });
+
 export const CleaningPlan = model<ICleaningPlan>(
     'CleaningPlan',
     cleaningPlanSchema,

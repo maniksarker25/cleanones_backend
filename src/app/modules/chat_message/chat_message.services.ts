@@ -12,6 +12,7 @@ const broadcastToChat = (
     chat: {
         _id: unknown;
         type: 'group' | 'direct' | 'worker' | 'client';
+        manager: unknown;
         client?: unknown | null;
         workers: unknown[];
     },
@@ -21,15 +22,18 @@ const broadcastToChat = (
     try {
         const io = getIO();
         io.to(`group:${chat._id}`).emit(event, payload);
-        // Group, worker<->managers and client<->managers chats broadcast to
-        // every manager — a direct 1:1 chat between one client and one
-        // worker is private and must not leak to the system-wide manager room.
+        // Group, worker<->managers and client<->managers chats broadcast to the
+        // owning manager only (their profile-id room) — a direct 1:1 chat
+        // between one client and one worker is private and never reaches it.
         if (
             chat.type === 'group' ||
             chat.type === 'worker' ||
             chat.type === 'client'
         ) {
-            io.to('role:manager').emit(event, payload);
+            io.to((chat.manager as { toString(): string }).toString()).emit(
+                event,
+                payload
+            );
         }
         // 'worker' chats have no client at all.
         if (chat.client) {
@@ -111,7 +115,7 @@ const createChatMessage = async (params: {
     // for every single message across every chat would be noise, not signal.
     const recipientProfileIds = [
         chat.client ? chat.client.toString() : null,
-        ...chat.workers.map((workerId) => workerId.toString()),
+        ...chat.workers.map((workerId:any) => workerId.toString()),
     ].filter(
         (id): id is string => !!id && id !== profileId
     );

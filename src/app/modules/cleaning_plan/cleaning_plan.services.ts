@@ -1,6 +1,13 @@
 import httpStatus from 'http-status';
 import mongoose, { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
+import {
+    assertOwned,
+    managerScope,
+    toManagerObjectId,
+} from '../../utilities/managerScope';
+import { USER_ROLE } from '../user/user.constant';
+import { Room } from '../room/room.model';
 import { emitAppEvent } from '../../events/eventEmitter';
 import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
@@ -79,16 +86,21 @@ const pruneTasksForRemovedRooms = async (
         .map((id) => new Types.ObjectId(id));
 };
 
-const ensureClientExists = async (clientId: string) => {
-    const client = await Client.findOne({ _id: clientId, isDeleted: false });
+const ensureClientExists = async (managerId: string, clientId: string) => {
+    const client = await Client.findOne({
+        _id: clientId,
+        isDeleted: false,
+        ...managerScope(managerId),
+    });
     if (!client) throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
     return client;
 };
 
-const ensureLocationExists = async (locationId: string) => {
+const ensureLocationExists = async (managerId: string, locationId: string) => {
     const location = await Location.findOne({
         _id: locationId,
         is_active: true,
+        ...managerScope(managerId),
     });
     if (!location)
         throw new AppError(httpStatus.NOT_FOUND, 'Location not found');
@@ -106,11 +118,23 @@ const createCleaningPlanIntoDB = async (
     managerId: string,
     payload: CreateCleaningPlanPayload
 ) => {
-    await ensureClientExists(payload.client.toString());
-    await ensureLocationExists(payload.location.toString());
+    const client = await ensureClientExists(managerId, payload.client.toString());
+    const location = await ensureLocationExists(
+        managerId,
+        payload.location.toString()
+    );
+    if (!location.client.equals(client._id)) {
+        throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'Location does not belong to this client'
+        );
+    }
 
     const rooms = payload.rooms ?? [];
     const tasks = payload.tasks ?? [];
+    // Every referenced room/task must be this manager's own.
+    await assertOwned(Room, rooms, managerId, 'Room');
+    await assertOwned(Task, tasks, managerId, 'Task');
     await validateTasksBelongToRooms(tasks, rooms);
     const max_estimated_duration = await computeMaxEstimatedDuration(tasks);
 
@@ -144,11 +168,18 @@ const updateCleaningPlanIntoDB = async (
     id: string,
     payload: UpdateCleaningPlanPayload
 ) => {
-    const plan = await CleaningPlan.findById(id);
+    const plan = await CleaningPlan.findOne({
+        _id: id,
+        ...managerScope(managerId),
+    });
     if (!plan)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
 
-    const { rooms, tasks, ...rest } = payload;
+    // Tenancy fields are fixed at creation and never reassignable by an update.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
+    const { rooms, tasks, manager: _m, client: _c, location: _l, ...rest } = payload;
+    if (rooms !== undefined) await assertOwned(Room, rooms, managerId, 'Room');
+    if (tasks !== undefined) await assertOwned(Task, tasks, managerId, 'Task');
 
     const update: Record<string, unknown> = { ...rest, last_updated_by: managerId };
 
@@ -187,7 +218,10 @@ const updateCleaningPlanIntoDB = async (
 // ─── Delete (soft) ─────────────────────────────────────────────────────────────
 
 const deleteCleaningPlanFromDB = async (managerId: string, id: string) => {
-    const plan = await CleaningPlan.findById(id);
+    const plan = await CleaningPlan.findOne({
+        _id: id,
+        ...managerScope(managerId),
+    });
     if (!plan)
         throw new AppError(httpStatus.NOT_FOUND, 'Cleaning plan not found');
 
@@ -258,14 +292,17 @@ const getMyCleaningPlansFromDB = async (
     if (allowedQuery.location && !Types.ObjectId.isValid(allowedQuery.location as string)) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Invalid location ID');
     }
-    return getAllCleaningPlansFromDB({
+    return listCleaningPlans(null, {
         ...allowedQuery,
         client: clientId,
         is_active: true,
     });
 };
 
-const getAllCleaningPlansFromDB = async (
+// `managerId` is null only on the client's own path, which pins `client` to
+// the caller's session id instead.
+const listCleaningPlans = async (
+    managerId: string | null,
     query: Record<string, unknown>
 ) => {
     const searchTerm = query.searchTerm as string | undefined;
@@ -288,7 +325,14 @@ const getAllCleaningPlansFromDB = async (
     const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
-        { $match: { is_active: true, ...filters } },
+        // Tenant scope last so a ?manager= in the query can't override it.
+        {
+            $match: {
+                is_active: true,
+                ...filters,
+                ...(managerId && { manager: toManagerObjectId(managerId) }),
+            },
+        },
     ];
 
     if (searchTerm) {
@@ -484,9 +528,26 @@ const getAllCleaningPlansFromDB = async (
 
 // ─── Get Single ────────────────────────────────────────────────────────────────
 
-const getSingleCleaningPlanFromDB = async (id: string) => {
+const getAllCleaningPlansFromDB = (
+    managerId: string,
+    query: Record<string, unknown>
+) => listCleaningPlans(managerId, query);
+
+// A manager may read only their own plans and a client only theirs; both
+// mismatches come back as "not found".
+const getSingleCleaningPlanFromDB = async (
+    viewer: { role: string; profileId: string },
+    id: string
+) => {
+    if (!Types.ObjectId.isValid(id)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid cleaning plan ID');
+    }
+    const ownerMatch =
+        viewer.role === USER_ROLE.manager
+            ? { manager: toManagerObjectId(viewer.profileId) }
+            : { client: new Types.ObjectId(viewer.profileId) };
     const [plan] = await CleaningPlan.aggregate([
-        { $match: { _id: new Types.ObjectId(id) } },
+        { $match: { _id: new Types.ObjectId(id), ...ownerMatch } },
         {
             $lookup: {
                 from: 'clients',

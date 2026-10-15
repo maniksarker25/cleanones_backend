@@ -1,6 +1,8 @@
 import httpStatus from 'http-status';
 import mongoose, { PipelineStage, Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { managerScope, toManagerObjectId } from '../../utilities/managerScope';
+import { USER_ROLE } from '../user/user.constant';
 import { emitAppEvent } from '../../events/eventEmitter';
 import chatServices from '../chat/chat.services';
 import { Client } from '../client/client.model';
@@ -13,10 +15,13 @@ import { Worker } from '../worker/worker.model';
 import { TLocation } from './location.interface';
 import { Location } from './location.model';
 
-const ensureClientExists = async (clientId: string) => {
+// `managerId` is omitted only for the client's own endpoints, where the client
+// id comes from the session rather than the request.
+const ensureClientExists = async (clientId: string, managerId?: string) => {
     const client = await Client.findOne({
         _id: clientId,
         isDeleted: false,
+        ...(managerId && managerScope(managerId)),
     });
 
     if (!client) {
@@ -26,8 +31,12 @@ const ensureClientExists = async (clientId: string) => {
     return client;
 };
 
-const ensureWorkerExists = async (workerId: string) => {
-    const worker = await Worker.findOne({ _id: workerId, isDeleted: false });
+const ensureWorkerExists = async (managerId: string, workerId: string) => {
+    const worker = await Worker.findOne({
+        _id: workerId,
+        isDeleted: false,
+        ...managerScope(managerId),
+    });
 
     if (!worker) {
         throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
@@ -40,10 +49,14 @@ const createLocationIntoDB = async (
     managerId: string,
     payload: TLocation
 ) => {
-    await ensureClientExists(payload.client.toString());
+    const client = await ensureClientExists(
+        payload.client.toString(),
+        managerId
+    );
 
     const result = await Location.create({
         ...payload,
+        manager: client.manager,
         last_updated_by: managerId,
     });
     return result;
@@ -54,7 +67,14 @@ const updateLocationIntoDB = async (
     id: string,
     payload: Partial<TLocation>
 ) => {
-    const location = await Location.findById(id);
+    // Ownership and tenancy are fixed at creation; never reassignable here.
+    delete (payload as { manager?: unknown }).manager;
+    delete (payload as { client?: unknown }).client;
+
+    const location = await Location.findOne({
+        _id: id,
+        ...managerScope(managerId),
+    });
     if (!location) {
         throw new AppError(httpStatus.NOT_FOUND, 'Location not found');
     }
@@ -128,7 +148,10 @@ export const cascadeCancelPlansForLocations = async (
 };
 
 const deleteLocationFromDB = async (managerId: string, id: string) => {
-    const location = await Location.findById(id);
+    const location = await Location.findOne({
+        _id: id,
+        ...managerScope(managerId),
+    });
     if (!location) {
         throw new AppError(httpStatus.NOT_FOUND, 'Location not found');
     }
@@ -172,7 +195,10 @@ const deleteLocationFromDB = async (managerId: string, id: string) => {
     return result;
 };
 
-const getAllLocationsFromDB = async (query: Record<string, unknown>) => {
+const getAllLocationsFromDB = async (
+    managerId: string,
+    query: Record<string, unknown>
+) => {
     const searchTerm = query.searchTerm as string | undefined;
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
@@ -195,7 +221,14 @@ const getAllLocationsFromDB = async (query: Record<string, unknown>) => {
     const sortField = sort ? sort.replace(/^-/, '') : 'createdAt';
 
     const pipeline: PipelineStage[] = [
-        { $match: { is_active: true, ...filters } },
+        // Tenant scope last so a ?manager= in the query can't override it.
+        {
+            $match: {
+                is_active: true,
+                ...filters,
+                manager: toManagerObjectId(managerId),
+            },
+        },
     ];
 
     if (searchTerm) {
@@ -321,10 +354,11 @@ const getAllLocationsFromDB = async (query: Record<string, unknown>) => {
 };
 
 const getClientLocationsFromDB = async (
+    managerId: string,
     clientId: string,
     query: Record<string, unknown>
 ) => {
-    await ensureClientExists(clientId);
+    await ensureClientExists(clientId, managerId);
 
     const searchTerm = query.searchTerm as string | undefined;
     const page = Number(query.page) || 1;
@@ -348,8 +382,9 @@ const getClientLocationsFromDB = async (
         {
             $match: {
                 is_active: true,
-                client: new Types.ObjectId(clientId),
                 ...filters,
+                client: new Types.ObjectId(clientId),
+                manager: toManagerObjectId(managerId),
             },
         },
     ];
@@ -477,12 +512,14 @@ const getClientLocationsFromDB = async (
 };
 
 const getWorkerLocationsFromDB = async (
+    managerId: string,
     workerId: string,
     query: Record<string, unknown>
 ) => {
-    await ensureWorkerExists(workerId);
+    await ensureWorkerExists(managerId, workerId);
 
     const locationIds = await CleaningPlan.find({
+        ...managerScope(managerId),
         'assigned_workers.worker': workerId,
         is_active: true,
         status: { $ne: 'completed' },
@@ -512,9 +549,10 @@ const getWorkerLocationsFromDB = async (
     const pipeline: PipelineStage[] = [
         {
             $match: {
-                _id: { $in: locationIds },
                 is_active: true,
                 ...filters,
+                _id: { $in: locationIds },
+                manager: toManagerObjectId(managerId),
             },
         },
     ];
@@ -715,9 +753,21 @@ const getMyLocationsFromDB = async (
     };
 };
 
-const getSingleLocationFromDB = async (id: string) => {
+// A manager may read only their own locations and a client only theirs; both
+// mismatches come back as "not found".
+const getSingleLocationFromDB = async (
+    viewer: { role: string; profileId: string },
+    id: string
+) => {
+    if (!Types.ObjectId.isValid(id)) {
+        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid location ID');
+    }
+    const ownerMatch =
+        viewer.role === USER_ROLE.manager
+            ? { manager: toManagerObjectId(viewer.profileId) }
+            : { client: new Types.ObjectId(viewer.profileId) };
     const [location] = await Location.aggregate([
-        { $match: { _id: new Types.ObjectId(id) } },
+        { $match: { _id: new Types.ObjectId(id), ...ownerMatch } },
         {
             $lookup: {
                 from: 'clients',

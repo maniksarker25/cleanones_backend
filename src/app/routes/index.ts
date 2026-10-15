@@ -5,6 +5,7 @@ import { AdminRoutes } from '../modules/admin/admin.routes';
 import { additionalTaskRoutes } from '../modules/additional_task/additional_task.routes';
 import { authRoutes } from '../modules/auth/auth.routes';
 import { clientRoutes } from '../modules/client/client.routes';
+import { companyRoutes } from '../modules/company/company.routes';
 import { clientContactRoutes } from '../modules/client_contact/client_contact.routes';
 import { cleaningPlanRoutes } from '../modules/cleaning_plan/cleaning_plan.routes';
 import { chatRoutes } from '../modules/chat/chat.routes';
@@ -14,6 +15,7 @@ import { fileUploadRoutes } from '../modules/file-upload/file-upload.routes';
 import { invoiceRoutes } from '../modules/invoice/invoice.routes';
 import { legalInfoRoutes } from '../modules/legal_info/legal_info.routes';
 import { locationRoutes } from '../modules/location/location.routes';
+import { managerRoutes } from '../modules/manager/manager.routes';
 import { messageRoutes } from '../modules/message/message.routes';
 import { ManageRoutes } from '../modules/manage-web/manage.routes';
 import { metaRoutes } from '../modules/meta/meta.routes';
@@ -130,6 +132,14 @@ const moduleRoutes = [
     {
         path: '/invoice',
         router: invoiceRoutes,
+    },
+    {
+        path: '/manager',
+        router: managerRoutes,
+    },
+    {
+        path: '/company',
+        router: companyRoutes,
     },
 ];
 
