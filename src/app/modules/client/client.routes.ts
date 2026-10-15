@@ -4,6 +4,7 @@ import csvUpload from '../../middlewares/csvUpload';
 import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import clientController from './client.controller';
+import clientCompanyAdminController from './client.company_admin.controller';
 import clientValidations from './client.validation';
 
 const router = Router();
@@ -75,6 +76,17 @@ router.get(
     '/roster',
     auth(USER_ROLE.client),
     clientController.getClientPlanRoster
+);
+
+router.get(
+    '/company-admin/get-all-clients',
+    auth(USER_ROLE.company_admin),
+    clientCompanyAdminController.getAllClients
+);
+router.get(
+    '/company-admin/get-single-client/:id',
+    auth(USER_ROLE.company_admin),
+    clientCompanyAdminController.getSingleClient
 );
 
 export const clientRoutes = router;

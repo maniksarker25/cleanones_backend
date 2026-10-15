@@ -2,13 +2,21 @@ import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
+import { managerScope } from '../../utilities/managerScope';
 import { roundToTwoDecimals } from '../shift/shift.shared.util';
 import { Worker } from '../worker/worker.model';
 import { TInvoice } from './invoice.interface';
 import { Invoice } from './invoice.model';
 
-const ensureWorkerExists = async (workerId: TInvoice['worker']) => {
-    const worker = await Worker.findOne({ _id: workerId, isDeleted: false });
+const ensureWorkerExists = async (
+    managerId: string,
+    workerId: TInvoice['worker']
+) => {
+    const worker = await Worker.findOne({
+        _id: workerId,
+        isDeleted: false,
+        ...managerScope(managerId),
+    });
     if (!worker) {
         throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
     }
@@ -19,7 +27,7 @@ const createInvoiceIntoDB = async (
     managerId: string,
     payload: Omit<TInvoice, 'manager'>
 ) => {
-    await ensureWorkerExists(payload.worker);
+    await ensureWorkerExists(managerId, payload.worker);
 
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -34,6 +42,7 @@ const createInvoiceIntoDB = async (
             const current = await Worker.findOne({
                 _id: payload.worker,
                 isDeleted: false,
+                ...managerScope(managerId),
             }).session(session);
             if (!current) {
                 throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
@@ -57,6 +66,7 @@ const createInvoiceIntoDB = async (
             const updated = await Worker.findOneAndUpdate(
                 {
                     _id: payload.worker,
+                    ...managerScope(managerId),
                     pending_amount: current.pending_amount,
                     total_unpaid_hours: unpaidHours,
                 },
@@ -101,9 +111,12 @@ const createInvoiceIntoDB = async (
     }
 };
 
-const getAllInvoicesFromDB = async (query: Record<string, unknown>) => {
+const getAllInvoicesFromDB = async (
+    managerId: string,
+    query: Record<string, unknown>
+) => {
     const invoiceQuery = new QueryBuilder(
-        Invoice.find()
+        Invoice.find(managerScope(managerId))
             .populate({
                 path: 'manager',
                 populate: { path: 'user', select: 'email phone' },

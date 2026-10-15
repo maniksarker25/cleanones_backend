@@ -8,6 +8,11 @@ const workerSchema = new Schema<TWorker>(
         email: { type: String, default: null },
         isDeleted: { type: Boolean, default: false },
         phone: { type: String, default: null },
+        manager: {
+            type: Schema.Types.ObjectId,
+            ref: 'Manager',
+            required: true,
+        },
         user: {
             type: Schema.Types.ObjectId,
             ref: 'User',
@@ -120,5 +125,7 @@ const workerSchema = new Schema<TWorker>(
         versionKey: false,
     }
 );
+
+workerSchema.index({ manager: 1, isDeleted: 1, createdAt: -1 });
 
 export const Worker = model<TWorker>('Worker', workerSchema, 'worker_profiles');

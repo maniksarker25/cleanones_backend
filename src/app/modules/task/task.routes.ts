@@ -3,6 +3,7 @@ import auth from '../../middlewares/auth';
 import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import taskController from './task.controller';
+import taskCompanyAdminController from './task.company_admin.controller';
 import taskValidations from './task.validation';
 
 const router = Router();
@@ -43,6 +44,17 @@ router.get(
     '/single-task/:id',
     auth(USER_ROLE.manager),
     taskController.getSingleTask
+);
+
+router.get(
+    '/company-admin/get-all-tasks',
+    auth(USER_ROLE.company_admin),
+    taskCompanyAdminController.getAllTasks
+);
+router.get(
+    '/company-admin/get-single-task/:id',
+    auth(USER_ROLE.company_admin),
+    taskCompanyAdminController.getSingleTask
 );
 
 export const taskRoutes = router;

@@ -44,7 +44,10 @@ const deleteLocation = catchAsync(async (req, res) => {
 });
 
 const getAllLocations = catchAsync(async (req, res) => {
-    const result = await locationServices.getAllLocationsFromDB(req.query);
+    const result = await locationServices.getAllLocationsFromDB(
+        req.user.profileId as string,
+        req.query
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -55,6 +58,7 @@ const getAllLocations = catchAsync(async (req, res) => {
 
 const getClientLocations = catchAsync(async (req, res) => {
     const result = await locationServices.getClientLocationsFromDB(
+        req.user.profileId as string,
         req.params.clientId,
         req.query
     );
@@ -68,6 +72,7 @@ const getClientLocations = catchAsync(async (req, res) => {
 
 const getWorkerLocations = catchAsync(async (req, res) => {
     const result = await locationServices.getWorkerLocationsFromDB(
+        req.user.profileId as string,
         req.params.workerId,
         req.query
     );
@@ -95,6 +100,7 @@ const getMyLocations = catchAsync(async (req, res) => {
 
 const getSingleLocation = catchAsync(async (req, res) => {
     const result = await locationServices.getSingleLocationFromDB(
+        { role: req.user.role, profileId: req.user.profileId as string },
         req.params.id
     );
     sendResponse(res, {

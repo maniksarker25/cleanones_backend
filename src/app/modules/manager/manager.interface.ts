@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 
 export interface TManager {
     user: Types.ObjectId;
+    company: Types.ObjectId;
     name: string;
     email: string;
     phone: string;

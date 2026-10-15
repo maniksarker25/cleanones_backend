@@ -16,6 +16,7 @@ export type TAdditionalTaskStatus = (typeof ADDITIONAL_TASK_STATUS)[number];
 
 export interface IAdditionalTask {
     cleaning_plan_id: Types.ObjectId;
+    manager: Types.ObjectId;
     name: string;
     description?:string;
     duration_minutes?: number | null;

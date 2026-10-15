@@ -10,6 +10,7 @@ router.get(
         USER_ROLE.superAdmin,
         USER_ROLE.admin,
         USER_ROLE.manager,
+        USER_ROLE.company_admin,
         USER_ROLE.client,
         USER_ROLE.worker
     ),
@@ -21,6 +22,7 @@ router.patch(
         USER_ROLE.superAdmin,
         USER_ROLE.admin,
         USER_ROLE.manager,
+        USER_ROLE.company_admin,
         USER_ROLE.client,
         USER_ROLE.worker
     ),
@@ -33,6 +35,7 @@ router.delete(
         USER_ROLE.superAdmin,
         USER_ROLE.admin,
         USER_ROLE.manager,
+        USER_ROLE.company_admin,
         USER_ROLE.client,
         USER_ROLE.worker
     ),

@@ -28,6 +28,7 @@ export const WEEKDAYS = [
 
 export interface TTask {
     client: Types.ObjectId;
+    manager: Types.ObjectId;
     location: Types.ObjectId;
     room: Types.ObjectId;
     last_updated_by?: Types.ObjectId;

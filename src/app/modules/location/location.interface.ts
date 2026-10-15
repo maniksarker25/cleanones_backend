@@ -7,6 +7,7 @@ import { Types } from 'mongoose';
 export interface TLocation {
     _id?: string;
     client: Types.ObjectId;
+    manager: Types.ObjectId;
     last_updated_by?: Types.ObjectId;
     name: string;
     address: string;

@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import mongoose, { Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { assertOwned, managerScope } from '../../utilities/managerScope';
 import { errorLogger } from '../../shared/logger';
 import { combineDateWithTimeOfDay, normalizeToUTCDateOnly } from '../cleaning_plan/availability.util';
 import { assertWorkersEligible } from '../worker/worker.eligibility.util';
@@ -10,7 +11,7 @@ import { BulkAssignment } from './bulk_assignment.model';
 import { Shift } from './shift.model';
 import { assignWorkersToShift } from './shift.services';
 import { listShiftsInRange } from './shift.query.services';
-import { FULL_WEEKDAY_NAMES } from './shift.shared.util';
+import { ensureActivePlan, FULL_WEEKDAY_NAMES } from './shift.shared.util';
 
 // Caps how far a bulk-assign preview/confirm can span, so neither walk is unbounded.
 // 62 so a full 2-month range always fits. Keep in sync with MAX_BULK_ASSIGN_DATES in shift.validation.ts.
@@ -46,6 +47,7 @@ export interface BulkAssignPreviewResult {
  * dates in [from, to] by whether the worker's own working_days covers them.
  */
 export const previewBulkAssignForWorker = async (
+    managerId: string,
     planId: string,
     workerId: string,
     from: Date,
@@ -68,14 +70,17 @@ export const previewBulkAssignForWorker = async (
         throw new AppError(httpStatus.BAD_REQUEST, 'Invalid worker ID');
     }
 
-    await assertWorkersEligible([workerId]);
-    const worker = await Worker.findById(workerId).select('name working_days').lean();
+    await ensureActivePlan(planId, managerId);
+    await assertWorkersEligible(managerId, [workerId]);
+    const worker = await Worker.findOne({ _id: workerId, ...managerScope(managerId) })
+        .select('name working_days')
+        .lean();
     if (!worker) {
         throw new AppError(httpStatus.NOT_FOUND, 'Worker not found');
     }
     const workingDays = new Set(worker.working_days ?? []);
 
-    const shiftEntries = (await listShiftsInRange(planId, fromDay, toDay)) as Array<{
+    const shiftEntries = (await listShiftsInRange(managerId, planId, fromDay, toDay)) as Array<{
         date: Date;
         is_virtual: boolean;
         status: string;
@@ -184,6 +189,11 @@ export const bulkAssignWorkerToShifts = async (
     if (!mongoose.isValidObjectId(workerId)) {
         throw new AppError(httpStatus.BAD_REQUEST, 'Invalid worker ID');
     }
+
+    // Fail the whole request up front for a foreign plan/worker, instead of
+    // reporting every single date as an individual failure.
+    await ensureActivePlan(planId, managerId);
+    await assertOwned(Worker, workerId, managerId, 'Worker');
 
     const normalizedDates = dates.map((d) => normalizeToUTCDateOnly(d));
 

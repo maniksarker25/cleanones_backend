@@ -17,7 +17,10 @@ const createInvoice = catchAsync(async (req, res) => {
 });
 
 const getAllInvoices = catchAsync(async (req, res) => {
-    const result = await invoiceServices.getAllInvoicesFromDB(req.query);
+    const result = await invoiceServices.getAllInvoicesFromDB(
+        req.user.profileId as string,
+        req.query
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,

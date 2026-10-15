@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import mongoose, { Types } from 'mongoose';
 import AppError from '../../error/appError';
+import { managerScope } from '../../utilities/managerScope';
 import { emitAppEvent } from '../../events/eventEmitter';
 import { errorLogger } from '../../shared/logger';
 import { anyPatternOccursOnDate, normalizeToUTCDateOnly } from '../cleaning_plan/availability.util';
@@ -46,15 +47,19 @@ const isDuplicateKeyError = (error: unknown): boolean =>
  * date. Race-safe: the loser of a concurrent create just refetches the winner.
  */
 const getOrCreateBareShift = async (
+    managerId: string,
     planId: string | Types.ObjectId,
     date: Date
 ): Promise<IShift & { _id: Types.ObjectId }> => {
     const day = normalizeToUTCDateOnly(date);
 
+    // Ownership gate first: it also guards the lookup below, since a plan this
+    // manager doesn't own can't have a shift they may touch.
+    const plan = await ensureActivePlan(planId, managerId);
+
     const existing = await Shift.findOne({ cleaning_plan: planId, date: day });
     if (existing) return existing;
 
-    const plan = await ensureActivePlan(planId);
     if (!plan.is_active) {
         throw new AppError(
             httpStatus.BAD_REQUEST,
@@ -79,6 +84,7 @@ const getOrCreateBareShift = async (
 
     try {
         return await Shift.create({
+            manager: plan.manager,
             cleaning_plan: plan._id,
             date: day,
             // Placeholder — assignWorkersToShift sets the real schedule right after.
@@ -124,7 +130,7 @@ export const assignWorkersToShift = async (
         throw new AppError(httpStatus.BAD_REQUEST, 'end_time must be after start_time');
     }
 
-    const shift = await getOrCreateBareShift(planId, date);
+    const shift = await getOrCreateBareShift(managerId, planId, date);
     const shiftHasStarted = shift.status === 'in_progress' || shift.status === 'completed';
 
     const existingByWorkerId = new Map(
@@ -137,7 +143,10 @@ export const assignWorkersToShift = async (
     );
 
     if (newlyAddedWorkers.length) {
-        await assertWorkersEligible(newlyAddedWorkers.map((aw) => aw.worker));
+        await assertWorkersEligible(
+            managerId,
+            newlyAddedWorkers.map((aw) => aw.worker)
+        );
     }
 
     // Once started, conflict-check against the real committed window, not the caller's params.
@@ -275,6 +284,7 @@ export interface EligibleWorkerRow {
  * double-book them. Pure preview — nothing written, nothing blocked here.
  */
 export const listEligibleWorkersForShift = async (
+    managerId: string,
     planId: string,
     date: Date,
     startTime: Date,
@@ -285,7 +295,7 @@ export const listEligibleWorkersForShift = async (
     }
 
     const day = normalizeToUTCDateOnly(date);
-    const plan = await ensureActivePlan(planId);
+    const plan = await ensureActivePlan(planId, managerId);
     const snapshot = await buildShiftSnapshot(plan);
     if (!anyPatternOccursOnDate(snapshot.patterns, day)) {
         throw new AppError(
@@ -302,7 +312,10 @@ export const listEligibleWorkersForShift = async (
         .select('_id')
         .lean();
 
-    const allWorkers = await Worker.find(activeWorkerFilter).lean();
+    const allWorkers = await Worker.find({
+        ...activeWorkerFilter,
+        ...managerScope(managerId),
+    }).lean();
     const eligibleWorkers = await filterEligibleWorkers(allWorkers);
 
     const results: EligibleWorkerRow[] = [];
@@ -335,7 +348,7 @@ export const updateShiftStatus = async (
     date: Date,
     status: IShift['status']
 ) => {
-    const shift = await getShiftOrThrow(planId, date);
+    const shift = await getShiftOrThrow(planId, date, managerId);
     const result = await Shift.findByIdAndUpdate(
         shift._id,
         { status, last_updated_by: managerId },

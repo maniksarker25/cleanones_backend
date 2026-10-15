@@ -45,6 +45,7 @@ const deleteCleaningPlan = catchAsync(async (req, res) => {
 
 const getAllCleaningPlans = catchAsync(async (req, res) => {
     const result = await cleaningPlanServices.getAllCleaningPlansFromDB(
+        req.user.profileId as string,
         req.query
     );
     sendResponse(res, {
@@ -70,6 +71,7 @@ const getMyCleaningPlans = catchAsync(async (req, res) => {
 
 const getSingleCleaningPlan = catchAsync(async (req, res) => {
     const result = await cleaningPlanServices.getSingleCleaningPlanFromDB(
+        { role: req.user.role, profileId: req.user.profileId as string },
         req.params.id
     );
     sendResponse(res, {

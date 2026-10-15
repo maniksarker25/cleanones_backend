@@ -5,6 +5,7 @@ import clientContactServices from './client_contact.services';
 
 const createClientContact = catchAsync(async (req, res) => {
     const result = await clientContactServices.createClientContactIntoDB(
+        req.user.profileId as string,
         req.body
     );
     sendResponse(res, {
@@ -17,6 +18,7 @@ const createClientContact = catchAsync(async (req, res) => {
 
 const updateClientContact = catchAsync(async (req, res) => {
     const result = await clientContactServices.updateClientContactIntoDB(
+        req.user.profileId as string,
         req.params.id,
         req.body
     );
@@ -30,6 +32,7 @@ const updateClientContact = catchAsync(async (req, res) => {
 
 const deleteClientContact = catchAsync(async (req, res) => {
     const result = await clientContactServices.deleteClientContactFromDB(
+        req.user.profileId as string,
         req.params.id
     );
     sendResponse(res, {
@@ -41,7 +44,9 @@ const deleteClientContact = catchAsync(async (req, res) => {
 });
 
 const getAllClientContacts = catchAsync(async (req, res) => {
-    const result = await clientContactServices.getAllClientContactsFromDB();
+    const result = await clientContactServices.getAllClientContactsFromDB(
+        req.user.profileId as string
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,
@@ -52,6 +57,7 @@ const getAllClientContacts = catchAsync(async (req, res) => {
 
 const getSingleClientContact = catchAsync(async (req, res) => {
     const result = await clientContactServices.getSingleClientContactFromDB(
+        req.user.profileId as string,
         req.params.id
     );
     sendResponse(res, {

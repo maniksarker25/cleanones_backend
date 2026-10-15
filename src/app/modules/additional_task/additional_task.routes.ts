@@ -3,6 +3,7 @@ import auth from '../../middlewares/auth';
 import validateRequest from '../../middlewares/validateRequest';
 import { USER_ROLE } from '../user/user.constant';
 import additionalTaskController from './additional_task.controller';
+import additionalTaskCompanyAdminController from './additional_task.company_admin.controller';
 import additionalTaskValidations from './additional_task.validation';
 
 const router = Router();
@@ -56,6 +57,17 @@ router.get(
     '/single-additional-task/:id',
     auth(USER_ROLE.manager, USER_ROLE.client),
     additionalTaskController.getSingleAdditionalTask
+);
+
+router.get(
+    '/company-admin/get-all-additional-tasks',
+    auth(USER_ROLE.company_admin),
+    additionalTaskCompanyAdminController.getAllAdditionalTasks
+);
+router.get(
+    '/company-admin/get-single-additional-task/:id',
+    auth(USER_ROLE.company_admin),
+    additionalTaskCompanyAdminController.getSingleAdditionalTask
 );
 
 export const additionalTaskRoutes = router;
